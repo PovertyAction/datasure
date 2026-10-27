@@ -32,22 +32,38 @@ from datasure.checks.gpschecks.models import MAPBOX_STYLE
 from datasure.checks.gpschecks.review import (
     ACCEPTED_STATUS,
     GPS_CHECK_TYPE,
+    LOF_DEFAULT_CONTAMINATION,
+    LOF_MAX_CONTAMINATION,
+    LOF_MIN_CONTAMINATION,
+    LOF_MIN_NEIGHBORS,
+    LOF_MIN_POINTS,
     OUTLIER_STATUS,
     CoordinateColumns,
     GPSAction,
+    GPSOutlierSummary,
+    GPSReviewLog,
     GPSSelection,
-    accepted_gps_keys,
     allowed_gps_actions,
     build_gps_entries,
     coordinate_columns,
-    count_unreviewed_outliers,
-    mark_gps_reviewed,
+    gps_corrections,
+    gps_review_history,
+    lof_contamination,
+    lof_max_neighbors,
+    lof_neighbors,
     outlier_status,
     outliers_table,
     select_gps_outlier,
+    summarize_gps_outliers,
     validate_coordinates,
 )
 from datasure.checks.gpschecks.settings_ui import gpschecks_report_settings
+from datasure.checks.headline import (
+    CheckDelta,
+    CheckHeadline,
+    settings_no_longer_fit,
+)
+from datasure.checks.health_period import DeltaWindow, dated_after, logged_after
 from datasure.checks.outliers.review import (
     REVIEW_COLUMNS,
     REVIEW_STATUS_COL,
@@ -576,35 +592,62 @@ def _load_and_parse_gps_data(
     if not selected_alias:
         return gps_settings, None, None
 
-    selected_config = gps_settings.filter(pl.col("alias") == selected_alias).to_dicts()[
-        0
-    ]
-
     try:
-        parsed_data = _parse_gps_data(data, selected_config)
+        parsed_data, problem = _valid_points(
+            data, _selected_config(gps_settings, selected_alias)
+        )
     except Exception as e:
         st.error(f"Error parsing GPS data: {e}")
         return gps_settings, selected_alias, None
 
-    if "latitude" not in parsed_data.columns or "longitude" not in parsed_data.columns:
-        st.warning("Unable to parse GPS coordinates from the selected configuration.")
-        return gps_settings, selected_alias, None
-
-    parsed_data = parsed_data.filter(
-        pl.col("latitude").is_not_null() & pl.col("longitude").is_not_null()
-    )
-
-    if parsed_data.is_empty():
-        st.warning("No valid GPS coordinates found in the data.")
+    if parsed_data is None:
+        st.warning(problem)
         return gps_settings, selected_alias, None
 
     return gps_settings, selected_alias, parsed_data
+
+
+def _selected_config(gps_settings: pl.DataFrame, selected_alias: str) -> dict:
+    """Return the GPS configuration with alias `selected_alias`."""
+    return gps_settings.filter(pl.col("alias") == selected_alias).to_dicts()[0]
+
+
+def _valid_points(
+    data: pl.DataFrame, selected_config: dict
+) -> tuple[pl.DataFrame | None, str]:
+    """Parse a configuration's coordinates and keep the points that have both.
+
+    The outliers section and Summary's check health row both use it, so
+    they detect outliers among the same points.
+
+    Returns
+    -------
+    tuple[pl.DataFrame | None, str]
+        The points with ``latitude`` and ``longitude``, or None and why
+        there are none.
+
+    Raises
+    ------
+    Exception
+        Whatever `_parse_gps_data` raises for a configuration that does not
+        fit the data.
+    """
+    parsed = _parse_gps_data(data, selected_config)
+    if "latitude" not in parsed.columns or "longitude" not in parsed.columns:
+        return None, "Unable to parse GPS coordinates from the selected configuration."
+    parsed = parsed.filter(
+        pl.col("latitude").is_not_null() & pl.col("longitude").is_not_null()
+    )
+    if parsed.is_empty():
+        return None, "No valid GPS coordinates found in the data."
+    return parsed, ""
 
 
 def _run_lof_detection(
     df_pd,
     n_samples: int,
     go3_column,
+    view: ViewState | None = None,
 ) -> object | None:
     """Render LOF detection UI controls and run detection.
 
@@ -616,40 +659,52 @@ def _run_lof_detection(
         Number of data points available.
     go3_column
         Streamlit column context for the neighbors slider.
+    view : ViewState | None
+        Where the slider values are saved, if anywhere. Summary's check
+        health row detects outliers with the saved values.
 
     Returns
     -------
     pd.DataFrame | None
         DataFrame with Outlier column, or None if insufficient data.
     """
-    if n_samples < 6:
+    if n_samples < LOF_MIN_POINTS:
         st.warning(
             f"Not enough GPS points for Auto-Clustering. "
-            f"Found {n_samples} point(s), need at least 6. "
+            f"Found {n_samples} point(s), need at least {LOF_MIN_POINTS}. "
             "Try 'Cluster by Column' method or add more data."
         )
         return None
 
-    max_neighbors = min(50, n_samples - 1)
+    max_neighbors = lof_max_neighbors(n_samples)
 
     with go3_column:
         n_neighbors = st.slider(
             label="Number of Neighbors",
-            min_value=5,
+            min_value=LOF_MIN_NEIGHBORS,
             max_value=max_neighbors,
-            value=min(20, max_neighbors),
-            key="outlier_n_neighbors",
             help="Number of neighbors for Local Outlier Factor algorithm.",
+            # A saved value the slider no longer allows falls back to the
+            # default, as `lof_neighbors` does for Summary.
+            **bind_widget(
+                view,
+                "outlier_n_neighbors",
+                options=range(LOF_MIN_NEIGHBORS, max_neighbors + 1),
+                value=lof_neighbors(None, n_samples),
+            ),
         )
 
+    if view is not None:
+        saved = view.values().get("outlier_contamination")
+        if saved is not None and lof_contamination(saved) != saved:
+            view.forget("outlier_contamination")
     contamination = st.slider(
         label="Expected Outlier Proportion",
-        min_value=0.01,
-        max_value=0.5,
-        value=0.1,
+        min_value=LOF_MIN_CONTAMINATION,
+        max_value=LOF_MAX_CONTAMINATION,
         step=0.01,
-        key="outlier_contamination",
         help="Expected proportion of outliers in the data.",
+        **bind_widget(view, "outlier_contamination", value=LOF_DEFAULT_CONTAMINATION),
     )
 
     if n_samples < 20:
@@ -892,18 +947,83 @@ class GPSReview:
     survey_id: str | None = None
 
 
-def _mark_accepted_outliers(
-    outlier_df: pd.DataFrame, survey_key: str, review: GPSReview
-) -> pd.DataFrame:
-    """Mark the outliers accepted for the selected configuration's columns."""
-    if review.columns is None:
-        accepted = {}
-    else:
-        acceptances = review.processor.get_active_acceptances(
-            review.alias, GPS_CHECK_TYPE, survey_key
-        )
-        accepted = accepted_gps_keys(acceptances, review.columns)
-    return mark_gps_reviewed(outlier_df, accepted, survey_key)
+def _can_review(alias: str | None, survey_key: str, outlier_df: pd.DataFrame) -> bool:
+    """Whether outliers can be corrected or accepted.
+
+    They can't without a dataset alias, when the Survey KEY column is not in
+    the data, or when it has the name of a review results column.
+    """
+    return bool(
+        alias
+        and survey_key
+        and survey_key not in REVIEW_COLUMNS
+        and survey_key in outlier_df.columns
+    )
+
+
+def _gps_review(
+    project_id: str,
+    alias: str | None,
+    survey_key: str,
+    data: pl.DataFrame,
+    gps_settings: pl.DataFrame,
+    selected_alias: str,
+    outlier_df: pd.DataFrame,
+    survey_id: str | None,
+) -> GPSReview | None:
+    """Return what reviewing the outliers needs, or None if they can't be.
+
+    See `_can_review`. `selected_alias` names the GPS configuration in
+    `gps_settings` whose coordinate columns acceptances apply to.
+    """
+    if not _can_review(alias, survey_key, outlier_df):
+        return None
+    return GPSReview(
+        processor=CorrectionProcessor(project_id),
+        alias=alias,
+        data=data,
+        columns=coordinate_columns(_selected_config(gps_settings, selected_alias)),
+        survey_id=survey_id,
+    )
+
+
+def _reviewed_summary(
+    outlier_df: pd.DataFrame, survey_key: str, review: GPSReview | None
+) -> GPSOutlierSummary:
+    """Mark the outliers `review`'s log entries review and count them.
+
+    The outliers section and Summary's check health row both count through
+    here, so their numbers match.
+    """
+    review_log = (
+        None
+        if review is None
+        else _gps_review_log(review.processor, review.alias, survey_key, review.columns)
+    )
+    return summarize_gps_outliers(outlier_df, survey_key, review=review_log)
+
+
+def _gps_review_log(
+    processor: CorrectionProcessor,
+    alias: str,
+    survey_key: str,
+    columns: CoordinateColumns | None,
+) -> GPSReviewLog:
+    """Read the log entries that review the outliers of one configuration."""
+    acceptances = (
+        processor.get_active_acceptances(alias, GPS_CHECK_TYPE, survey_key)
+        if columns is not None
+        else pl.DataFrame()
+    )
+    log = processor.get_correction_log(alias)
+    return GPSReviewLog(
+        acceptances=acceptances,
+        corrections=gps_corrections(
+            log, processor.get_active_corrections(alias, survey_key), columns
+        ),
+        columns=columns,
+        history=gps_review_history(log),
+    )
 
 
 def _render_reviewable_outliers_table(
@@ -1290,6 +1410,7 @@ def _render_gps_outliers_checks(
     enumerator: str | None,
     alias: str | None = None,
     survey_id: str | None = None,
+    show_map: bool = True,
 ) -> None:
     """Render GPS outliers detection and visualization.
 
@@ -1320,6 +1441,9 @@ def _render_gps_outliers_checks(
         accepted from the outliers table, and accepted ones are not counted.
     survey_id : str | None
         Survey ID column name, recorded with each correction.
+    show_map : bool
+        Whether to draw the outliers map, which needs a Mapbox token. The
+        counts and the outliers table show either way.
     """
     section_header("GPS Outliers Detection")
 
@@ -1351,7 +1475,7 @@ def _render_gps_outliers_checks(
     # Run selected detection method
     clustering_col = None
     if detection_method == GPSOutlierMethod.auto_lof.value:
-        outlier_df = _run_lof_detection(df_pd, len(df_pd), go3)
+        outlier_df = _run_lof_detection(df_pd, len(df_pd), go3, view)
     else:
         outlier_df, clustering_col = _run_cluster_detection(
             df_pd, string_columns, go3, view
@@ -1360,28 +1484,26 @@ def _render_gps_outliers_checks(
     if outlier_df is None:
         return
 
-    review = None
     if alias and survey_key in REVIEW_COLUMNS:
         st.warning(
             f"Outliers can't be corrected or accepted on this page because the "
             f"Survey KEY column is named '{survey_key}', which this report uses "
             "for review results. Rename the column to review outliers here."
         )
-    elif alias and survey_key and survey_key in outlier_df.columns:
-        selected_config = gps_settings.filter(
-            pl.col("alias") == selected_alias
-        ).to_dicts()[0]
-        review = GPSReview(
-            processor=CorrectionProcessor(project_id),
-            alias=alias,
-            data=data,
-            columns=coordinate_columns(selected_config),
-            survey_id=survey_id,
-        )
-        outlier_df = _mark_accepted_outliers(outlier_df, survey_key, review)
-
-    # Display summary statistics
-    num_outliers = count_unreviewed_outliers(outlier_df, marked=review is not None)
+    review = _gps_review(
+        project_id,
+        alias,
+        survey_key,
+        data,
+        gps_settings,
+        selected_alias,
+        outlier_df,
+        survey_id,
+    )
+    # The same counts as Summary's check health row (`gpschecks_headline`).
+    summary = _reviewed_summary(outlier_df, survey_key, review)
+    outlier_df = summary.outliers
+    num_outliers = summary.outstanding
     total_points = len(outlier_df)
     outlier_pct = (num_outliers / total_points * 100) if total_points > 0 else 0
 
@@ -1397,19 +1519,19 @@ def _render_gps_outliers_checks(
     with col3:
         st.metric("Outlier Percentage", f"{outlier_pct:.2f}%")
 
-    # Display map with outliers
-    section_header("Outliers Map")
-    plot_clusters_on_map(
-        outlier_df,
-        "latitude",
-        "longitude",
-        enumerator,
-        survey_date,
-        survey_key,
-        clustering_col if detection_method == "Cluster by Column" else None,
-        "Outlier",
-        marked=review is not None,
-    )
+    if show_map:
+        section_header("Outliers Map")
+        plot_clusters_on_map(
+            outlier_df,
+            "latitude",
+            "longitude",
+            enumerator,
+            survey_date,
+            survey_key,
+            clustering_col if detection_method == "Cluster by Column" else None,
+            "Outlier",
+            marked=review is not None,
+        )
 
     _render_outliers_data_table(
         outlier_df,
@@ -2013,7 +2135,21 @@ def gpschecks_report(
     if not mapbox_token:
         st.warning(
             "⚠ No Mapbox API key provided. "
-            "Please add a Mapbox API token in the settings to enable map visualizations."
+            "Please add a Mapbox API token in the settings to enable map "
+            "visualizations. GPS outliers are still detected and listed below."
+        )
+        # The outlier count needs no map; Summary's check health row shows it
+        # too, so the check must show the same number.
+        _render_gps_outliers_checks(
+            project_id,
+            page_name_id,
+            data,
+            config_settings.survey_key,
+            config_settings.survey_date,
+            config_settings.enumerator,
+            alias=alias,
+            survey_id=config_settings.survey_id,
+            show_map=False,
         )
         return
 
@@ -2093,6 +2229,220 @@ def gpschecks_report(
     demo_callout(
         "**Next**: :material/arrow_upward: Scroll up and select **Field team → Enumerator Stats**."
     )
+
+
+# Saved view values of the outliers section that decide which points are
+# outliers, so Summary's check health row is recomputed when one changes.
+HEADLINE_VIEW_KEYS = (
+    "outlier_gps_config",
+    "outlier_detection_method",
+    "outlier_n_neighbors",
+    "outlier_contamination",
+    "outlier_clustering_col",
+)
+
+
+def gpschecks_headline_view(project_id: str, page_name_id: str) -> str:
+    """Return the saved view values the GPS headline depends on, as text.
+
+    Page fingerprints leave view state out, so the check health cache adds
+    this to the GPS row's key.
+    """
+    saved = _page_view(project_id, page_name_id).values()
+    return json.dumps([saved.get(key) for key in HEADLINE_VIEW_KEYS])
+
+
+def _saved_option(saved: Any, options: list) -> Any:
+    """Return the option a bound selectbox shows: the saved one or the first."""
+    return saved if saved in options else options[0]
+
+
+def _detect_saved_outliers(
+    points: pd.DataFrame, saved: dict[str, Any], categorical_columns: list[str]
+) -> pd.DataFrame | None:
+    """Detect outliers with the saved method and settings, as the check does.
+
+    None when the check shows no count: too few points for Auto-Clustering,
+    or no clustering column chosen for Cluster by Column.
+    """
+    methods = [item.value for item in GPSOutlierMethod]
+    method = _saved_option(saved.get("outlier_detection_method"), methods)
+    if method == GPSOutlierMethod.auto_lof.value:
+        if len(points) < LOF_MIN_POINTS:
+            return None
+        return detect_outliers_with_lof(
+            points,
+            "latitude",
+            "longitude",
+            lof_neighbors(saved.get("outlier_n_neighbors"), len(points)),
+            lof_contamination(saved.get("outlier_contamination")),
+        )
+    clustering_col = saved.get("outlier_clustering_col")
+    if clustering_col not in categorical_columns:
+        return None
+    return detect_outliers_with_clusters(
+        points, "latitude", "longitude", clustering_col
+    )
+
+
+def _gps_summary(
+    project_id: str,
+    page_name_id: str,
+    data: pl.DataFrame,
+    config: dict,
+    alias: str | None,
+) -> GPSOutlierSummary | None:
+    """Detect and review the outliers as the check does, without rendering it.
+
+    Takes the parameters of `gpschecks_headline` and returns None when it
+    does.
+    """
+    gps_settings = _get_gps_column_settings(project_id, page_name_id)
+    if gps_settings.is_empty() or data.is_empty():
+        return None
+    saved = _page_view(project_id, page_name_id).values()
+    selected_alias = _saved_option(
+        saved.get("outlier_gps_config"), gps_settings["alias"].to_list()
+    )
+    selected_config = _selected_config(gps_settings, selected_alias)
+    try:
+        settings = GPSSettings(**config)
+        parsed, _ = _valid_points(data, selected_config)
+    except (pl.exceptions.PolarsError, ValidationError, KeyError, ValueError) as exc:
+        raise settings_no_longer_fit("GPS", exc) from exc
+    if parsed is None:
+        return None
+
+    outlier_df = _detect_saved_outliers(
+        parsed.to_pandas(), saved, get_df_columns(parsed).categorical_columns
+    )
+    if outlier_df is None:
+        return None
+    survey_key = settings.survey_key
+    review = _gps_review(
+        project_id,
+        alias,
+        survey_key,
+        data,
+        gps_settings,
+        selected_alias,
+        outlier_df,
+        settings.survey_id,
+    )
+    return _reviewed_summary(outlier_df, survey_key, review)
+
+
+def gpschecks_headline(
+    project_id: str,
+    page_name_id: str,
+    data: pl.DataFrame,
+    config: dict,
+    alias: str | None = None,
+) -> CheckHeadline | None:
+    """Return the GPS headline for Summary's check health row.
+
+    Outstanding: the outliers section's "Outliers Detected", leaving out
+    accepted outliers, for the GPS configuration, detection method and
+    Auto-Clustering settings saved in the check's view. Resolved: points
+    accepted or corrected from the check (see `summarize_gps_outliers`).
+    Computed without rendering the check, and without a Mapbox token. The
+    headline's basis is the reviewed outliers, for `gpschecks_delta`.
+
+    Parameters
+    ----------
+    project_id : str
+        The project identifier.
+    page_name_id : str
+        Page name identifier.
+    data : pl.DataFrame
+        The survey data of the page.
+    config : dict
+        The page configuration the check starts from (`GPSSettings`).
+    alias : str | None
+        The survey dataset alias, whose correction log reviews the outliers.
+        If None, every outlier is counted and nothing is resolved.
+
+    Returns
+    -------
+    CheckHeadline | None
+        None when the check shows no count: no GPS configuration, no valid
+        coordinates, too few points for Auto-Clustering, or no clustering
+        column chosen.
+
+    Raises
+    ------
+    ValueError
+        If the saved GPS configuration no longer fits the data.
+    """
+    summary = _gps_summary(project_id, page_name_id, data, config, alias)
+    if summary is None:
+        return None
+    total = len(summary.outliers)
+    share = summary.outstanding / total * 100 if total else 0
+    return CheckHeadline(
+        f"{summary.outstanding:,}",
+        f"GPS outliers ({share:.2f}% of {total:,} points)",
+        outstanding=summary.outstanding,
+        resolved=summary.resolved,
+        basis=summary,
+    )
+
+
+def gpschecks_delta(
+    project_id: str,
+    page_name_id: str,
+    data: pl.DataFrame,
+    config: dict,
+    alias: str | None,
+    window: DeltaWindow,
+    basis: GPSOutlierSummary | None = None,
+) -> CheckDelta | None:
+    """Return the GPS row's change over the comparison period, for Summary.
+
+    Outstanding: the outliers `gpschecks_headline` counts on submissions
+    dated after the period start (`window.as_of`). Outliers are not detected
+    again on the earlier submissions alone, since that would move every
+    point's neighbourhood. Resolved: the resolved points whose first
+    resolving log entry was made after the period start, so a later entry on
+    a point resolved earlier does not count it again; undone corrections and
+    acceptances that no longer apply are not resolved. Takes the
+    parameters of `gpschecks_headline`.
+
+    Parameters
+    ----------
+    window : DeltaWindow
+        The period start and Summary's date column.
+    basis : GPSOutlierSummary | None
+        The headline's basis, computed on `data`; None computes it.
+
+    Returns
+    -------
+    CheckDelta | None
+        None when the headline is None or Summary's date column is not set.
+        The resolved change is None when the outliers could not be reviewed,
+        as the headline's is.
+
+    Raises
+    ------
+    ValueError
+        If the saved GPS configuration no longer fits the data.
+    """
+    date_col, as_of = window.survey_date, window.as_of
+    if not date_col:
+        return None
+    summary = basis or _gps_summary(project_id, page_name_id, data, config, alias)
+    if summary is None:
+        return None
+    unreviewed = summary.unreviewed()
+    new = 0
+    if not unreviewed.empty and date_col in unreviewed.columns:
+        dates = pl.from_pandas(unreviewed[[date_col]])
+        new = dates.filter(dated_after(dates, date_col, as_of)).height
+    resolved = None
+    if summary.resolved is not None:
+        resolutions = summary.resolutions
+        resolved = resolutions.filter(logged_after(resolutions, as_of)).height
+    return CheckDelta(new, resolved=resolved)
 
 
 def gpschecks_status(

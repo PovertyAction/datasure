@@ -79,6 +79,8 @@ def _gps_acceptances(*keys: str) -> pl.DataFrame:
 def _review(data, columns=COLUMNS, accepted=()) -> GPSReview:
     processor = MagicMock()
     processor.get_active_acceptances.return_value = _gps_acceptances(*accepted)
+    processor.get_correction_log.return_value = pl.DataFrame()
+    processor.get_active_corrections.return_value = pl.DataFrame()
     return GPSReview(
         processor=processor,
         alias="survey",
@@ -114,9 +116,11 @@ def _shown_table(st_mock) -> pl.DataFrame:
 
 class TestOutliersTable:
     def _render(self, outlier_df, review, st_mock):
-        from datasure.checks.gpschecks.report_ui import _mark_accepted_outliers
+        from datasure.checks.gpschecks.report_ui import _gps_review_log
+        from datasure.checks.gpschecks.review import summarize_gps_outliers
 
-        marked = _mark_accepted_outliers(outlier_df, "KEY", review)
+        review_log = _gps_review_log(review.processor, "survey", "KEY", review.columns)
+        marked = summarize_gps_outliers(outlier_df, "KEY", review=review_log).outliers
         with (
             patch(f"{MODULE}.st", st_mock),
             patch(f"{MODULE}._gps_correction_dialog") as dialog,

@@ -53,8 +53,106 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   configuration** entry opens `_export_config_dialog` (`views/start_view.py`)
   with an "Include record-level decisions" checkbox, so the bundle is built
   only when the dialog opens instead of for every card on every rerun
+- **Check health changes over a comparison period** (#399, #365): Summary's
+  check health rows gain a Change column and "+N since …" under Resolved. A
+  collapsible **Comparison period** box above the rows offers Day (default,
+  vs the end of yesterday), 7 days, Week (week to date, week start
+  selectable, default Sunday), 30 days and Month (month to date)
+  (`checks/health_period.py`: `ComparisonPeriod`, `period_start(period,
+  today, week_start)`, `since_label`). The choice is one project-wide view
+  setting in `settings/project_view_settings.json` (scope
+  `health.PERIOD_SCOPE`), so project exports leave it out
+  - `CheckEntry.delta` functions (`checks/health_deltas.py`) return a
+    `CheckDelta` (outstanding change, resolved in the period, `DeltaKind`)
+    for Progress, Missing Values, Duplicates, Outliers & Constraints,
+    Enumerator Stats and Backchecks; `health_rows(..., deltas=, window=)`
+    computes them and caches them under the period start (`DeltaWindow`,
+    built by `health_deltas.comparison_window`; the week start is a
+    `Weekday`). Progress, Missing Values and Enumerator Stats are recomputed
+    on the submissions dated on or before the period start
+    (`on_or_before`). Duplicates counts the unresolved duplicate IDs held by
+    a submission dated in the period, including an ID already duplicated
+    before the period that a new submission joins; Outliers counts current
+    flags on submissions dated in the period. Resolved deltas count
+    still-active entries made after the period start in `corr_log_{alias}`
+    (`duplicates_delta`: an ID counts only when its latest removed record or
+    changed or removed ID was logged in the period, not for an unrelated
+    later entry; `ReviewContext.entries_after`) and `bc_attribution`
+    (`backchecks_delta`); new `outliers_delta`. Every check counts an item
+    only when it was unresolved at the period start: Outliers skips cells a
+    check's flag was accepted or corrected on by then
+    (`ReviewContext.resolved_by_period_start`), Backchecks compares the
+    attributions then and now, and GPS dates a point by its first
+    acceptance or correction (`GPSReviewLog.history`). The check-level delta
+    functions take the `DeltaWindow`. Page config dicts move to
+    `checks/check_configs.py`
+  - A change that cannot be computed shows an error marker and the reason in
+    the row's Change column (`HealthRow.delta_error`) instead of "—"; the
+    row keeps its numbers and the delta is not cached
+  - Rows use Summary's date column (its saved date, else the page survey
+    date); Backchecks uses the backcheck date column. With no date column
+    the box and Change column are hidden and a caption says "Set a date
+    column in Summary settings to see changes over time." A caption shows
+    the latest submission date
+  - `CheckHeadline` gains `count` (Progress submissions, Enumerator Stats
+    active enumerators); `enumerator_headline` takes `today`;
+    `id_duplicates.resolved_ids` returns the resolved ID set
+- **GPS check health row** (#399, #365): GPS Checks moves off "Status only".
+  `gpschecks_headline` (`checks/gpschecks/report_ui.py`) detects outliers
+  with the GPS configuration, detection method, clustering column and LOF
+  sliders saved in the check's view, without rendering it or needing a Mapbox
+  token. Outstanding is the check's **Outliers Detected**; resolved counts
+  accepted points plus points with a `source="gps"` correction still in
+  effect that are not outliers now. It returns None (blue **Ready**) with
+  fewer than `LOF_MIN_POINTS` points or no clustering column, and raises
+  `settings_no_longer_fit` when the GPS configuration no longer parses
+  - `summarize_gps_outliers` (`checks/gpschecks/review.py`, pure) gives both
+    the check's metric and Summary's row; `GPSOutlierSummary` exposes the
+    marked outliers, `unreviewed()` rows (with every data column, including
+    the survey date) and `resolutions` (KEY and latest log `date`) for a
+    later delta. `gps_corrections` picks the in-effect GPS corrections,
+    `GPSReviewLog` carries them with the active acceptances. Replaces
+    `_mark_accepted_outliers`
+  - The **Number of Neighbors** and **Expected Outlier Proportion** sliders
+    are bound to the GPS view state (`outlier_n_neighbors`,
+    `outlier_contamination`); `lof_neighbors` and `lof_contamination` apply
+    the same defaults and fallback for a saved value out of range
+  - `health_rows` takes `view_keys`, and `CheckEntry` gains `headline_view`
+    (GPS: `gpschecks_headline_view`, the `HEADLINE_VIEW_KEYS` values), added
+    to a row's cache key because the page fingerprint leaves view state out
+  - Without a Mapbox token the GPS page still renders the outliers section
+    (`_render_gps_outliers_checks(..., show_map=False)`): counts and table,
+    no map
+- **GPS check health change** (#399, #365): the GPS Checks row gets a
+  Change and "+N since …": `gpschecks_delta` (`health_deltas.gps`)
+  counts unaccepted outliers on submissions dated in the
+  period (outliers are not detected again on the earlier submissions) and
+  the resolved points whose first GPS acceptance or correction is in the
+  period
+- **Check health benchmark** (#399): `just bench-health [rows] [repeat]`
+  (`scripts/benchmark_check_health.py`) times each check's headline and its
+  delta for every comparison period, and Summary's rows without deltas and
+  with each period's, on the demo data and a generated 50,000-row form. It
+  flags any delta, and any period's end-to-end delta overhead, over the 1 s
+  budget. None is over it: the slowest delta, Outliers, is about 0.3 s on the
+  generated form in every period, and the deltas add 0.7 to 0.9 s to the
+  rows end to end, so every delta is still computed on load
 
 ### Changed
+
+- **`render_health_rows` no longer draws the section header** (#399, #365):
+  call `render_health_header()` first. It takes `since` (None hides the
+  Change column)
+- **Outliers and GPS deltas reuse the headline's flags** (#399, #365):
+  `CheckHeadline` gains `basis` (not compared), what a headline computed its
+  numbers from. `duplicates_headline`, `outliers_headline` and
+  `gpschecks_headline` set it, and the deltas'
+  `basis=` reuses it
+  instead of computing the flags again (the Outliers delta computed them twice
+  per load). `health_rows` keeps the latest basis per check outside the
+  headline cache, matched to the headline's key. On a 50,000-row form the
+  Outliers delta drops from about 0.9 s to 0.35 s and the GPS delta from about
+  1.3 s to under 0.05 s. `_reviewed_flags` becomes `_outliers_basis`
 
 - **Breaking: headline functions return `CheckHeadline`** (#399, #365):
   `progress_headline`, `missing_headline`, `duplicates_headline`,
@@ -85,10 +183,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     when saved settings no longer fit the data (the other rows still
     render), amber **Flagged** when it has more than 0 outstanding and is
     not informational, blue **Ready** when it has no headline numbers (GPS
-    Checks, or Backchecks with no values compared), so the pill claims
+    Checks before outliers can be detected, or Backchecks with no values
+    compared), so the pill claims
     nothing about uncounted issues, else green **No issues**. The row's action comes
     from its state (`RowState.action`)
-  - A ready check with no headline numbers (Descriptive Stats, GPS Checks)
+  - A ready check with no headline numbers (Descriptive Stats)
     shows "Status only" (`STATUS_ONLY`) as its detail; Descriptive Stats
     stays green through the informational `status_only_headline`
   - `missing_headline` reports the % of columns all missing (was the mean %

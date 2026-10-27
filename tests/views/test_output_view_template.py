@@ -14,6 +14,7 @@ from datasure.checks.headline import CheckHeadline
 from datasure.utils import nav_ui
 from datasure.utils.dataframe_utils import TableState
 from datasure.utils.duckdb_utils import duckdb_save_table
+from datasure.utils.navigation import READY
 from datasure.utils.view_state import remembered, save_selection
 from datasure.views import output_view_template as template
 
@@ -203,6 +204,10 @@ HEADLINES = {
     "backchecks_headline": CheckHeadline(
         "3", "4.25% error rate", outstanding=3, resolved=2
     ),
+    "gpschecks_headline": CheckHeadline(
+        "2", "GPS outliers (20.00% of 10 points)", outstanding=2, resolved=1
+    ),
+    "gpschecks_headline_view": "[]",
 }
 
 
@@ -442,6 +447,35 @@ class TestSummaryHealthRows:
             "gray",
             ":material/build:",
             "Not set up",
+        )
+
+    def test_a_ready_gps_check_shows_its_outliers(self, page):
+        check_page = page()
+
+        with patch.object(catalogue, "gpschecks_status", return_value=READY):
+            check_page.render(SURVEY)
+
+        assert check_page.rows()["GPS Checks"] == [
+            "Flagged",
+            "**2**",
+            "GPS outliers (20.00% of 10 points)",
+            "1",
+        ]
+        check_page.headlines["gpschecks_headline"].assert_called_once_with(
+            PROJECT_ID,
+            "hfcs",
+            SURVEY.page_data,
+            {
+                "survey_key": "key",
+                "survey_id": "key",
+                "survey_date": None,
+                "enumerator": None,
+                "team": None,
+            },
+            alias=ALIAS,
+        )
+        check_page.headlines["gpschecks_headline_view"].assert_called_with(
+            PROJECT_ID, "hfcs"
         )
 
     def test_descriptive_stats_shows_status_only(self, page):

@@ -21,7 +21,7 @@ Kept free of Streamlit so the logic can be tested without a running app.
 import json
 import math
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
 
@@ -48,6 +48,50 @@ OUTLIER_COL = "Outlier"
 OUTLIER_STATUS = "Outlier"
 NORMAL_STATUS = "Normal"
 ACCEPTED_STATUS = "Accepted"
+
+
+# Auto-Clustering (LOF) settings: the sliders' ranges and defaults. The check
+# and Summary's check health row both read the saved values through
+# `lof_neighbors` and `lof_contamination`, so they detect the same outliers.
+LOF_MIN_POINTS = 6
+LOF_MIN_NEIGHBORS = 5
+LOF_MAX_NEIGHBORS = 50
+LOF_DEFAULT_NEIGHBORS = 20
+LOF_MIN_CONTAMINATION = 0.01
+LOF_MAX_CONTAMINATION = 0.5
+LOF_DEFAULT_CONTAMINATION = 0.1
+
+
+def lof_max_neighbors(n_samples: int) -> int:
+    """Return the most neighbors LOF can use for `n_samples` points."""
+    return min(LOF_MAX_NEIGHBORS, n_samples - 1)
+
+
+def lof_neighbors(saved: Any, n_samples: int) -> int:
+    """Return the saved number of neighbors, or the default if it doesn't fit.
+
+    A saved value outside the slider's range for `n_samples` points, such as
+    one saved when the data had more points, falls back to the default.
+    """
+    maximum = lof_max_neighbors(n_samples)
+    if (
+        isinstance(saved, int)
+        and not isinstance(saved, bool)
+        and LOF_MIN_NEIGHBORS <= saved <= maximum
+    ):
+        return saved
+    return min(LOF_DEFAULT_NEIGHBORS, maximum)
+
+
+def lof_contamination(saved: Any) -> float:
+    """Return the saved expected outlier proportion, or the default."""
+    if (
+        isinstance(saved, int | float)
+        and not isinstance(saved, bool)
+        and LOF_MIN_CONTAMINATION <= saved <= LOF_MAX_CONTAMINATION
+    ):
+        return float(saved)
+    return LOF_DEFAULT_CONTAMINATION
 
 
 class GPSAction(StrEnum):
@@ -346,6 +390,211 @@ def count_unreviewed_outliers(outliers: pd.DataFrame, *, marked: bool) -> int:
     otherwise no outlier counts as accepted.
     """
     return int((_is_outlier(outliers) & ~_is_reviewed(outliers, marked=marked)).sum())
+
+
+@dataclass(frozen=True)
+class GPSReviewLog:
+    """The correction log entries that review the outliers of one configuration.
+
+    Attributes
+    ----------
+    acceptances : pl.DataFrame
+        The active GPS acceptances, from
+        `CorrectionProcessor.get_active_acceptances`.
+    corrections : pl.DataFrame
+        The GPS corrections still in effect (see `gps_corrections`).
+    columns : CoordinateColumns | None
+        The configuration's coordinate columns; None if it stores both in one
+        column, so no acceptance applies to it.
+    history : pl.DataFrame
+        Every GPS acceptance and correction in the log, including those no
+        longer in effect (see `gps_review_history`), to date when each point
+        was first resolved.
+    """
+
+    acceptances: pl.DataFrame
+    corrections: pl.DataFrame
+    columns: CoordinateColumns | None
+    history: pl.DataFrame = field(default_factory=pl.DataFrame)
+
+
+@dataclass(frozen=True)
+class GPSOutlierSummary:
+    """The GPS outliers of one configuration with their review status.
+
+    Attributes
+    ----------
+    outliers : pd.DataFrame
+        The detection output, marked by `mark_gps_reviewed` when `marked`.
+    marked : bool
+        Whether the outliers could be reviewed (see `summarize_gps_outliers`).
+    outstanding : int
+        Outliers not accepted as valid: the check's "Outliers Detected".
+    resolved : int | None
+        Points accepted or corrected from the check and not flagged as
+        outstanding now; None when the outliers could not be reviewed.
+    resolutions : pl.DataFrame
+        KEY (as text) and the date of its first GPS acceptance or
+        correction, one row per resolved point. An entry no longer in effect
+        still counts, so a point resolved again later keeps its first date.
+    """
+
+    outliers: pd.DataFrame
+    marked: bool
+    outstanding: int
+    resolved: int | None
+    resolutions: pl.DataFrame
+
+    def unreviewed(self) -> pd.DataFrame:
+        """Return the outstanding outliers, with every column of the data."""
+        flagged = _is_outlier(self.outliers) & ~_is_reviewed(
+            self.outliers, marked=self.marked
+        )
+        return self.outliers[flagged]
+
+
+_RESOLUTIONS_SCHEMA = {"KEY": pl.String, "date": pl.Datetime("us")}
+
+
+def gps_corrections(
+    log: pl.DataFrame,
+    active_corrections: pl.DataFrame,
+    columns: CoordinateColumns | None,
+) -> pl.DataFrame:
+    """Return the GPS check's corrections still in effect for a configuration.
+
+    Parameters
+    ----------
+    log : pl.DataFrame
+        The whole correction log, for removed observations: a successful
+        "remove row" from the GPS check stays in effect until it is undone.
+    active_corrections : pl.DataFrame
+        From `CorrectionProcessor.get_active_corrections`: value corrections
+        the data still holds. Only the GPS check's corrections of `columns`
+        are kept.
+    columns : CoordinateColumns | None
+        The configuration's coordinate columns; None keeps removed rows only.
+
+    Returns
+    -------
+    pl.DataFrame
+        Rows of the log, removed observations first.
+    """
+    frames = []
+    if {"action", "source", "status"} <= set(log.columns):
+        frames.append(
+            log.filter(
+                (pl.col("action") == Action.REMOVE_ROW.value)
+                & (pl.col("source") == GPS_CHECK_TYPE)
+                & (pl.col("status") == "Successful")
+            )
+        )
+    if columns is not None and {"source", "column"} <= set(active_corrections.columns):
+        frames.append(
+            active_corrections.filter(
+                (pl.col("source") == GPS_CHECK_TYPE)
+                & pl.col("column").is_in(list(columns.as_tuple()))
+            )
+        )
+    if not frames:
+        return log.clear()
+    return pl.concat(frames, how="diagonal_relaxed")
+
+
+def gps_review_history(log: pl.DataFrame) -> pl.DataFrame:
+    """Return every GPS acceptance and successful GPS correction in the log.
+
+    Unlike `GPSReviewLog.acceptances` and `.corrections`, entries no longer in
+    effect are kept: they still show when a point was first resolved.
+    """
+    if not {"action", "check_type", "source", "status"} <= set(log.columns):
+        return log.clear()
+    return log.filter(
+        ((pl.col("action") == Action.ACCEPT) & (pl.col("check_type") == GPS_CHECK_TYPE))
+        | (
+            pl.col("action").is_in(
+                [Action.MODIFY_VALUE, Action.REMOVE_VALUE, Action.REMOVE_ROW]
+            )
+            & (pl.col("source") == GPS_CHECK_TYPE)
+            & (pl.col("status") == "Successful")
+        )
+    )
+
+
+def summarize_gps_outliers(
+    outliers: pd.DataFrame, survey_key: str, *, review: GPSReviewLog | None
+) -> GPSOutlierSummary:
+    """Mark accepted outliers and count what is outstanding and resolved.
+
+    The GPS check's "Outliers Detected" metric and Summary's check health
+    row both come from this function, so their numbers match.
+
+    Parameters
+    ----------
+    outliers : pd.DataFrame
+        Output of `detect_outliers_with_lof` or `detect_outliers_with_clusters`.
+    survey_key : str
+        The Survey KEY column in `outliers`.
+    review : GPSReviewLog | None
+        The log entries reviewing these outliers, or None when they can't be
+        reviewed (no dataset alias, or a KEY column with a review column's
+        name); then every outlier is outstanding and nothing is resolved.
+
+    Returns
+    -------
+    GPSOutlierSummary
+        A point is resolved when it is an accepted outlier, or when a GPS
+        correction of it is still in effect and it is not an outstanding
+        outlier now. Each point counts once.
+    """
+    if review is None:
+        return GPSOutlierSummary(
+            outliers,
+            marked=False,
+            outstanding=count_unreviewed_outliers(outliers, marked=False),
+            resolved=None,
+            resolutions=pl.DataFrame(schema=_RESOLUTIONS_SCHEMA),
+        )
+    accepted = (
+        {}
+        if review.columns is None
+        else accepted_gps_keys(review.acceptances, review.columns)
+    )
+    marked = mark_gps_reviewed(outliers, accepted, survey_key)
+    is_outlier = _is_outlier(marked)
+    is_accepted = _is_reviewed(marked, marked=True)
+
+    def keys(rows: pd.Series) -> set[str]:
+        return {str(_native(key)) for key in marked.loc[rows, survey_key]}
+
+    outstanding = keys(is_outlier & ~is_accepted)
+    corrected = (
+        set(review.corrections["KEY"].cast(pl.String).to_list())
+        if "KEY" in review.corrections.columns
+        else set()
+    )
+    resolved = keys(is_accepted) | (corrected - outstanding)
+    entries = [
+        frame.select(pl.col("KEY").cast(pl.String), pl.col("date"))
+        for frame in (review.acceptances, review.corrections, review.history)
+        if {"KEY", "date"} <= set(frame.columns) and not frame.is_empty()
+    ]
+    resolutions = (
+        pl.concat(entries, how="vertical_relaxed")
+        .filter(pl.col("KEY").is_in(sorted(resolved)))
+        .group_by("KEY")
+        .agg(pl.col("date").min())
+        .sort("KEY")
+        if entries
+        else pl.DataFrame(schema=_RESOLUTIONS_SCHEMA)
+    )
+    return GPSOutlierSummary(
+        marked,
+        marked=True,
+        outstanding=count_unreviewed_outliers(marked, marked=True),
+        resolved=len(resolved),
+        resolutions=resolutions,
+    )
 
 
 def outlier_status(

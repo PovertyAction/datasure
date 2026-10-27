@@ -3,7 +3,7 @@
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any, Literal
 
 import duckdb
@@ -63,7 +63,12 @@ from datasure.checks.backchecks.scope import (
     scope_captions,
 )
 from datasure.checks.backchecks.settings_ui import backchecks_report_settings
-from datasure.checks.headline import CheckHeadline, settings_no_longer_fit
+from datasure.checks.headline import (
+    CheckDelta,
+    CheckHeadline,
+    settings_no_longer_fit,
+)
+from datasure.checks.health_period import DeltaWindow, logged_after, on_or_before
 from datasure.utils.dataframe_utils import (
     ColumnByType,
     TableState,
@@ -895,6 +900,89 @@ def backchecks_headline(
         outstanding=unattributed,
         resolved=sum(sources.values()) - unattributed,
     )
+
+
+def _unattributed(
+    comparisons: pl.DataFrame, log: pl.DataFrame, survey_key: str
+) -> tuple[int, int]:
+    """Count the mismatches `log` leaves unattributed and those it attributes."""
+    sources = count_error_sources(mark_error_sources(comparisons, log, survey_key))
+    unattributed = sources[ErrorSource.UNATTRIBUTED]
+    return unattributed, sum(sources.values()) - unattributed
+
+
+def backchecks_delta(
+    project_id: str,
+    page_name_id: str,
+    survey_data: pl.DataFrame,
+    backcheck_data: pl.DataFrame,
+    setting_file: str,
+    config: dict,
+    window: DeltaWindow,
+) -> CheckDelta | None:
+    """Return the backchecks row's change over the comparison period.
+
+    Outstanding: the unattributed mismatches `backchecks_headline` counts,
+    less those on the backchecks dated on or before the period start.
+    Resolved: the mismatches attributed now that were unattributed at the
+    period start, so re-attributing a mismatch does not count it again.
+    Takes the parameters of
+    `backchecks_headline`, plus the window, whose backcheck date column the
+    backchecks are dated by.
+
+    Returns
+    -------
+    CheckDelta | None
+        None when the backcheck date column is not set or not in the
+        backcheck data, or no values were compared.
+
+    Raises
+    ------
+    ValueError
+        If the saved settings no longer fit the data.
+    """
+    date_col, as_of = window.backcheck_date, window.as_of
+    if not date_col or date_col not in backcheck_data.columns:
+        return None
+    total = _total_errors(
+        project_id, page_name_id, survey_data, backcheck_data, setting_file, config
+    )
+    if total is None:
+        return None
+    log = load_attribution_log(project_id, page_name_id)
+    key = total.survey_key
+    unattributed, _ = _unattributed(total.comparisons, log, key)
+    earlier = on_or_before(backcheck_data, date_col, as_of)
+    then = (
+        None
+        if earlier.is_empty()
+        else _total_errors(
+            project_id, page_name_id, survey_data, earlier, setting_file, config
+        )
+    )
+    before = 0 if then is None else _unattributed(then.comparisons, log, key)[0]
+    return CheckDelta(
+        max(unattributed - before, 0),
+        resolved=_attributed_since(total.comparisons, log, key, as_of),
+    )
+
+
+def _attributed_since(
+    comparisons: pl.DataFrame, log: pl.DataFrame, survey_key: str, as_of: date
+) -> int:
+    """Count the mismatches attributed now that were unattributed at `as_of`.
+
+    A mismatch attributed by `as_of` and attributed again in the period was
+    already resolved, so it does not count.
+    """
+    if comparisons.is_empty():
+        return 0
+    unattributed = str(ErrorSource.UNATTRIBUTED)
+    now = mark_error_sources(comparisons, log, survey_key)[ERROR_SOURCE_COL]
+    then = mark_error_sources(
+        comparisons, log.filter(~logged_after(log, as_of)), survey_key
+    )[ERROR_SOURCE_COL]
+    return ((now != unattributed) & (then == unattributed)).fill_null(False).sum()
 
 
 def _render_overall_error_rates(backcheck_analysis: pl.DataFrame) -> None:

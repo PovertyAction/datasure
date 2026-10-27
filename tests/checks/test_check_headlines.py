@@ -78,14 +78,14 @@ class TestProgressHeadline:
 
     def test_submissions_without_a_target(self, setting_file):
         assert progress_headline(SURVEY, setting_file, self.CONFIG) == (
-            CheckHeadline("5", "submitted interviews", informational=True)
+            CheckHeadline("5", "submitted interviews", informational=True, count=5)
         )
 
     def test_submitted_out_of_the_target_from_the_page_config(self, setting_file):
         config = {**self.CONFIG, "survey_target": 20}
 
         assert progress_headline(SURVEY, setting_file, config) == (
-            CheckHeadline("5 / 20", "25.00% of target", informational=True)
+            CheckHeadline("5 / 20", "25.00% of target", informational=True, count=5)
         )
 
     def test_a_target_saved_in_the_check_settings_wins(self, setting_file):
@@ -353,6 +353,198 @@ class TestOutliersHeadline:
             self._headline(setting_file)
 
 
+class TestGPSHeadline:
+    CONFIG = {"survey_key": "key", "survey_id": "key"}  # noqa: RUF012
+    # Ten points close together and two far away. With the default LOF
+    # settings (11 neighbors for 12 points, 10%) k09 and k10 are flagged;
+    # with 5 neighbors the two far points k11 and k12 are.
+    DATA = pl.DataFrame(
+        {
+            "key": [f"k{i:02d}" for i in range(1, 13)],
+            "lat": [6.60 + 0.001 * (i % 4) for i in range(10)] + [7.5, 5.5],
+            "lon": [-0.18 + 0.001 * (i // 4) for i in range(10)] + [-1.5, 1.2],
+            "region": ["a"] * 12,
+        }
+    )
+    GPS_COLUMNS = pl.DataFrame(
+        {
+            "alias": ["home"],
+            "format_type": ["Separate Columns"],
+            "delimiter": [None],
+            "gps_column": [None],
+            "latitude_column": ["lat"],
+            "longitude_column": ["lon"],
+            "altitude_column": [None],
+            "accuracy_column": [None],
+        },
+        schema_overrides={
+            "delimiter": pl.String,
+            "gps_column": pl.String,
+            "altitude_column": pl.String,
+            "accuracy_column": pl.String,
+        },
+    )
+
+    @pytest.fixture(autouse=True)
+    def page_settings(self, cache_dir):
+        """The GPS check saves its view state in the page settings file."""
+
+        def fake_cache_path(*parts):
+            path = cache_dir.joinpath(*map(str, parts))
+            path.parent.mkdir(parents=True, exist_ok=True)
+            return path
+
+        with patch("datasure.utils.settings_utils.get_cache_path", fake_cache_path):
+            yield
+
+    def _view(self):
+        from datasure.checks.gpschecks.report_ui import _page_view
+
+        return _page_view(PROJECT_ID, PAGE)
+
+    def _headline(self, alias=None, data=None):
+        from datasure.checks.gpschecks.report_ui import gpschecks_headline
+
+        return gpschecks_headline(
+            PROJECT_ID,
+            PAGE,
+            self.DATA if data is None else data,
+            self.CONFIG,
+            alias,
+        )
+
+    def _save_columns(self):
+        duckdb_save_table(PROJECT_ID, self.GPS_COLUMNS, f"gps_columns_{PAGE}", "logs")
+
+    def test_counts_outliers_with_the_default_lof_settings(self):
+        self._save_columns()
+
+        assert self._headline() == CheckHeadline(
+            "2",
+            "GPS outliers (16.67% of 12 points)",
+            outstanding=2,
+            resolved=None,
+        )
+
+    def test_uses_the_saved_lof_settings(self):
+        self._save_columns()
+        self._view().save("outlier_n_neighbors", 5)
+
+        with patch(
+            "datasure.checks.gpschecks.report_ui.CorrectionProcessor"
+        ) as processor:
+            processor.return_value.get_active_acceptances.return_value = (
+                self._acceptance("k11")
+            )
+            processor.return_value.get_correction_log.return_value = pl.DataFrame()
+            processor.return_value.get_active_corrections.return_value = pl.DataFrame()
+            headline = self._headline(alias="survey")
+
+        # k11 and k12 are the outliers; k11 was accepted.
+        assert (headline.outstanding, headline.resolved) == (1, 1)
+
+    @staticmethod
+    def _acceptance(key):
+        return pl.DataFrame(
+            {
+                "date": [datetime(2025, 1, 2)],
+                "KEY": [key],
+                "action": ["accept"],
+                "column": [None],
+                "current_value": [json.dumps({"lat": 7.5, "lon": -1.5})],
+                "reason": ["market"],
+            },
+            schema_overrides={"column": pl.String},
+        )
+
+    def _rendered_count(self, processor):
+        """Render the outliers section; return its "Outliers Detected"."""
+        import sys
+
+        from datasure.checks.gpschecks import report_ui
+
+        st = MagicMock()
+        st.session_state = {}
+
+        def widget(*args, **kwargs):
+            # A widget shows its session value, else its default.
+            key = kwargs["key"]
+            if key in st.session_state:
+                return st.session_state[key]
+            if "value" in kwargs:
+                return kwargs["value"]
+            options = list(kwargs.get("options", args[1] if len(args) > 1 else []))
+            return options[kwargs.get("index", 0)]
+
+        st.selectbox.side_effect = widget
+        st.slider.side_effect = widget
+        st.columns.side_effect = lambda spec, **_: [
+            MagicMock() for _ in range(spec if isinstance(spec, int) else len(spec))
+        ]
+        with (
+            patch.object(report_ui, "st", st),
+            patch.dict(sys.modules, {"streamlit": st}),
+            patch.object(report_ui, "plot_clusters_on_map"),
+            patch.object(report_ui, "_render_outliers_data_table"),
+            patch.object(report_ui, "CorrectionProcessor", return_value=processor),
+        ):
+            report_ui._render_gps_outliers_checks.__wrapped__(
+                PROJECT_ID, PAGE, self.DATA, "key", None, None, alias="survey"
+            )
+        return {c.args[0]: c.args[1] for c in st.metric.call_args_list}[
+            "Outliers Detected"
+        ]
+
+    @pytest.mark.parametrize("saved_neighbors", [None, 5])
+    def test_matches_the_checks_outliers_detected(self, saved_neighbors):
+        self._save_columns()
+        if saved_neighbors is not None:
+            self._view().save("outlier_n_neighbors", saved_neighbors)
+        processor = MagicMock()
+        processor.get_active_acceptances.return_value = self._acceptance("k11")
+        processor.get_correction_log.return_value = pl.DataFrame()
+        processor.get_active_corrections.return_value = pl.DataFrame()
+
+        with patch(
+            "datasure.checks.gpschecks.report_ui.CorrectionProcessor",
+            return_value=processor,
+        ):
+            headline = self._headline(alias="survey")
+
+        assert self._rendered_count(processor) == headline.value
+
+    def test_none_until_a_clustering_column_is_chosen(self):
+        self._save_columns()
+        self._view().save("outlier_detection_method", "Cluster by Column")
+
+        assert self._headline() is None
+
+    def test_cluster_method_uses_the_saved_column(self):
+        self._save_columns()
+        self._view().save("outlier_detection_method", "Cluster by Column")
+        self._view().save("outlier_clustering_col", "region")
+
+        assert self._headline() is not None
+
+    def test_none_with_too_few_points_for_lof(self):
+        self._save_columns()
+
+        assert self._headline(data=self.DATA.head(5)) is None
+
+    def test_none_without_a_gps_configuration(self):
+        assert self._headline() is None
+
+    def test_view_key_changes_with_the_lof_settings(self):
+        from datasure.checks.gpschecks.report_ui import gpschecks_headline_view
+
+        before = gpschecks_headline_view(PROJECT_ID, PAGE)
+        self._view().save("gps_color_by", "region")
+        assert gpschecks_headline_view(PROJECT_ID, PAGE) == before
+
+        self._view().save("outlier_contamination", 0.2)
+        assert gpschecks_headline_view(PROJECT_ID, PAGE) != before
+
+
 class TestEnumeratorHeadline:
     CONFIG = {  # noqa: RUF012
         "survey_key": "key",
@@ -376,7 +568,9 @@ class TestEnumeratorHeadline:
         data = self._data(["e1", "e1", "e2", "e3"], [1, 20, 2, 30])
 
         assert enumerator_headline(PROJECT_ID, data, setting_file, self.CONFIG) == (
-            CheckHeadline("2 / 3", "active in the past 7 days", informational=True)
+            CheckHeadline(
+                "2 / 3", "active in the past 7 days", informational=True, count=2
+            )
         )
 
     @staticmethod

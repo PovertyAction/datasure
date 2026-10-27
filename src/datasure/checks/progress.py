@@ -1456,10 +1456,14 @@ def progress_headline(
     summary = compute_progress_summary(data, target)
     if not target or target <= 0:
         return CheckHeadline(
-            f"{summary.total_submitted:,}", "submitted interviews", informational=True
+            f"{summary.total_submitted:,}",
+            "submitted interviews",
+            informational=True,
+            count=summary.total_submitted,
         )
     return CheckHeadline(
         f"{summary.total_submitted:,} / {target:,}",
         f"{summary.percentage_completed:.2f}% of target",
         informational=True,
+        count=summary.total_submitted,
     )

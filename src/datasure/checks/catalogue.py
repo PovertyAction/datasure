@@ -1,21 +1,33 @@
 """The check catalogue: every check shown on a check page.
 
 Each entry gives a check's slug, short label, icon, group, render function,
-status function and optional headline function, in display order. The check
+status function and optional headline and delta functions, in display order.
+Delta functions live in `health_deltas`, so the catalogue only names them. The
+check
 page builds its navigation and Summary's check health rows from this
 catalogue, so adding an entry here is the only change needed for a new check
 to appear.
 """
 
-from collections.abc import Callable
+from collections.abc import Callable, Hashable
 from dataclasses import dataclass
+from datetime import date
 from functools import partial
 
+from datasure.checks import health_deltas
 from datasure.checks.backchecks.report_ui import (
     backchecks_headline,
     backchecks_report,
     backchecks_settings_section,
     backchecks_status,
+)
+from datasure.checks.check_configs import (
+    backcheck_config,
+    duplicates_config,
+    enumerator_config,
+    gps_config,
+    outliers_config,
+    progress_config,
 )
 from datasure.checks.context import CheckContext
 from datasure.checks.descriptive import descriptive_report
@@ -30,16 +42,24 @@ from datasure.checks.enumerator.report_ui import (
     enumerator_status,
 )
 from datasure.checks.gpschecks.report_ui import (
+    gpschecks_headline,
+    gpschecks_headline_view,
     gpschecks_report,
     gpschecks_settings_section,
     gpschecks_status,
 )
 from datasure.checks.headline import CheckHeadline
 from datasure.checks.health import (
+    Delta,
     health_rows,
+    render_comparison_period,
+    render_health_header,
     render_health_rows,
+    render_period_caption,
     status_only_headline,
 )
+from datasure.checks.health_deltas import comparison_window, latest_submission
+from datasure.checks.health_period import DEFAULT_PERIOD, since_label
 from datasure.checks.missing import missing_headline, missing_report
 from datasure.checks.outliers.report_ui import (
     outliers_headline,
@@ -49,8 +69,10 @@ from datasure.checks.outliers.report_ui import (
 )
 from datasure.checks.progress import progress_headline, progress_report
 from datasure.checks.summary import summary_report
+from datasure.utils.cache_utils import get_cache_path
 from datasure.utils.dataframe_utils import get_df_columns
 from datasure.utils.nav_ui import (
+    PROJECT_VIEW_FILE,
     SET_UP_BELOW,
     guarded_status,
     project_nav_key,
@@ -117,6 +139,15 @@ class CheckEntry:
         checks that cannot be not applicable or have no settings section.
     setup_hint : str
         Ends the not-set-up message; it must say where the setup happens.
+    delta : Delta | None
+        The row's change over Summary's comparison period, from the context,
+        the headline now and the window (see `health_rows`). None for checks
+        whose row shows no change.
+    headline_view : Callable[[CheckContext], Hashable] | None
+        The saved view values ``headline`` depends on, such as the GPS
+        check's Auto-Clustering sliders. Summary's cached numbers are keyed
+        on page data and settings without view state, so these are added to
+        the check's key. None for headlines that ignore view state.
     """
 
     slug: str
@@ -129,32 +160,8 @@ class CheckEntry:
     headline: Callable[[CheckContext], CheckHeadline | None] | None = None
     settings: Callable[[CheckContext], None] | None = None
     setup_hint: str = SET_UP_BELOW
-
-
-def _outliers_config(ctx: CheckContext) -> dict:
-    config = ctx.config
-    return {
-        "survey_key": config.survey_key,
-        "survey_id": config.survey_id,
-        "enumerator": config.enumerator,
-        "team": config.team,
-        "survey_date": config.survey_date,
-    }
-
-
-def _backcheck_config(ctx: CheckContext) -> dict:
-    config = ctx.config
-    return {
-        "survey_key": config.survey_key,
-        "survey_id": config.survey_id,
-        "survey_date": config.survey_date,
-        "backcheck_date": config.backcheck_date,
-        "enumerator": config.enumerator,
-        "backchecker": config.backchecker,
-        "backchecker_team": config.backchecker_team,
-        "backcheck_target_percent": config.backcheck_target_percent,
-        "survey_target": config.survey_target,
-    }
+    delta: Delta | None = None
+    headline_view: Callable[[CheckContext], Hashable] | None = None
 
 
 def _render_summary(ctx: CheckContext) -> None:
@@ -176,17 +183,41 @@ def summary_check_health(ctx: CheckContext) -> None:
     """Draw a check health row for every check but Summary, under its sections.
 
     Replaces Summary's former Data Quality section: each row's numbers come
-    from its check, with that check's settings and corrections.
+    from its check, with that check's settings and corrections. Above the
+    rows, the Comparison period box sets what their changes compare with;
+    without any date column it is replaced by a caption saying how to get
+    changes.
     """
     nav_key = check_nav_key(ctx.project_id, ctx.config.page_name_id)
     items = with_errors(nav_items(ctx), render_errors(nav_key))
-    entries = {entry.slug: entry for entry in CHECK_CATALOGUE}
+    render_health_header()
+    # Today is the computer clock's date.
+    today = date.today()
+    window = comparison_window(ctx, DEFAULT_PERIOD, today)
+    since = None
+    if window.has_dates:
+        period, week_start = render_comparison_period(
+            get_cache_path(ctx.project_id, "settings", PROJECT_VIEW_FILE),
+            ctx.project_id,
+        )
+        window = comparison_window(ctx, period, today, week_start)
+        since = since_label(period, today, week_start)
+    render_period_caption(since, latest_submission(ctx, window))
     rows = health_rows(
         ctx,
         [item for item in items if item.slug != "summary"],
-        {slug: entry.headline for slug, entry in entries.items() if entry.headline},
+        {entry.slug: entry.headline for entry in CHECK_CATALOGUE if entry.headline},
+        deltas={entry.slug: entry.delta for entry in CHECK_CATALOGUE if entry.delta},
+        window=window if window.has_dates else None,
+        view_keys={
+            entry.slug: entry.headline_view
+            for entry in CHECK_CATALOGUE
+            if entry.headline_view
+        },
     )
-    render_health_rows(rows, on_select=partial(select_nav_item, nav_key, CHECK_PARAM))
+    render_health_rows(
+        rows, on_select=partial(select_nav_item, nav_key, CHECK_PARAM), since=since
+    )
     demo_callout(
         "**Next**: :material/arrow_upward: Scroll up and select **Overview → Progress**."
     )
@@ -202,22 +233,11 @@ def _render_descriptive(ctx: CheckContext) -> None:
     )
 
 
-def _progress_config(ctx: CheckContext) -> dict:
-    config = ctx.config
-    return {
-        "survey_key": config.survey_key,
-        "survey_id": config.survey_id,
-        "enumerator": config.enumerator,
-        "survey_date": config.survey_date,
-        "survey_target": config.survey_target,
-    }
-
-
 def _render_progress(ctx: CheckContext) -> None:
     progress_report(
         ctx.data.page_data,
         ctx.config.setting_file,
-        _progress_config(ctx),
+        progress_config(ctx),
         ctx.survey_columns,
     )
 
@@ -231,21 +251,6 @@ def _render_missing(ctx: CheckContext) -> None:
     )
 
 
-def _duplicates_config(ctx: CheckContext) -> dict:
-    config = ctx.config
-    return {
-        "survey_key": config.survey_key,
-        "survey_id": config.survey_id,
-        "enumerator": config.enumerator,
-        "team": config.team,
-        "survey_date": config.survey_date,
-        "backcheck_data_name": config.backcheck_data_name,
-        "backcheck_date": config.backcheck_date,
-        "backchecker": config.backchecker,
-        "backchecker_team": config.backchecker_team,
-    }
-
-
 def _render_duplicates(ctx: CheckContext) -> None:
     config = ctx.config
     duplicates_report(
@@ -253,7 +258,7 @@ def _render_duplicates(ctx: CheckContext) -> None:
         config.page_name_id,
         ctx.data.page_data,
         config.setting_file,
-        _duplicates_config(ctx),
+        duplicates_config(ctx),
         ctx.survey_columns,
         ctx.data.backcheck_data_with_rows,
         alias=config.survey_data_name,
@@ -266,7 +271,7 @@ def _render_outliers(ctx: CheckContext) -> None:
         ctx.config.page_name_id,
         ctx.data.page_data,
         ctx.config.setting_file,
-        _outliers_config(ctx),
+        outliers_config(ctx),
         ctx.survey_columns,
         alias=ctx.config.survey_data_name,
     )
@@ -279,23 +284,10 @@ def _render_gps(ctx: CheckContext) -> None:
         config.page_name_id,
         ctx.data.page_data,
         config.setting_file,
-        _gps_config(ctx),
+        gps_config(ctx),
         ctx.survey_columns,
         alias=config.survey_data_name,
     )
-
-
-def _enumerator_config(ctx: CheckContext) -> dict:
-    config = ctx.config
-    return {
-        "survey_key": config.survey_key,
-        "survey_id": config.survey_id,
-        "survey_date": config.survey_date,
-        "enumerator": config.enumerator,
-        "formversion": config.formversion,
-        "duration": config.duration,
-        "team": config.team,
-    }
 
 
 def _render_enumerator(ctx: CheckContext) -> None:
@@ -303,7 +295,7 @@ def _render_enumerator(ctx: CheckContext) -> None:
         ctx.project_id,
         ctx.data.page_data,
         ctx.config.setting_file,
-        _enumerator_config(ctx),
+        enumerator_config(ctx),
         ctx.survey_columns,
     )
 
@@ -317,7 +309,7 @@ def _render_backchecks(ctx: CheckContext) -> None:
         data.page_data,
         data.backcheck_data,
         ctx.config.setting_file,
-        _backcheck_config(ctx),
+        backcheck_config(ctx),
         ctx.survey_columns,
         get_df_columns(data.backcheck_data),
     )
@@ -325,19 +317,8 @@ def _render_backchecks(ctx: CheckContext) -> None:
 
 def _outliers_settings(ctx: CheckContext) -> None:
     outliers_settings_section(
-        ctx.config.setting_file, _outliers_config(ctx), ctx.survey_columns
+        ctx.config.setting_file, outliers_config(ctx), ctx.survey_columns
     )
-
-
-def _gps_config(ctx: CheckContext) -> dict:
-    config = ctx.config
-    return {
-        "survey_key": config.survey_key,
-        "survey_id": config.survey_id,
-        "survey_date": config.survey_date,
-        "enumerator": config.enumerator,
-        "team": config.team,
-    }
 
 
 def _gps_settings(ctx: CheckContext) -> None:
@@ -347,7 +328,7 @@ def _gps_settings(ctx: CheckContext) -> None:
         config.page_name_id,
         ctx.data.page_data,
         config.setting_file,
-        _gps_config(ctx),
+        gps_config(ctx),
         ctx.survey_columns,
     )
 
@@ -363,7 +344,7 @@ def _backchecks_settings(ctx: CheckContext) -> None:
         data.page_data,
         data.backcheck_data,
         ctx.config.setting_file,
-        _backcheck_config(ctx),
+        backcheck_config(ctx),
         ctx.survey_columns,
         get_df_columns(data.backcheck_data),
     )
@@ -425,7 +406,7 @@ def _backchecks_status(ctx: CheckContext) -> StatusResult:
 # Headline adapters also look the module-level functions up on each call.
 def _progress_headline(ctx: CheckContext) -> CheckHeadline | None:
     return progress_headline(
-        ctx.data.page_data, ctx.config.setting_file, _progress_config(ctx)
+        ctx.data.page_data, ctx.config.setting_file, progress_config(ctx)
     )
 
 
@@ -439,7 +420,7 @@ def _duplicates_headline(ctx: CheckContext) -> CheckHeadline | None:
         ctx.project_id,
         ctx.data.page_data,
         config.setting_file,
-        _duplicates_config(ctx),
+        duplicates_config(ctx),
         alias=config.survey_data_name,
     )
 
@@ -452,9 +433,24 @@ def _outliers_headline(ctx: CheckContext) -> CheckHeadline | None:
         ctx.data.page_data,
         ctx.survey_columns,
         config.setting_file,
-        _outliers_config(ctx),
+        outliers_config(ctx),
         config.survey_data_name,
     )
+
+
+def _gps_headline(ctx: CheckContext) -> CheckHeadline | None:
+    config = ctx.config
+    return gpschecks_headline(
+        ctx.project_id,
+        config.page_name_id,
+        ctx.data.page_data,
+        gps_config(ctx),
+        alias=config.survey_data_name,
+    )
+
+
+def _gps_headline_view(ctx: CheckContext) -> Hashable:
+    return gpschecks_headline_view(ctx.project_id, ctx.config.page_name_id)
 
 
 def _enumerator_headline(ctx: CheckContext) -> CheckHeadline | None:
@@ -462,7 +458,7 @@ def _enumerator_headline(ctx: CheckContext) -> CheckHeadline | None:
         ctx.project_id,
         ctx.data.page_data,
         ctx.config.setting_file,
-        _enumerator_config(ctx),
+        enumerator_config(ctx),
     )
 
 
@@ -474,7 +470,7 @@ def _backchecks_headline(ctx: CheckContext) -> CheckHeadline | None:
         ctx.data.page_data,
         ctx.data.backcheck_data,
         ctx.config.setting_file,
-        _backcheck_config(ctx),
+        backcheck_config(ctx),
     )
 
 
@@ -495,6 +491,7 @@ CHECK_CATALOGUE: tuple[CheckEntry, ...] = (
         _render_progress,
         _survey_rows_status,
         headline=_progress_headline,
+        delta=health_deltas.progress,
     ),
     CheckEntry(
         "missing",
@@ -504,6 +501,7 @@ CHECK_CATALOGUE: tuple[CheckEntry, ...] = (
         _render_missing,
         _survey_rows_status,
         headline=_missing_headline,
+        delta=health_deltas.missing,
     ),
     CheckEntry(
         "duplicates",
@@ -513,6 +511,7 @@ CHECK_CATALOGUE: tuple[CheckEntry, ...] = (
         _render_duplicates,
         _duplicates_status,
         headline=_duplicates_headline,
+        delta=health_deltas.duplicates,
     ),
     CheckEntry(
         "outliers",
@@ -522,6 +521,7 @@ CHECK_CATALOGUE: tuple[CheckEntry, ...] = (
         _render_outliers,
         _outliers_status,
         headline=_outliers_headline,
+        delta=health_deltas.outliers,
         settings=_outliers_settings,
     ),
     CheckEntry(
@@ -531,7 +531,10 @@ CHECK_CATALOGUE: tuple[CheckEntry, ...] = (
         DATA_INTEGRITY,
         _render_gps,
         _gps_status,
+        headline=_gps_headline,
+        delta=health_deltas.gps,
         settings=_gps_settings,
+        headline_view=_gps_headline_view,
     ),
     CheckEntry(
         "enumerator",
@@ -541,6 +544,7 @@ CHECK_CATALOGUE: tuple[CheckEntry, ...] = (
         _render_enumerator,
         _enumerator_status,
         headline=_enumerator_headline,
+        delta=health_deltas.enumerator,
     ),
     CheckEntry(
         "backchecks",
@@ -551,6 +555,7 @@ CHECK_CATALOGUE: tuple[CheckEntry, ...] = (
         _backchecks_status,
         setup=_setup_backchecks,
         headline=_backchecks_headline,
+        delta=health_deltas.backchecks,
         settings=_backchecks_settings,
         # The backcheck dataset is chosen and imported on other pages.
         setup_hint="Fix it on the page linked below.",

@@ -9,6 +9,7 @@ import polars as pl
 import pytest
 from polars.testing import assert_frame_equal
 
+from datasure.checks.health import PERIOD_SCOPE
 from datasure.models.schemas import (
     ImportSourceEntry,
     ProjectConfigBundle,
@@ -20,6 +21,7 @@ from datasure.utils.duckdb_utils import (
     duckdb_save_table,
     duckdb_table_exists,
 )
+from datasure.utils.nav_ui import PROJECT_VIEW_FILE
 from datasure.utils.project_config import (
     BUNDLE_VERSION,
     _render_config_summary,
@@ -32,6 +34,7 @@ from datasure.utils.project_config import (
     parse_project_config,
 )
 from datasure.utils.reapply_utils import ReapplyFailure
+from datasure.utils.view_state import ViewState
 
 PROJECT_ID = "test_survey_project_1001"
 
@@ -214,6 +217,34 @@ class TestExportProjectConfig:
 
         assert bundle.pages[0].settings == {"missing": {"threshold": 5}}
         assert "view_state" not in bundle.model_dump_json()
+
+    @patch("datasure.utils.project_config.get_cache_path")
+    @patch("datasure.utils.project_config.ConfigurationService")
+    @patch(
+        "datasure.utils.project_config.duckdb_table_exists",
+        new=Mock(return_value=True),
+    )
+    @patch("datasure.utils.project_config.duckdb_get_table")
+    def test_export_leaves_out_the_check_health_comparison_period(
+        self, mock_get_table, mock_config_service_cls, mock_get_cache_path, tmp_path
+    ):
+        """The comparison period is saved in the project view file, never shared."""
+        mock_get_table.return_value = pl.DataFrame()
+        mock_config_service_cls.return_value.get_all_configurations.return_value = (
+            pl.DataFrame(
+                {"page_name": ["Household HFC"], "survey_data_name": ["household"]}
+            )
+        )
+        mock_get_cache_path.return_value = tmp_path
+        view = ViewState(tmp_path / PROJECT_VIEW_FILE, PERIOD_SCOPE)
+        view.save(f"health_period__{PROJECT_ID}", "Week")
+        view.save(f"health_week_start__{PROJECT_ID}", "Monday")
+
+        bundle = export_project_config(PROJECT_ID, "ACME Endline 2026")
+
+        exported = bundle.model_dump_json()
+        assert "health_period" not in exported
+        assert "Monday" not in exported
 
 
 # === RESOLUTION HELPERS === #

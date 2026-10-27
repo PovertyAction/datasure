@@ -1320,7 +1320,11 @@ def enumerator_report_data(data: pl.DataFrame, setting_file: str) -> pl.DataFram
 
 
 def enumerator_headline(
-    project_id: str, data: pl.DataFrame, setting_file: str, config: dict
+    project_id: str,
+    data: pl.DataFrame,
+    setting_file: str,
+    config: dict,
+    today: dt_date | None = None,
 ) -> CheckHeadline | None:
     """Return the enumerator headline for Summary's check health row.
 
@@ -1338,6 +1342,10 @@ def enumerator_headline(
         Path to the page's settings file.
     config : dict
         The page configuration the check starts from.
+    today : date | None
+        The day "active in the past 7 days" counts back from, for the
+        enumerators active as of the comparison period start. Defaults to
+        the system clock.
 
     Returns
     -------
@@ -1351,10 +1359,11 @@ def enumerator_headline(
     if not (settings.enumerator and settings.survey_date) or data.is_empty():
         return None
     metrics = compute_enumerator_overview(
-        data, settings.survey_date, settings.enumerator, settings.team
+        data, settings.survey_date, settings.enumerator, settings.team, today=today
     )
     return CheckHeadline(
         f"{metrics.num_active_enumerators:,} / {metrics.num_enumerators:,}",
         "active in the past 7 days",
         informational=True,
+        count=metrics.num_active_enumerators,
     )

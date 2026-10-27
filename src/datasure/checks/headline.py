@@ -5,9 +5,17 @@ headline function. Every number must match what the check itself reports.
 Kept free of Streamlit and of the checks, so any check can import it.
 """
 
-from dataclasses import dataclass
+from dataclasses import dataclass, field
+from enum import StrEnum
+from typing import TYPE_CHECKING
 
 from pydantic import ValidationError
+
+if TYPE_CHECKING:
+    # Only named in annotations, so this module stays free of the checks.
+    from datasure.checks.duplicates import DuplicatesBasis
+    from datasure.checks.gpschecks.review import GPSOutlierSummary
+    from datasure.checks.outliers.report_ui import OutliersBasis
 
 
 @dataclass(frozen=True)
@@ -31,6 +39,18 @@ class CheckHeadline:
     informational : bool
         The value describes the data rather than counting issues, as for
         Progress and Enumerator Stats, so the row is never flagged.
+    count : float | None
+        The number an informational value shows, such as the submissions or
+        the active enumerators, which its change over the comparison period
+        compares. None when the value has no such number.
+    basis : DuplicatesBasis | GPSOutlierSummary | OutliersBasis | None
+        What the check computed the numbers from, such as its flags, so its
+        delta can reuse them instead of computing them again: Duplicates'
+        ``DuplicatesBasis``, Outliers' ``OutliersBasis`` and GPS Checks'
+        ``GPSOutlierSummary``; None for the other checks. Only valid for
+        the data the headline was computed on; Summary keeps it out of the
+        headline cache. Not compared, so headlines with equal numbers are
+        equal.
     """
 
     value: str
@@ -38,6 +58,10 @@ class CheckHeadline:
     outstanding: float | None = None
     resolved: int | None = None
     informational: bool = False
+    count: float | None = None
+    basis: "DuplicatesBasis | GPSOutlierSummary | OutliersBasis | None" = field(
+        default=None, compare=False, repr=False
+    )
 
     @property
     def flagged(self) -> bool:
@@ -47,6 +71,40 @@ class CheckHeadline:
             and self.outstanding is not None
             and self.outstanding > 0
         )
+
+
+class DeltaKind(StrEnum):
+    """What a row's outstanding change measures, which sets how it reads."""
+
+    # Issues among the submissions dated in the period: "▲ 3 new".
+    NEW = "new"
+    # A change in percentage points, as for Missing Values.
+    POINTS = "points"
+    # Submissions dated in the period, as for Progress.
+    SUBMISSIONS = "submissions"
+    # A change in active enumerators, as for Enumerator Stats.
+    ACTIVE = "active"
+
+
+@dataclass(frozen=True)
+class CheckDelta:
+    """How a check's health row changed over the comparison period.
+
+    Attributes
+    ----------
+    outstanding : float | None
+        The change in the outstanding number, read as `kind` says; None when
+        it cannot be computed.
+    resolved : int | None
+        Resolutions logged in the period that are still in effect; None for
+        checks that resolve nothing.
+    kind : DeltaKind
+        What `outstanding` measures.
+    """
+
+    outstanding: float | None = None
+    resolved: int | None = None
+    kind: DeltaKind = DeltaKind.NEW
 
 
 def settings_no_longer_fit(check: str, cause: Exception) -> ValueError:
