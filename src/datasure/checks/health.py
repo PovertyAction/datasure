@@ -1,10 +1,13 @@
-"""Summary's check health grid: one card per check with its status and headline.
+"""Summary's check health rows: one row per check, grouped like the navigation.
 
-``health_cards`` builds the cards from the checks' navigation items and their
+``health_rows`` builds the rows from the checks' navigation items and their
 headline functions. Headlines are cached on the page's data and settings, so
 Summary only recomputes them when something they depend on changes.
-``render_health_grid`` draws the cards. Streamlit is imported inside the
+``render_health_rows`` draws the rows. Streamlit is imported inside the
 drawing function, as in ``ui_utils``.
+
+A row's state comes from the check's configuration status (``CheckStatus``)
+and, for a ready check, from its headline: outstanding issues flag the row.
 """
 
 import hashlib
@@ -15,86 +18,160 @@ from collections import OrderedDict
 from collections.abc import Callable, Hashable, Iterable, Mapping, Sequence
 from dataclasses import astuple, dataclass
 from datetime import date
+from enum import StrEnum
 from pathlib import Path
+from typing import NamedTuple
 
 import polars as pl
 
 from datasure.checks.context import CheckContext
+from datasure.checks.headline import CheckHeadline
 from datasure.utils.duckdb_utils import database_path
 from datasure.utils.navigation import CheckStatus, NavItem
 from datasure.utils.view_state import without_view_state
 
 logger = logging.getLogger(__name__)
 
-Headline = Callable[[CheckContext], str | None]
+Headline = Callable[[CheckContext], CheckHeadline | None]
 
 OPEN_ACTION = "Open →"
 SET_UP_ACTION = "Set up →"
+# Shown in place of a number a row does not have.
+NO_NUMBER = "—"
+# The detail of a ready check with no numbers, such as Descriptive Stats.
+STATUS_ONLY = "Status only"
 
-# Status text and icon on a card, so status does not rely on colour alone.
-_STATUS_LINES: dict[CheckStatus, tuple[str, str, str]] = {
-    CheckStatus.READY: ("green", ":material/check_circle:", "Ready"),
-    CheckStatus.NOT_SET_UP: ("gray", ":material/build:", "Not set up"),
-    CheckStatus.NOT_APPLICABLE: (
-        "gray",
-        ":material/do_not_disturb_on:",
-        "Not applicable",
+
+def status_only_headline(_ctx: CheckContext | None) -> CheckHeadline:
+    """Headline of a check that only describes the data and counts nothing.
+
+    Its row is green, as for any informational check, with no number.
+    """
+    return CheckHeadline(NO_NUMBER, STATUS_ONLY, informational=True)
+
+
+class Pill(NamedTuple):
+    """A status pill: colour, icon and label, so status is not colour alone."""
+
+    colour: str
+    icon: str
+    label: str
+
+
+class RowState(StrEnum):
+    """What a check's health row reports, shown as its status pill."""
+
+    NOT_SET_UP = "not_set_up"
+    NOT_APPLICABLE = "not_applicable"
+    # The status or a number could not be computed.
+    ERROR = "error"
+    # Ready, with outstanding issues.
+    FLAGGED = "flagged"
+    # Ready with no outstanding issues, or an informational check.
+    NO_ISSUES = "no_issues"
+    # Ready, but its issues are not counted, so nothing is claimed about them.
+    READY = "ready"
+
+    @property
+    def pill(self) -> Pill:
+        """The state's status pill."""
+        return _PILLS[self]
+
+    @property
+    def action(self) -> str | None:
+        """The row's button label, or None when there is nothing to do."""
+        return _ACTIONS.get(self, OPEN_ACTION)
+
+
+_PILLS: dict[RowState, Pill] = {
+    RowState.NOT_SET_UP: Pill("gray", ":material/build:", "Not set up"),
+    RowState.NOT_APPLICABLE: Pill(
+        "gray", ":material/do_not_disturb_on:", "Not applicable"
     ),
-    CheckStatus.ERROR: ("red", ":material/error:", "Error"),
+    RowState.ERROR: Pill("red", ":material/error:", "Error"),
+    RowState.FLAGGED: Pill("orange", ":material/warning:", "Flagged"),
+    RowState.NO_ISSUES: Pill("green", ":material/check_circle:", "No issues"),
+    RowState.READY: Pill("blue", ":material/check:", "Ready"),
 }
 
-_CARDS_PER_ROW = 3
+_ACTIONS: dict[RowState, str | None] = {
+    RowState.NOT_SET_UP: SET_UP_ACTION,
+    RowState.NOT_APPLICABLE: None,
+}
 
-# Every card is at least this tall, and cards in a row stretch to the
-# tallest one, so the grid lines up whatever each card shows.
-_CARD_KEY_PREFIX = "health_card_box_"
-_CARD_MIN_HEIGHT_PX = 240
-_CARD_HEIGHT_CSS = f"""<style>
-[class*="st-key-{_CARD_KEY_PREFIX}"] {{
-    min-height: {_CARD_MIN_HEIGHT_PX}px;
-}}
-</style>"""
+_STATE_BY_STATUS = {
+    CheckStatus.NOT_SET_UP: RowState.NOT_SET_UP,
+    CheckStatus.NOT_APPLICABLE: RowState.NOT_APPLICABLE,
+    CheckStatus.ERROR: RowState.ERROR,
+}
 
 
 @dataclass(frozen=True)
-class HealthCard:
-    """One check's card on the health grid.
+class HealthRow:
+    """One check's row in the check health list.
 
     Attributes
     ----------
     item : NavItem
         The check's navigation item: label, group, status and reason.
-    headline : str | None
-        The check's headline, such as "14 duplicate IDs"; None for checks
-        that are not ready or have no headline.
-    headline_error : str
-        Why the headline could not be computed; empty when it could.
+    headline : CheckHeadline | None
+        The check's numbers; None for checks that are not ready or have no
+        headline.
+    error : str
+        Why the numbers could not be computed; empty when they could.
     """
 
     item: NavItem
-    headline: str | None = None
-    headline_error: str = ""
+    headline: CheckHeadline | None = None
+    error: str = ""
+
+    @property
+    def state(self) -> RowState:
+        """The row's state, from the check's status and outstanding issues."""
+        if self.item.status in _STATE_BY_STATUS:
+            return _STATE_BY_STATUS[self.item.status]
+        if self.error:
+            return RowState.ERROR
+        if self.headline is None:
+            return RowState.READY
+        if self.headline.flagged:
+            return RowState.FLAGGED
+        return RowState.NO_ISSUES
 
     @property
     def action(self) -> str | None:
-        """The card's button label, or None when there is nothing to do."""
-        if self.item.status is CheckStatus.NOT_SET_UP:
-            return SET_UP_ACTION
-        if self.item.status is CheckStatus.NOT_APPLICABLE:
-            return None
-        return OPEN_ACTION
+        """The row's button label, or None when there is nothing to do."""
+        return self.state.action
 
     @property
-    def status_line(self) -> str:
-        """The status as Markdown text with an icon."""
-        colour, icon, text = _STATUS_LINES[self.item.status]
-        return f":{colour}[{icon} {text}]"
+    def value(self) -> str:
+        """The outstanding number as shown."""
+        return self.headline.value if self.headline else NO_NUMBER
+
+    @property
+    def detail(self) -> str:
+        """The line under the value: the check's detail, the error or reason.
+
+        A ready check with no numbers shows ``STATUS_ONLY``.
+        """
+        if self.error:
+            return f"Could not compute the numbers: {self.error}"
+        if self.headline:
+            return self.headline.detail
+        return self.item.reason or STATUS_ONLY
+
+    @property
+    def resolved(self) -> str:
+        """The resolved count as shown."""
+        if self.headline is None or self.headline.resolved is None:
+            return NO_NUMBER
+        return f"{self.headline.resolved:,}"
 
 
 # --- Headline cache --------------------------------------------------------
 
 _CACHE_SIZE = 256
-_cache: "OrderedDict[Hashable, str | None]" = OrderedDict()
+_cache: "OrderedDict[Hashable, CheckHeadline | None]" = OrderedDict()
 _cache_lock = threading.Lock()
 
 
@@ -158,9 +235,10 @@ def _page_fingerprint(ctx: CheckContext) -> Hashable:
     """What headlines depend on: data, page settings and settings tables.
 
     The settings files are hashed. The logs database (outlier and backcheck
-    columns, missing codes, accepted flags) and the intermediate database
-    (consent and outcome data) are stamped by modification time and size.
-    Enumerator activity is measured against today, so the date is included.
+    columns, missing codes, accepted flags, backcheck attributions) and the
+    intermediate database (consent and outcome data, corrections) are stamped
+    by modification time and size. Enumerator activity is measured against
+    today, so the date is included.
     """
     config = ctx.config
     databases = [
@@ -182,7 +260,9 @@ def _page_fingerprint(ctx: CheckContext) -> Hashable:
     )
 
 
-def _cached(key: Hashable, compute: Callable[[], str | None]) -> str | None:
+def _cached(
+    key: Hashable, compute: Callable[[], CheckHeadline | None]
+) -> CheckHeadline | None:
     with _cache_lock:
         if key in _cache:
             _cache.move_to_end(key)
@@ -199,21 +279,22 @@ def _fingerprint_or_none(ctx: CheckContext) -> Hashable | None:
     try:
         return _page_fingerprint(ctx)
     except (pl.exceptions.PolarsError, TypeError):
-        # Data that cannot be hashed is not cached; headlines still show.
+        # Data that cannot be hashed is not cached; the numbers still show.
         logger.warning("Could not fingerprint the page data", exc_info=True)
         return None
 
 
-def health_cards(
+def health_rows(
     ctx: CheckContext,
     items: Iterable[NavItem],
     headlines: Mapping[str, Headline],
-) -> tuple[HealthCard, ...]:
-    """Build a health card for each check.
+) -> tuple[HealthRow, ...]:
+    """Build a health row for each check.
 
-    Ready checks with a headline function get their headline, cached on the
-    page's data and settings. A headline that raises is reported on its card
-    and is not cached, so the next run tries again.
+    Ready checks with a headline function get their numbers, cached on the
+    page's data and settings. A headline that raises gives its row the error
+    state and is not cached, so the next run tries again; the other rows are
+    still built.
 
     Parameters
     ----------
@@ -226,45 +307,63 @@ def health_cards(
 
     Returns
     -------
-    tuple[HealthCard, ...]
-        One card per item.
+    tuple[HealthRow, ...]
+        One row per item.
     """
     fingerprint = _fingerprint_or_none(ctx)
-    cards = []
+    rows = []
     for item in items:
         headline = headlines.get(item.slug)
         if item.status is not CheckStatus.READY or headline is None:
-            cards.append(HealthCard(item))
+            rows.append(HealthRow(item))
             continue
         try:
             if fingerprint is None:
                 value = headline(ctx)
             else:
                 value = _cached((item.slug, fingerprint), lambda h=headline: h(ctx))
-        # UI boundary: one headline must not stop the grid. The error is
-        # shown on the card by render_health_grid (deferred display, see
-        # CONTRIBUTING "Error Handling Conventions").
+        # UI boundary: one check's numbers must not stop the other rows. The
+        # error is shown on the row by render_health_rows (deferred display,
+        # see CONTRIBUTING "Error Handling Conventions").
         except Exception as exc:
             logger.exception("Could not compute the headline of %r", item.slug)
-            cards.append(
-                HealthCard(item, headline_error=f"{type(exc).__name__}: {exc}")
-            )
+            rows.append(HealthRow(item, error=f"{type(exc).__name__}: {exc}"))
             continue
-        cards.append(HealthCard(item, headline=value))
-    return tuple(cards)
+        rows.append(HealthRow(item, headline=value))
+    return tuple(rows)
 
 
-def render_health_grid(
-    cards: Sequence[HealthCard], on_select: Callable[[str], None]
+def group_rows(
+    rows: Iterable[HealthRow],
+) -> tuple[tuple[str | None, tuple[HealthRow, ...]], ...]:
+    """Group rows by navigation group, each group once.
+
+    Groups come in order of their first row, as in the navigation, and rows
+    keep their order within a group, even when a group's rows are not next
+    to each other.
+    """
+    groups: dict[str | None, list[HealthRow]] = {}
+    for row in rows:
+        groups.setdefault(row.item.group, []).append(row)
+    return tuple((group, tuple(members)) for group, members in groups.items())
+
+
+# Relative widths of the Check, Status, Outstanding, Resolved and action
+# columns, shared by the header and every row so the columns line up.
+_COLUMN_WIDTHS = (2.0, 1.4, 2.6, 1.0, 1.1)
+_HEADERS = ("Check", "Status", "Outstanding", "Resolved", "")
+
+
+def render_health_rows(
+    rows: Sequence[HealthRow], on_select: Callable[[str], None]
 ) -> None:
-    """Draw the health grid: a bordered card per check, three to a row.
+    """Draw the check health list: a row per check, grouped like the navigation.
 
-    Cards share a minimum height and stretch to the tallest card in their
-    row; the full-width action button sits at the bottom of each card.
-
-    Each card shows the check's label, group, status, and its headline or
-    the reason it is not ready. "Open →" and "Set up →" call ``on_select``
-    with the check's slug.
+    One column header is shared by every group, and each row sits in its own
+    bordered container so its numbers read as one check. Each row shows the check's
+    label, status pill, outstanding number with its detail line (or the
+    reason the check is not ready, or the error), resolved count and action
+    button. "Open →" and "Set up →" call ``on_select`` with the check's slug.
     """
     import streamlit as st
 
@@ -272,41 +371,33 @@ def render_health_grid(
 
     st.divider()
     section_header("Check health", ":material/health_and_safety:")
-    st.html(_CARD_HEIGHT_CSS)
-    for start in range(0, len(cards), _CARDS_PER_ROW):
-        columns = st.columns(_CARDS_PER_ROW)
-        for offset, card in enumerate(cards[start : start + _CARDS_PER_ROW]):
-            with (
-                columns[offset],
-                st.container(
-                    border=True,
-                    height="stretch",
-                    key=f"{_CARD_KEY_PREFIX}{card.item.slug}",
-                ),
-            ):
-                _render_card(st, card, on_select)
+    for column, header in zip(st.columns(_COLUMN_WIDTHS), _HEADERS, strict=True):
+        if header:
+            column.caption(f"**{header.upper()}**")
+    for group, members in group_rows(rows):
+        if group:
+            st.caption(f"**{group}**")
+        for row in members:
+            with st.container(border=True):
+                _render_row(st, row, on_select)
 
 
-def _render_card(st, card: HealthCard, on_select: Callable[[str], None]) -> None:
-    item = card.item
-    # The content grows to fill the card, so the button sits at the bottom.
-    with st.container(height="stretch"):
-        st.markdown(f"**{item.label}**")
-        st.caption(item.group or "")
-        st.markdown(card.status_line)
-        if card.headline_error:
-            st.error(
-                f"Could not compute the headline: {card.headline_error}",
-                icon=":material/error:",
-            )
-        elif card.headline:
-            st.markdown(f"### {card.headline}")
-        elif item.reason:
-            st.caption(item.reason)
-    if card.action:
-        st.button(
-            card.action,
-            key=f"health_card_{item.slug}",
+def _render_row(st, row: HealthRow, on_select: Callable[[str], None]) -> None:
+    item = row.item
+    name, status, outstanding, resolved, action = st.columns(
+        _COLUMN_WIDTHS, vertical_alignment="center"
+    )
+    name.markdown(f"**{item.label}**")
+    pill = row.state.pill
+    status.badge(pill.label, icon=pill.icon, color=pill.colour)
+    outstanding.markdown(f"**{row.value}**")
+    if row.detail:
+        outstanding.caption(row.detail)
+    resolved.markdown(row.resolved)
+    if row.action:
+        action.button(
+            row.action,
+            key=f"health_row_{item.slug}",
             on_click=on_select,
             args=(item.slug,),
             width="stretch",

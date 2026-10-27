@@ -18,6 +18,7 @@ from datasure.checks.backchecks.attribution import (
     attribution_history,
     backcheck_key_col,
     build_attribution_entries,
+    count_error_sources,
     is_mismatch,
     load_attribution_log,
     mark_error_sources,
@@ -32,6 +33,7 @@ from datasure.checks.backchecks.compute import (
     compute_enumerator_backchecker_stats,
     compute_overall_error_rates,
     expand_col_names,
+    in_total_categories,
     load_saved_backchecks_settings,
 )
 from datasure.checks.backchecks.coverage import (
@@ -61,6 +63,7 @@ from datasure.checks.backchecks.scope import (
     scope_captions,
 )
 from datasure.checks.backchecks.settings_ui import backchecks_report_settings
+from datasure.checks.headline import CheckHeadline, settings_no_longer_fit
 from datasure.utils.dataframe_utils import (
     ColumnByType,
     TableState,
@@ -773,6 +776,58 @@ def overall_error_rate_percent(
         no values were compared, or the saved settings no longer fit the data.
     """
     try:
+        total = _total_errors(
+            project_id, page_name_id, survey_data, backcheck_data, setting_file, config
+        )
+    except ValueError:
+        logger.warning(
+            "Could not compute the backcheck error rate for page %s",
+            page_name_id,
+            exc_info=True,
+        )
+        return None
+    return None if total is None else total.error_rate
+
+
+@dataclass(frozen=True)
+class _TotalErrors:
+    """The comparisons behind the Backchecks tab's "Error Rate (Total)".
+
+    Attributes
+    ----------
+    comparisons : pl.DataFrame
+        The compared values in `TOTAL_CATEGORIES`.
+    error_rate : float
+        The total error rate, in percent.
+    survey_key : str
+        The saved Survey KEY column, which attributions are logged by.
+    """
+
+    comparisons: pl.DataFrame
+    error_rate: float
+    survey_key: str
+
+
+def _total_errors(
+    project_id: str,
+    page_name_id: str,
+    survey_data: pl.DataFrame,
+    backcheck_data: pl.DataFrame,
+    setting_file: str,
+    config: dict,
+) -> _TotalErrors | None:
+    """Compare the values the Backchecks tab compares, without rendering it.
+
+    Returns None when no backcheck columns are configured or no values were
+    compared.
+
+    Raises
+    ------
+    ValueError
+        If the saved settings no longer fit the data (see
+        `settings_no_longer_fit`).
+    """
+    try:
         settings = load_saved_backchecks_settings(
             setting_file, settings_from_page_config(config)
         )
@@ -782,15 +837,14 @@ def overall_error_rate_percent(
             comparison_scope(survey_data, backcheck_data, setting_file),
             settings,
         )
-    except (pl.exceptions.PolarsError, ValidationError, ValueError):
-        logger.warning(
-            "Could not compute the backcheck error rate for page %s",
-            page_name_id,
-            exc_info=True,
-        )
-        return None
+    except (pl.exceptions.PolarsError, ValidationError, ValueError) as exc:
+        raise settings_no_longer_fit("Backchecks", exc) from exc
     rates = compute_overall_error_rates(analysis)
-    return rates[0].error_rate if rates else None
+    if not rates or rates[0].error_rate is None:
+        return None
+    return _TotalErrors(
+        in_total_categories(analysis), rates[0].error_rate, settings.survey_key
+    )
 
 
 def backchecks_headline(
@@ -800,21 +854,47 @@ def backchecks_headline(
     backcheck_data: pl.DataFrame,
     setting_file: str,
     config: dict,
-) -> str | None:
-    """Return the backchecks headline for the Summary health grid.
+) -> CheckHeadline | None:
+    """Return the backchecks headline for Summary's check health row.
 
-    The check's total error rate, from `overall_error_rate_percent`, which
-    takes the same parameters.
+    Outstanding: the mismatches with no error source attributed. Resolved:
+    the mismatches attributed to the enumerator, backchecker or respondent.
+    Both count the mismatches behind the check's "Error Rate (Total)", which
+    the detail shows. Takes the parameters of `overall_error_rate_percent`.
+
+    The error rate is above 0 on nearly every project, so the outstanding
+    number is the unattributed mismatches rather than the rate.
 
     Returns
     -------
-    str | None
-        For example "4.25% error rate", or None when no values were compared.
+    CheckHeadline | None
+        For example 3 outstanding, "4.25% error rate", or None when no values
+        were compared.
+
+    Raises
+    ------
+    ValueError
+        If the saved settings no longer fit the data, so Summary shows the
+        row as an error with the reason.
     """
-    rate = overall_error_rate_percent(
+    total = _total_errors(
         project_id, page_name_id, survey_data, backcheck_data, setting_file, config
     )
-    return None if rate is None else f"{rate:.2f}% error rate"
+    if total is None:
+        return None
+    marked = mark_error_sources(
+        total.comparisons,
+        load_attribution_log(project_id, page_name_id),
+        total.survey_key,
+    )
+    sources = count_error_sources(marked)
+    unattributed = sources[ErrorSource.UNATTRIBUTED]
+    return CheckHeadline(
+        f"{unattributed:,}",
+        f"{total.error_rate:.2f}% error rate",
+        outstanding=unattributed,
+        resolved=sum(sources.values()) - unattributed,
+    )
 
 
 def _render_overall_error_rates(backcheck_analysis: pl.DataFrame) -> None:

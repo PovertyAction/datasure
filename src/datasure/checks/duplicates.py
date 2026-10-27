@@ -20,6 +20,7 @@ import streamlit as st
 
 from datasure.checks.backchecks.models import TAB_NAME as BACKCHECKS_TAB_NAME
 from datasure.checks.backchecks.models import backcheck_id_columns
+from datasure.checks.headline import CheckHeadline
 from datasure.checks.id_duplicates import count_resolved_ids
 from datasure.checks.id_duplicates_ui import (
     BACKCHECK_DATA,
@@ -2431,21 +2432,33 @@ def duplicates_status(
     return READY
 
 
-def duplicates_headline(data: pl.DataFrame, setting_file: str, config: dict) -> str:
-    """Return the duplicates headline for the Summary health grid.
+def duplicates_headline(
+    project_id: str,
+    data: pl.DataFrame,
+    setting_file: str,
+    config: dict,
+    alias: str | None = None,
+) -> CheckHeadline:
+    """Return the duplicates headline for Summary's check health row.
 
-    The number of unresolved duplicate survey IDs among the records the saved
-    Records to Include filter keeps: the count the check's Survey data
-    switcher shows.
+    Outstanding: the unresolved duplicate survey IDs among the records the
+    saved Records to Include filter keeps, the count the check's Survey data
+    switcher shows. Resolved: the duplicate IDs corrections have resolved,
+    the check's survey "Resolved" count.
 
     Parameters
     ----------
+    project_id : str
+        The project identifier.
     data : pl.DataFrame
-        The survey data.
+        The survey data, with corrections applied.
     setting_file : str
         Path to the page's settings file.
     config : dict
         The page configuration the check starts from.
+    alias : str | None
+        The survey dataset alias, whose uncorrected data gives the resolved
+        count. If None, the resolved count is None (shown as "—").
 
     Raises
     ------
@@ -2455,9 +2468,8 @@ def duplicates_headline(data: pl.DataFrame, setting_file: str, config: dict) -> 
     settings = load_default_duplicates_settings(
         setting_file, DuplicatesSettings(**config)
     )
-    records = filter_records_to_include(
-        data, saved_records_to_include(setting_file), "survey"
-    )
+    conditions = saved_records_to_include(setting_file)
+    records = filter_records_to_include(data, conditions, "survey")
     if records.error:
         # An invalid filter checks no records, so a count would read as zero.
         raise ValueError(
@@ -2476,4 +2488,22 @@ def duplicates_headline(data: pl.DataFrame, setting_file: str, config: dict) -> 
             display_cols_setting="id_table_display_cols",
         )
     )
-    return f"{count:,} duplicate ID{'' if count == 1 else 's'}"
+    # Without an alias there is no uncorrected data to compare with, so the
+    # resolved count is unknown rather than 0.
+    resolved = (
+        _resolved_ids(
+            CorrectionProcessor(project_id),
+            alias,
+            conditions,
+            settings.survey_id,
+            records.data,
+        )
+        if alias
+        else None
+    )
+    return CheckHeadline(
+        f"{count:,}",
+        f"duplicate ID{'' if count == 1 else 's'}",
+        outstanding=count,
+        resolved=resolved,
+    )

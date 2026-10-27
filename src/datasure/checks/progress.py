@@ -16,6 +16,7 @@ import seaborn as sns
 import streamlit as st
 from pydantic import BaseModel, Field, field_validator
 
+from datasure.checks.headline import CheckHeadline
 from datasure.utils.chart_utils import donut_chart
 from datasure.utils.dataframe_utils import ColumnByType
 from datasure.utils.navigations_utils import demo_callout
@@ -1431,11 +1432,14 @@ def progress_report(
     )
 
 
-def progress_headline(data: pl.DataFrame, setting_file: str, config: dict) -> str:
-    """Return the progress headline for the Summary health grid.
+def progress_headline(
+    data: pl.DataFrame, setting_file: str, config: dict
+) -> CheckHeadline:
+    """Return the progress headline for Summary's check health row.
 
-    The share of the target and the submissions, as the Progress Summary
-    shows them, or only the submissions when no target is set.
+    The submissions out of the target, with the share of the target as the
+    Progress Summary shows it, or only the submissions when no target is
+    set. Informational: progress is never an issue to resolve.
 
     Parameters
     ----------
@@ -1451,8 +1455,11 @@ def progress_headline(data: pl.DataFrame, setting_file: str, config: dict) -> st
     ).survey_target
     summary = compute_progress_summary(data, target)
     if not target or target <= 0:
-        return f"{summary.total_submitted:,} submitted interviews"
-    return (
-        f"{summary.percentage_completed:.2f}% of target "
-        f"({summary.total_submitted:,} of {target:,})"
+        return CheckHeadline(
+            f"{summary.total_submitted:,}", "submitted interviews", informational=True
+        )
+    return CheckHeadline(
+        f"{summary.total_submitted:,} / {target:,}",
+        f"{summary.percentage_completed:.2f}% of target",
+        informational=True,
     )

@@ -652,6 +652,19 @@ def test_compute_missing_summary_some_missing():
 
 
 @patch("datasure.checks.missing.st.cache_data", lambda f: f)
+def test_compute_missing_summary_counts_all_missing_columns():
+    """The all-missing count sits beside its percentage."""
+    missing_data = pl.DataFrame(
+        {"age": [1, 1], "gender": [0, 1], "income": [2, 1], "x": [0, 0]}
+    )
+
+    result = compute_missing_summary(missing_data)
+
+    assert (result.all_missing_count, result.column_count) == (2, 4)
+    assert result.all_missing_pct == 50.0
+
+
+@patch("datasure.checks.missing.st.cache_data", lambda f: f)
 def test_compute_missing_summary_all_missing():
     """Test compute_missing_summary with DataFrame having all missing values."""
     missing_data = pl.DataFrame(

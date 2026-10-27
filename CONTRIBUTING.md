@@ -134,8 +134,8 @@ specific exception the code can actually raise, and follow these rules:
    `st.error` itself, provided the caller always renders that data with
    `st.error` (or an error marker plus reason). Example: `guarded_status` in
    `utils/nav_ui.py` returns an error status that `render_empty_state` shows,
-   and `health_cards` in `checks/health.py` stores the error on the card that
-   `render_health_grid` shows. The handler must still call
+   and `health_rows` in `checks/health.py` stores the error on the row that
+   `render_health_rows` shows. The handler must still call
    `logger.exception(...)`, and its boundary comment must name where the
    error is displayed.
 

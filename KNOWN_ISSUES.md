@@ -69,7 +69,7 @@ To check which version you have, run `datasure --version`. Versions with `a`, `b
 - **Status:** 🟡 Planned for 1.2.0
 - **Affected versions:** 1.0.0 and later
 - **Symptom:** The Summary tab shows 0 for outlier % and back check error rate in every project, even when the Outliers and Backchecks tabs show flags. These tiles have not been built yet. A 0 here does not mean there are no problems.
-- **Workaround:** Read these figures from the Outliers and Backchecks tabs. In the next release, these tiles are replaced by the **Outliers & Constraints** and **Backchecks** cards in Summary's check health grid, which show the same figures as those checks.
+- **Workaround:** Read these figures from the Outliers and Backchecks tabs. In the next release, these tiles are replaced by the **Outliers & Constraints** and **Backchecks** rows in Summary's check health list, which show the same figures as those checks.
 - **Issue:** [#358](https://github.com/PovertyAction/datasure/issues/358)
 
 ### KI-024: Restart Demo keeps your earlier corrections and settings

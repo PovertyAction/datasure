@@ -857,33 +857,53 @@ Collection progress metrics:
 
 ##### Check Health
 
-After Progress, Summary shows a card for every other check, so you can see
-where to start triage. Each card shows:
+After Progress, Summary lists every other check in one row each, so you can see
+where to start triage. The rows are grouped like the check navigation
+(**Overview**, **Data integrity**, **Field team** and **Exploration**) under
+one shared column header, and each check sits in its own box. Each row shows:
 
-- The check's name and group
-- Its status, as text and an icon: **Ready**, **Not set up**,
-  **Not applicable** or **Error**
-- For a ready check, its headline number. For a check that is not ready, the
-  reason
+- **Check**: the check's name
+- **Status**: a coloured pill with an icon and a label, so the status does not
+  rely on colour alone
+- **Outstanding**: the issues still to deal with, with a detail line under the
+  number. For a check that is not ready, the reason instead
+- **Resolved**: the issues already resolved through corrections, acceptances
+  or error-source attributions, or "—" for checks that resolve nothing or
+  when the count can't be worked out
+- **Open →** or **Set up →**
 
-| Check | Headline |
-| --- | --- |
-| Progress | Share of the target reached, for example "62.00% of target (310 of 500)", or the submissions when no target is set |
-| Missing Values | Mean percentage of values missing, counting missing codes |
-| Duplicates | Duplicate survey IDs not yet resolved, for example "14 duplicate IDs" |
-| Outliers & Constraints | Outliers, with the share of checked values flagged, and constraint violations, leaving out accepted flags, for example "3 outliers (1.4% of values), 1 constraint violation" |
-| Enumerator Stats | Enumerators active in the past 7 days, out of all enumerators |
-| Backchecks | Total error rate |
-| Descriptive Stats, GPS Checks | Status only |
+| Status | Colour | When |
+| --- | --- | --- |
+| **Not set up** | Grey | The check needs settings first |
+| **Not applicable** | Grey | The check has nothing to work with on this page, for example GPS Checks without a GPS column |
+| **Error** | Red | The check failed, or its numbers could not be worked out, for example because its saved settings no longer fit the data. The detail line says why; the other rows still show |
+| **Flagged** | Amber | The check is ready and has more than 0 outstanding issues |
+| **No issues** | Green | The check is ready and has 0 outstanding issues. Progress, Enumerator Stats and Descriptive Stats only describe the data, so they are green when ready |
+| **Ready** | Blue | The check is ready, but Summary does not count its issues, so it makes no claim about them. Open the check to see them. GPS Checks shows this, as does Backchecks when no values were compared |
 
-Each headline is the number the check itself shows. Headlines are worked out
-again only when the data or the check's settings change, so Summary stays
-quick.
+| Check | Outstanding | Detail | Resolved |
+| --- | --- | --- | --- |
+| Progress | Submissions out of the target, for example "310 / 500", or the submissions when no target is set | Share of the target reached | — |
+| Missing Values | Share of columns where every value is missing, counting missing codes | "of columns all missing (5 of 40)" | — |
+| Duplicates | Duplicate survey IDs not yet resolved, after Records to Include | "duplicate IDs" | Duplicate IDs resolved through corrections |
+| Outliers & Constraints | Outliers plus constraint violations, leaving out accepted flags | For example "3 outliers (1.4% of values), 1 constraint violation" | Flags accepted as valid, and corrected values that were flagged before the correction and are no longer flagged, once for each check that flagged them. Correcting a value that was never flagged does not count |
+| Enumerator Stats | Enumerators active in the past 7 days, out of all enumerators | "active in the past 7 days" | — |
+| Backchecks | Mismatches with no error source attributed | The total error rate, for example "4.25% error rate" | Mismatches attributed to the enumerator, backchecker or respondent |
+| Descriptive Stats, GPS Checks | Status only | — | — |
 
-Click **Open →** on a card to go to that check, or **Set up →** to open a check
+Backchecks counts unattributed mismatches rather than the error rate because
+the error rate is above 0 on nearly every project and would keep the row amber.
+Review each mismatch on the Backchecks tab and attribute it to an error source
+to move it from Outstanding to Resolved.
+
+Each number is the number the check itself shows. The numbers are worked out
+again only when the data, the check's settings or its corrections change, so
+Summary stays quick.
+
+Click **Open →** on a row to go to that check, or **Set up →** to open a check
 that is not set up and configure it. Both update the page address, like
 choosing the check in the navigation. Checks that do not apply to your data
-have no button; their card says why.
+have no button; their row says why.
 
 ---
 

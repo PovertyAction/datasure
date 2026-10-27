@@ -2,8 +2,9 @@
 
 Each entry gives a check's slug, short label, icon, group, render function,
 status function and optional headline function, in display order. The check
-page builds its navigation and Summary's health grid from this catalogue, so
-adding an entry here is the only change needed for a new check to appear.
+page builds its navigation and Summary's check health rows from this
+catalogue, so adding an entry here is the only change needed for a new check
+to appear.
 """
 
 from collections.abc import Callable
@@ -33,7 +34,12 @@ from datasure.checks.gpschecks.report_ui import (
     gpschecks_settings_section,
     gpschecks_status,
 )
-from datasure.checks.health import health_cards, render_health_grid
+from datasure.checks.headline import CheckHeadline
+from datasure.checks.health import (
+    health_rows,
+    render_health_rows,
+    status_only_headline,
+)
 from datasure.checks.missing import missing_headline, missing_report
 from datasure.checks.outliers.report_ui import (
     outliers_headline,
@@ -100,10 +106,11 @@ class CheckEntry:
     setup : Callable[[CheckContext], None] | None
         Draws what the user needs to set the check up when it is not set up.
         Default: ``render``, for reports that start with their settings.
-    headline : Callable[[CheckContext], str | None] | None
-        The number Summary's health grid shows for the check when it is
-        ready, such as "14 duplicate IDs". It must match what the check
-        reports. None for checks with no single triage number.
+    headline : Callable[[CheckContext], CheckHeadline | None] | None
+        The numbers Summary's check health row shows for the check when it
+        is ready: the outstanding value and its detail, and the resolved
+        count. Every number must match what the check reports. None for
+        checks with no numbers, whose row shows their status only.
     settings : Callable[[CheckContext], None] | None
         Draws the check's settings section alone, under the empty state when
         the check is not applicable, so its settings stay reachable. None for
@@ -119,7 +126,7 @@ class CheckEntry:
     render: Callable[[CheckContext], None]
     status: Callable[[CheckContext], StatusResult] = lambda _ctx: READY
     setup: Callable[[CheckContext], None] | None = None
-    headline: Callable[[CheckContext], str | None] | None = None
+    headline: Callable[[CheckContext], CheckHeadline | None] | None = None
     settings: Callable[[CheckContext], None] | None = None
     setup_hint: str = SET_UP_BELOW
 
@@ -166,20 +173,20 @@ def _render_summary(ctx: CheckContext) -> None:
 
 @demo_output_onboarding("summary")
 def summary_check_health(ctx: CheckContext) -> None:
-    """Draw a health card for every check but Summary, under its sections.
+    """Draw a check health row for every check but Summary, under its sections.
 
-    Replaces Summary's former Data Quality section: each card's headline
-    comes from its check, with that check's settings and corrections.
+    Replaces Summary's former Data Quality section: each row's numbers come
+    from its check, with that check's settings and corrections.
     """
     nav_key = check_nav_key(ctx.project_id, ctx.config.page_name_id)
     items = with_errors(nav_items(ctx), render_errors(nav_key))
     entries = {entry.slug: entry for entry in CHECK_CATALOGUE}
-    cards = health_cards(
+    rows = health_rows(
         ctx,
         [item for item in items if item.slug != "summary"],
         {slug: entry.headline for slug, entry in entries.items() if entry.headline},
     )
-    render_health_grid(cards, on_select=partial(select_nav_item, nav_key, CHECK_PARAM))
+    render_health_rows(rows, on_select=partial(select_nav_item, nav_key, CHECK_PARAM))
     demo_callout(
         "**Next**: :material/arrow_upward: Scroll up and select **Overview → Progress**."
     )
@@ -416,23 +423,28 @@ def _backchecks_status(ctx: CheckContext) -> StatusResult:
 
 
 # Headline adapters also look the module-level functions up on each call.
-def _progress_headline(ctx: CheckContext) -> str | None:
+def _progress_headline(ctx: CheckContext) -> CheckHeadline | None:
     return progress_headline(
         ctx.data.page_data, ctx.config.setting_file, _progress_config(ctx)
     )
 
 
-def _missing_headline(ctx: CheckContext) -> str | None:
+def _missing_headline(ctx: CheckContext) -> CheckHeadline | None:
     return missing_headline(ctx.project_id, ctx.data.page_data)
 
 
-def _duplicates_headline(ctx: CheckContext) -> str | None:
+def _duplicates_headline(ctx: CheckContext) -> CheckHeadline | None:
+    config = ctx.config
     return duplicates_headline(
-        ctx.data.page_data, ctx.config.setting_file, _duplicates_config(ctx)
+        ctx.project_id,
+        ctx.data.page_data,
+        config.setting_file,
+        _duplicates_config(ctx),
+        alias=config.survey_data_name,
     )
 
 
-def _outliers_headline(ctx: CheckContext) -> str | None:
+def _outliers_headline(ctx: CheckContext) -> CheckHeadline | None:
     config = ctx.config
     return outliers_headline(
         ctx.project_id,
@@ -445,7 +457,7 @@ def _outliers_headline(ctx: CheckContext) -> str | None:
     )
 
 
-def _enumerator_headline(ctx: CheckContext) -> str | None:
+def _enumerator_headline(ctx: CheckContext) -> CheckHeadline | None:
     return enumerator_headline(
         ctx.project_id,
         ctx.data.page_data,
@@ -454,7 +466,7 @@ def _enumerator_headline(ctx: CheckContext) -> str | None:
     )
 
 
-def _backchecks_headline(ctx: CheckContext) -> str | None:
+def _backchecks_headline(ctx: CheckContext) -> CheckHeadline | None:
     # Only called when the status is ready, so the backcheck data has rows.
     return backchecks_headline(
         ctx.project_id,
@@ -550,6 +562,7 @@ CHECK_CATALOGUE: tuple[CheckEntry, ...] = (
         EXPLORATION,
         _render_descriptive,
         _survey_rows_status,
+        headline=status_only_headline,
     ),
 )
 

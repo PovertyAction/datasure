@@ -10,6 +10,7 @@ import polars as pl
 import streamlit as st
 from pydantic import BaseModel, ValidationError
 
+from datasure.checks.headline import CheckHeadline, settings_no_longer_fit
 from datasure.checks.outliers.compute import (
     _build_include_cols,
     _compute_constraint_metrics,
@@ -48,7 +49,10 @@ from datasure.checks.outliers.review import (
     TableFilters,
     allowed_actions,
     clear_reviewed_flags,
+    count_resolved_flags,
     filter_table,
+    flagged_cells,
+    has_corrected_cells,
     highlight_reviewed_row,
     join_survey_columns,
     key_has_conflicting_values,
@@ -1455,10 +1459,17 @@ def _review_context(
 
 @dataclass(frozen=True)
 class _ReviewedFlags:
-    """Outlier and constraint results with accepted flags cleared."""
+    """Outlier and constraint results with accepted flags cleared.
+
+    `flagged_before_correction` holds the (KEY, column) cells each check
+    flags in the uncorrected data, by check type, so only corrections of
+    flagged values count as resolved.
+    """
 
     outliers: pl.DataFrame
     violations: pl.DataFrame
+    survey_key: str
+    flagged_before_correction: dict[str, set[tuple]]
 
 
 def _reviewed_flags(
@@ -1470,11 +1481,18 @@ def _reviewed_flags(
     config: dict,
     alias: str | None,
 ) -> _ReviewedFlags | None:
-    """Compute the check's results without rendering it, for the health grid.
+    """Compute the check's results without rendering it, for the health rows.
 
     Uses the saved settings and outlier columns, and clears accepted flags,
-    as the Outliers tab does. None when no outlier columns are configured or
-    the saved settings no longer fit the data.
+    as the Outliers tab does. When values were corrected, the checks also
+    run on the uncorrected data to find which corrected values were
+    flagged. None when no outlier columns are configured.
+
+    Raises
+    ------
+    ValueError
+        If the saved settings no longer fit the data (see
+        `settings_no_longer_fit`).
     """
     column_config = _load_outlier_settings(project_id, page_name_id)
     if column_config.is_empty():
@@ -1492,13 +1510,8 @@ def _reviewed_flags(
         violations = compute_constraint_violations(
             data, settings, column_config, missing_codes=missing_codes
         )
-    except (pl.exceptions.PolarsError, ValidationError, ValueError):
-        logger.warning(
-            "Could not compute the outlier results for page %s",
-            page_name_id,
-            exc_info=True,
-        )
-        return None
+    except (pl.exceptions.PolarsError, ValidationError, ValueError) as exc:
+        raise settings_no_longer_fit("Outliers", exc) from exc
     review = _review_context(project_id, alias, settings.survey_key)
     outlier_data = clear_reviewed_flags(
         _with_review_status(outlier_data, settings, OUTLIERS, review), OUTLIERS
@@ -1508,7 +1521,41 @@ def _reviewed_flags(
             _with_review_status(violations, settings, CONSTRAINTS, review),
             CONSTRAINTS,
         )
-    return _ReviewedFlags(outlier_data, violations)
+    flagged_before: dict[str, set[tuple]] = {}
+    uncorrected = (
+        review.processor.get_uncorrected_data(review.alias)
+        if review is not None
+        and has_corrected_cells([(outlier_data, OUTLIERS), (violations, CONSTRAINTS)])
+        else pl.DataFrame()
+    )
+    if uncorrected.width > 0:
+        try:
+            flagged_before = flagged_cells(
+                [
+                    (
+                        compute_outlier_output(
+                            uncorrected,
+                            settings,
+                            column_config,
+                            missing_codes=missing_codes,
+                        ),
+                        OUTLIERS,
+                    ),
+                    (
+                        compute_constraint_violations(
+                            uncorrected,
+                            settings,
+                            column_config,
+                            missing_codes=missing_codes,
+                        ),
+                        CONSTRAINTS,
+                    ),
+                ],
+                settings.survey_key,
+            )
+        except (pl.exceptions.PolarsError, ValueError) as exc:
+            raise settings_no_longer_fit("Outliers", exc) from exc
+    return _ReviewedFlags(outlier_data, violations, settings.survey_key, flagged_before)
 
 
 def _plural(count: int, noun: str) -> str:
@@ -1523,12 +1570,13 @@ def outliers_headline(
     setting_file: str,
     config: dict,
     alias: str | None,
-) -> str | None:
-    """Return the outliers headline for the Summary health grid.
+) -> CheckHeadline | None:
+    """Return the outliers headline for Summary's check health row.
 
-    The check's "Total Outliers", with the share of checked values flagged,
-    and "Total Violations", leaving out accepted flags. Computed without
-    rendering the tab.
+    Outstanding: the check's "Total Outliers" plus "Total Violations",
+    leaving out accepted flags, with each total and the share of checked
+    values flagged in the detail. Resolved: the flags accepted or corrected
+    (see `count_resolved_flags`). Computed without rendering the tab.
 
     Parameters
     ----------
@@ -1550,11 +1598,16 @@ def outliers_headline(
 
     Returns
     -------
-    str | None
-        For example "3 outliers (1.4% of values), 1 constraint violation".
-        The share is left out when no values were checked. None when no
-        outlier columns are configured or the saved settings no longer fit
-        the data.
+    CheckHeadline | None
+        For example 4 outstanding, "3 outliers (1.4% of values), 1
+        constraint violation". The share is left out when no values were
+        checked. None when no outlier columns are configured.
+
+    Raises
+    ------
+    ValueError
+        If the saved settings no longer fit the data, so Summary shows the
+        row as an error with the reason.
     """
     flags = _reviewed_flags(
         project_id, page_name_id, data, survey_columns, setting_file, config, alias
@@ -1573,9 +1626,16 @@ def outliers_headline(
     )
     percent = flagged_value_percent(flags.outliers)
     rate = "" if percent is None else f" ({percent:.1f}% of values)"
-    return (
+    return CheckHeadline(
+        f"{outliers + violations:,}",
         f"{_plural(outliers, 'outlier')}{rate}, "
-        f"{_plural(violations, 'constraint violation')}"
+        f"{_plural(violations, 'constraint violation')}",
+        outstanding=outliers + violations,
+        resolved=count_resolved_flags(
+            [(flags.outliers, OUTLIERS), (flags.violations, CONSTRAINTS)],
+            flags.survey_key,
+            flags.flagged_before_correction,
+        ),
     )
 
 

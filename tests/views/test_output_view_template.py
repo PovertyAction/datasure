@@ -10,6 +10,7 @@ import pytest
 
 from datasure.checks import catalogue
 from datasure.checks.catalogue import CheckEntry
+from datasure.checks.headline import CheckHeadline
 from datasure.utils import nav_ui
 from datasure.utils.dataframe_utils import TableState
 from datasure.utils.duckdb_utils import duckdb_save_table
@@ -184,14 +185,24 @@ SETTINGS_SECTIONS = (
     "backchecks_settings_section",
 )
 
-# Headlines the mocked checks report on their Summary health cards.
+# Headlines the mocked checks report on their Summary check health rows.
 HEADLINES = {
-    "progress_headline": "2 submitted interviews",
-    "missing_headline": "0.00% of values missing",
-    "duplicates_headline": "0 duplicate IDs",
-    "outliers_headline": "1 outlier, 0 constraint violations",
-    "enumerator_headline": "1 of 1 enumerators active in the past 7 days",
-    "backchecks_headline": "4.25% error rate",
+    "progress_headline": CheckHeadline("2", "submitted interviews", informational=True),
+    "missing_headline": CheckHeadline(
+        "0.00%", "of columns all missing (0 of 2)", outstanding=0
+    ),
+    "duplicates_headline": CheckHeadline(
+        "0", "duplicate IDs", outstanding=0, resolved=6
+    ),
+    "outliers_headline": CheckHeadline(
+        "1", "1 outlier, 0 constraint violations", outstanding=1, resolved=0
+    ),
+    "enumerator_headline": CheckHeadline(
+        "1 / 1", "active in the past 7 days", informational=True
+    ),
+    "backchecks_headline": CheckHeadline(
+        "3", "4.25% error rate", outstanding=3, resolved=2
+    ),
 }
 
 
@@ -235,6 +246,10 @@ class CheckPage:
         self.st = MagicMock()
         self.st.session_state = {"st_config_checks_page": "config_page"}
         self.st.query_params = {} if url is None else {"check": url}
+        # Columns draw through st itself, so calls stay in drawing order.
+        self.st.columns.side_effect = lambda spec, **_: (
+            [self.st] * (spec if isinstance(spec, int) else len(spec))
+        )
         self.tmp_path = tmp_path
         self.config = _config(tmp_path, **config)
         self.reports = {name: MagicMock(name=name) for name in REPORTS}
@@ -288,41 +303,54 @@ class CheckPage:
     def messages(self, kind: str) -> str:
         return "\n".join(str(c.args[0]) for c in getattr(self.st, kind).call_args_list)
 
-    def cards(self) -> dict[str, str]:
-        """The Summary health cards: each card's text by its check label.
+    def rows(self) -> dict[str, list[str]]:
+        """The Summary check health rows: each row's texts by its check label.
 
-        A card starts with its bold label; the text up to the next card's
-        label belongs to it.
+        A row starts with its label, the markdown drawn just before its
+        status pill; the pill, value, detail and resolved count follow, up to
+        the next row's label. Group and column headings (bold captions) are
+        left out.
         """
-        cards: dict[str, list[str]] = {}
-        texts = [
-            str(c.args[0])
+        calls = [
+            (c[0], str(c.args[0]))
             for c in self.st.method_calls
-            if c[0] in {"markdown", "caption", "error"} and c.args
+            if c[0] in {"markdown", "caption", "badge"} and c.args
         ]
+        rows: dict[str, list[str]] = {}
         current = None
-        for text in texts:
-            if text.startswith("**") and text.endswith("**"):
+        for (name, text), (next_name, _) in zip(
+            calls, [*calls[1:], ("", "")], strict=True
+        ):
+            if name == "markdown" and next_name == "badge":
                 current = text.strip("*")
-                cards[current] = []
-            elif current is not None:
-                cards[current].append(text)
-        return {label: "\n".join(lines) for label, lines in cards.items()}
+                rows[current] = []
+            elif current is not None and not (
+                name == "caption" and text.startswith("**")
+            ):
+                rows[current].append(text)
+        return rows
 
-    def card_buttons(self) -> dict[str, str]:
-        """The health card buttons: label by check slug."""
+    def pills(self) -> list[tuple[str, str, str]]:
+        """Each row's status pill (colour, icon, label), in row order."""
+        return [
+            (c.kwargs["color"], c.kwargs["icon"], c.args[0])
+            for c in self.st.badge.call_args_list
+        ]
+
+    def row_buttons(self) -> dict[str, str]:
+        """The health row buttons: label by check slug."""
         return {
             c.kwargs["args"][0]: c.args[0]
             for c in self.st.button.call_args_list
-            if c.kwargs.get("key", "").startswith("health_card_")
+            if c.kwargs.get("key", "").startswith("health_row_")
         }
 
-    def click_card(self, slug: str) -> None:
-        """Click a health card's button."""
+    def click_row(self, slug: str) -> None:
+        """Click a health row's button."""
         call = next(
             c
             for c in self.st.button.call_args_list
-            if c.kwargs.get("key") == f"health_card_{slug}"
+            if c.kwargs.get("key") == f"health_row_{slug}"
         )
         with self.monkeypatch.context() as m:
             m.setitem(sys.modules, "streamlit", self.st)
@@ -340,8 +368,10 @@ def page(monkeypatch, tmp_path):
 SURVEY = template.CheckData(page_data=_rows(2), backcheck_data=_rows(1))
 
 
-class TestSummaryHealthGrid:
-    """Summary shows a health card per check, with a button to open it."""
+class TestSummaryHealthRows:
+    """Summary shows a check health row per check, with a button to open it."""
+
+    GROUPS = ("Overview", "Data integrity", "Field team", "Exploration")
 
     @pytest.fixture(autouse=True)
     def _fresh_headlines(self):
@@ -351,64 +381,119 @@ class TestSummaryHealthGrid:
         yield
         clear_headline_cache()
 
-    def test_a_card_for_every_check_except_summary(self, page):
+    def test_a_row_for_every_check_except_summary(self, page):
         check_page = page()
 
         check_page.render(SURVEY)
 
-        assert list(check_page.cards()) == [
+        assert list(check_page.rows()) == [
             entry.label
             for entry in catalogue.CHECK_CATALOGUE
             if entry.slug != "summary"
         ]
 
-    def test_ready_cards_show_their_status_and_headline(self, page):
+    def test_rows_are_grouped_under_the_navigation_groups(self, page):
         check_page = page()
 
         check_page.render(SURVEY)
 
-        cards = check_page.cards()
-        assert ":material/check_circle: Ready" in cards["Duplicates"]
-        assert "0 duplicate IDs" in cards["Duplicates"]
-        assert "4.25% error rate" in cards["Backchecks"]
-        assert "2 submitted interviews" in cards["Progress"]
-        assert check_page.card_buttons()["duplicates"] == "Open →"
+        headings = {f"**{group}**" for group in self.GROUPS}
+        shown = [
+            str(c.args[0])
+            for c in check_page.st.caption.call_args_list
+            if str(c.args[0]) in headings
+        ]
+        assert shown == [f"**{group}**" for group in self.GROUPS]
+
+    def test_ready_rows_show_their_numbers(self, page):
+        check_page = page()
+
+        check_page.render(SURVEY)
+
+        rows = check_page.rows()
+        assert rows["Duplicates"] == ["No issues", "**0**", "duplicate IDs", "6"]
+        assert rows["Backchecks"] == ["Flagged", "**3**", "4.25% error rate", "2"]
+        assert rows["Progress"] == [
+            "No issues",
+            "**2**",
+            "submitted interviews",
+            "—",
+        ]
+        assert check_page.row_buttons()["duplicates"] == "Open →"
+
+    def test_status_pills_have_a_colour_icon_and_label(self, page):
+        check_page = page()
+
+        check_page.render(SURVEY)
+
+        pills = dict(zip(check_page.rows(), check_page.pills(), strict=True))
+        assert pills["Backchecks"] == ("orange", ":material/warning:", "Flagged")
+        assert pills["Duplicates"] == (
+            "green",
+            ":material/check_circle:",
+            "No issues",
+        )
+        assert pills["GPS Checks"] == (
+            "gray",
+            ":material/do_not_disturb_on:",
+            "Not applicable",
+        )
+        assert pills["Outliers & Constraints"] == (
+            "gray",
+            ":material/build:",
+            "Not set up",
+        )
 
     def test_descriptive_stats_shows_status_only(self, page):
         check_page = page()
 
         check_page.render(SURVEY)
 
-        card = check_page.cards()["Descriptive Stats"]
-        assert card.splitlines() == [
-            "Exploration",
-            ":green[:material/check_circle: Ready]",
+        assert check_page.rows()["Descriptive Stats"] == [
+            "No issues",
+            "**—**",
+            "Status only",
+            "—",
         ]
 
-    def test_not_ready_cards_show_their_status_and_reason(self, page):
+    def test_not_ready_rows_show_their_status_and_reason(self, page):
         check_page = page()
 
         check_page.render(SURVEY)
 
-        cards, buttons = check_page.cards(), check_page.card_buttons()
-        assert ":material/do_not_disturb_on: Not applicable" in cards["GPS Checks"]
-        assert "No GPS column found in this dataset." in cards["GPS Checks"]
+        rows, buttons = check_page.rows(), check_page.row_buttons()
+        assert "No GPS column found in this dataset." in rows["GPS Checks"]
         assert "gps" not in buttons
-        assert ":material/build: Not set up" in cards["Outliers & Constraints"]
-        assert "No outlier or constraint columns" in cards["Outliers & Constraints"]
+        assert any(
+            "No outlier or constraint columns" in text
+            for text in rows["Outliers & Constraints"]
+        )
         assert buttons["outliers"] == "Set up →"
         # Not-ready checks do not compute a headline.
         check_page.headlines["outliers_headline"].assert_not_called()
+
+    def test_a_number_that_fails_shows_a_red_row_and_the_others_render(self, page):
+        check_page = page()
+        check_page.headlines["duplicates_headline"].side_effect = ValueError("boom")
+
+        check_page.render(SURVEY)
+
+        rows = check_page.rows()
+        pills = dict(zip(rows, check_page.pills(), strict=True))
+        assert pills["Duplicates"] == ("red", ":material/error:", "Error")
+        assert any("ValueError: boom" in text for text in rows["Duplicates"])
+        assert pills["Backchecks"][2] == "Flagged"
+        assert rows["Backchecks"][1] == "**3**"
 
     @pytest.mark.parametrize(
         ("slug", "report"),
         [("duplicates", "duplicates_report"), ("outliers", "outliers_report")],
     )
-    def test_card_buttons_select_the_check(self, page, slug, report):
+    def test_row_buttons_select_the_check(self, page, slug, report):
         check_page = page()
         check_page.render(SURVEY)
 
-        check_page.click_card(slug)
+        check_page.click_row(slug)
 
         assert check_page.render(SURVEY) == [report]
         assert check_page.st.query_params == {"check": slug}

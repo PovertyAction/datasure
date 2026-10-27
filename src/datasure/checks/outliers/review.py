@@ -15,7 +15,7 @@ flagged stays visible and counted: it still needs attention.
 Kept free of Streamlit so the logic can be tested without a running app.
 """
 
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any
 
@@ -210,6 +210,80 @@ def clear_reviewed_flags(flags: pl.DataFrame, check: FlagCheck) -> pl.DataFrame:
         .then(pl.lit(check.no_flag))
         .otherwise(pl.col(check.reason_col))
         .alias(check.reason_col)
+    )
+
+
+def _cells_where(flags: pl.DataFrame, survey_key: str, rows: pl.Expr) -> set[tuple]:
+    """Return the (KEY, column) cells of the rows of `flags` matching `rows`."""
+    selected = flags.filter(rows).select(
+        pl.col(survey_key).cast(pl.String), pl.col(COLUMN_NAME_COL).cast(pl.String)
+    )
+    return set(selected.iter_rows())
+
+
+def has_corrected_cells(results: Sequence[tuple[pl.DataFrame, FlagCheck]]) -> bool:
+    """Whether any results marked by `mark_reviewed` hold a corrected cell."""
+    return any(
+        REVIEW_STATUS_COL in flags.columns
+        and (flags[REVIEW_STATUS_COL] == CORRECTED_BADGE).any()
+        for flags, _ in results
+    )
+
+
+def flagged_cells(
+    results: Sequence[tuple[pl.DataFrame, FlagCheck]], survey_key: str
+) -> dict[str, set[tuple]]:
+    """Return the (KEY, column) cells each check flags, by check type."""
+    return {
+        check.check_type: set()
+        if flags.is_empty()
+        else _cells_where(flags, survey_key, _is_flagged(check))
+        for flags, check in results
+    }
+
+
+def count_resolved_flags(
+    results: Sequence[tuple[pl.DataFrame, FlagCheck]],
+    survey_key: str,
+    flagged_before_correction: Mapping[str, set[tuple]],
+) -> int:
+    """Count the flags resolved by an acceptance or a correction.
+
+    Resolved flags are counted in the same unit as outstanding ones: one
+    per check that flags a cell. Each accepted flag counts, so a cell
+    accepted as both an outlier and a constraint violation counts twice. A
+    corrected cell no check flags any more counts once for each check that
+    flagged its uncorrected value, so correcting that same cell also counts
+    twice. A corrected value that is still flagged still needs attention,
+    and correcting a value that was never flagged resolves nothing.
+
+    Parameters
+    ----------
+    results : Sequence[tuple[pl.DataFrame, FlagCheck]]
+        Each check's results marked by `mark_reviewed`, before or after
+        `clear_reviewed_flags`, with the check that produced them. Results
+        without review columns resolve nothing.
+    survey_key : str
+        The Survey KEY column in the results.
+    flagged_before_correction : Mapping[str, set[tuple]]
+        The (KEY, column) cells each check flags in the uncorrected data, by
+        check type, as returned by `flagged_cells`.
+    """
+    accepted = 0
+    corrected: set[tuple] = set()
+    still_flagged: set[tuple] = set()
+    for flags, check in results:
+        if flags.is_empty() or REVIEW_STATUS_COL not in flags.columns:
+            continue
+        status = pl.col(REVIEW_STATUS_COL).fill_null("")
+        accepted += flags.filter(status == REVIEWED_BADGE).height
+        corrected |= _cells_where(flags, survey_key, status == CORRECTED_BADGE)
+        still_flagged |= _cells_where(
+            flags, survey_key, _is_flagged(check) & (status != REVIEWED_BADGE)
+        )
+    resolved_cells = corrected - still_flagged
+    return accepted + sum(
+        len(resolved_cells & cells) for cells in flagged_before_correction.values()
     )
 
 
