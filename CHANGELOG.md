@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Record project activation**: opening a project from the home page
+  (`start_view._activate_project`) now stamps `last_used` in
+  `cache/projects.json` via `_record_last_used`. The "Last used" caption
+  and sort reflect when a project was last opened, not only when it was
+  created, and tools that manage the cache (such as a hosted deployment's
+  per-project write lock) can tell which project is open. A registry that
+  can't be written is logged and doesn't block opening the project
 - **Prep concat** (#388): Add Column has a `concat` method
   (`PrepFunctions.concat`) that joins two or more text columns in selection
   order with a separator stored in the step's `value` (`""`, `" "`, `","`,

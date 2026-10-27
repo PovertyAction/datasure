@@ -444,7 +444,8 @@ Per project (UUID-keyed):
   codes `missing_codes_{project_id}`), JSON settings (including
   each check page's, Prepare Data's and Corrections'
   [view state](#view-state)), and credential metadata
-- `cache/projects.json` — the project registry
+- `cache/projects.json` — the project registry: `name`, `created_at`, and
+  `last_used` (updated whenever a project is opened from the home page)
 - `cache/user_settings.json` — per-user preferences, currently the
   "Reviewer name" recorded as `user` in correction logs
   (`utils/reviewer.py`). Display names only, never credentials.

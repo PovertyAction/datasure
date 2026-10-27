@@ -177,9 +177,28 @@ def delete_project(project_id: str):
         st.error(f"Project '{project_id}' does not exist.")
 
 
+def _record_last_used(project_id: str) -> None:
+    """Stamp ``last_used`` on a project in the registry.
+
+    Keeps the home page's "Last used" caption and sort truthful, and gives
+    tools that manage the cache (e.g. a hosted deployment's per-project write
+    lock) an on-disk signal of which project was opened. A registry that
+    can't be written is logged, never fatal: opening the project matters more.
+    """
+    try:
+        projects = load_projects()
+        if project_id not in projects:
+            return
+        projects[project_id]["last_used"] = _now_str()
+        _save_projects(projects)
+    except (OSError, ValueError):
+        logger.warning("Could not record last_used for project %s", project_id)
+
+
 def _activate_project(project_id: str) -> None:
     """Set the active project and jump to the Import Data page."""
     st.session_state.st_project_id = project_id
+    _record_last_used(project_id)
     ConfigurationService(project_id).sync_output_view_files()
     st.switch_page(st.session_state.st_import_data_page)
 

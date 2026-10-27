@@ -314,6 +314,50 @@ class TestActivateProject:
         mock_switch_page.assert_called_once_with("import_page")
 
 
+class TestRecordLastUsed:
+    """Test that opening a project stamps last_used in the registry."""
+
+    def _open(self, monkeypatch, project_id):
+        monkeypatch.setitem(_st.session_state, "st_import_data_page", "import_page")
+        monkeypatch.setattr(_st, "switch_page", MagicMock())
+        with patch("datasure.views.start_view.ConfigurationService"):
+            start_view._activate_project(project_id)
+
+    def test_activation_updates_last_used(self, tmp_path, monkeypatch):
+        (tmp_path / "projects.json").write_text(
+            json.dumps(
+                {
+                    "abcd1234": {
+                        "name": "P",
+                        "created_at": "2025-01-01 00:00:00",
+                        "last_used": "2025-01-01 00:00:00",
+                    }
+                }
+            )
+        )
+        self._open(monkeypatch, "abcd1234")
+        entry = json.loads((tmp_path / "projects.json").read_text())["abcd1234"]
+        assert entry["last_used"] > "2025-01-01 00:00:00"
+        assert entry["created_at"] == "2025-01-01 00:00:00"
+        datetime.strptime(entry["last_used"], "%Y-%m-%d %H:%M:%S")
+
+    def test_unknown_project_leaves_registry_untouched(self, tmp_path, monkeypatch):
+        registry = {"abcd1234": {"name": "P", "last_used": "2025-01-01 00:00:00"}}
+        (tmp_path / "projects.json").write_text(json.dumps(registry))
+        self._open(monkeypatch, "zzzz9999")
+        assert json.loads((tmp_path / "projects.json").read_text()) == registry
+
+    def test_unwritable_registry_still_opens_project(self, monkeypatch):
+        monkeypatch.setattr(
+            start_view, "load_projects", MagicMock(return_value={"abcd1234": {}})
+        )
+        monkeypatch.setattr(
+            start_view, "_save_projects", MagicMock(side_effect=OSError("read-only"))
+        )
+        self._open(monkeypatch, "abcd1234")
+        assert _st.session_state["st_project_id"] == "abcd1234"
+
+
 class TestCreateAndLoadProject:
     """Test _create_and_load_project."""
 
