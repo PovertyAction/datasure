@@ -454,11 +454,12 @@ alone cannot detect.
 
 ```bash
 # Install the pre-release from Test PyPI
-# Dependencies are resolved from PyPI; the datasure package itself comes
-# from Test PyPI.
+# Only the datasure package comes from Test PyPI (via --find-links);
+# dependencies are resolved from PyPI. Do not add Test PyPI with --index:
+# uv's default first-index strategy would then take any dependency that
+# also exists on Test PyPI from there.
 uv tool install "datasure==X.Y.ZrcN" \
-    --index https://test.pypi.org/simple/ \
-    --index https://pypi.org/simple/
+    --find-links https://test.pypi.org/simple/datasure/
 
 # Verify the entry point and version
 datasure --version

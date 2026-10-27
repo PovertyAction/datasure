@@ -43,9 +43,11 @@ with the version you were asked to test, for example `1.2.0rc1`:
 
 ```bash
 uv tool install "datasure==X.Y.ZrcN" --force \
-    --index https://test.pypi.org/simple/ \
-    --index https://pypi.org/simple/
+    --find-links https://test.pypi.org/simple/datasure/
 ```
+
+This takes only DataSure itself from Test PyPI. Every other package comes
+from PyPI, because anyone can upload a package to Test PyPI.
 
 Then check the version:
 
@@ -55,9 +57,18 @@ datasure --version
 
 It should print the release candidate's version.
 
-To go back to the stable version, close DataSure, run
-`uv tool install datasure --force`, and copy your backed-up cache folder back
-in place of the current one.
+To go back to the stable version, close DataSure, reinstall the stable
+version, and copy your backed-up cache folder back in place of the current
+one. While 1.1.0 is the stable version, a plain reinstall crashes or
+disconnects ([KI-012](../../KNOWN_ISSUES.md#ki-012-fresh-installs-crash-on-the-prep-page-and-several-check-pages)),
+so reinstall it with this command:
+
+```bash
+uv tool install datasure==1.1.0 --force --with "polars<2" --with "starlette<1.8"
+```
+
+Once a newer stable version is out, `uv tool install datasure --force` is
+enough.
 
 ### Before reporting a problem
 
