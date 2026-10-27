@@ -140,7 +140,7 @@ def duckdb_save_table(
             conn.execute(
                 "SELECT COUNT(*) FROM information_schema.tables WHERE table_name = ?",
                 [table_id],
-            ).fetchone()[0]
+            ).fetchall()[0][0]
             > 0
         )
         if table_exists:
@@ -181,14 +181,15 @@ def duckdb_get_table(
             conn.execute(
                 "SELECT COUNT(*) FROM information_schema.tables WHERE table_name = ?",
                 [table_id],
-            ).fetchone()[0]
+            ).fetchall()[0][0]
             > 0
         )
         if table_exists:
             if type == "pd":
                 return conn.execute(f"SELECT * FROM {table_id}").fetchdf()
             else:
-                return conn.execute(f"SELECT * FROM {table_id}").pl()
+                # Relation .pl(): DuckDB 2.0 dropped .pl() on execute() results.
+                return conn.sql(f"SELECT * FROM {table_id}").pl()
         else:
             if type == "pd":
                 return pd.DataFrame()
@@ -217,7 +218,7 @@ def duckdb_remove_table(project_id: str, alias: str, db_name: str) -> None:
             conn.execute(
                 "SELECT COUNT(*) FROM information_schema.tables WHERE table_name = ?",
                 [table_id],
-            ).fetchone()[0]
+            ).fetchall()[0][0]
             > 0
         )
         if table_exists:
@@ -371,7 +372,7 @@ def duckdb_table_exists(project_id: str, alias: str, db_name: str) -> bool:
             conn.execute(
                 "SELECT COUNT(*) FROM information_schema.tables WHERE table_name = ?",
                 [table_id],
-            ).fetchone()[0]
+            ).fetchall()[0][0]
             > 0
         )
         return table_exists

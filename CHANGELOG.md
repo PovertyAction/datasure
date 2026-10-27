@@ -56,6 +56,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Dependencies** (#393): `duckdb>=1.3.1,<3` (was `>=1.3.1`), lock moved from
+  1.5.5 to 2.0.0; duckdb 3 is excluded until tested. `uv lock --upgrade` also
+  moves plotly to 7.1.0, pyarrow to 26.0.0, starlette to 1.9.0 and
+  jupyterlab to 4.6.4 (security fixes), folding in Dependabot #371.
+  `astral-sh/setup-uv` 10.1.0 → 10.3.0 in `coverage.yml` and `release.yml`
+  (#381); `uv_build>=0.7.19,<0.14.0` (#382)
 - **Check table names in one place**: `CHECK_TABLE_PREFIXES`, one constant
   per prefix, `check_table_name()` and `missing_codes_table_name()` live in
   `utils/duckdb_utils.py`, and every check module and the export registry
@@ -80,6 +86,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **DuckDB 2.0 compatibility** (#393): Fresh installs that resolved duckdb
+  2.0 failed on the first table read or write, so data could not be imported
+  - Root cause: duckdb 2.0 removed `.pl()` from `execute()` results and
+    raises `ResourceInUseException` when a connection is reused while an
+    `execute()` result is unfinished; the table-exists checks read it with
+    `fetchone()`
+  - Solution: `duckdb_get_table` reads Polars data through the relation API
+    (`conn.sql(...).pl()`), and every table-exists check uses `fetchall()`.
+    Both work on duckdb 1.x
+  - Files: `src/datasure/utils/duckdb_utils.py`
 - **Missing codes counted as values** (#379): The codes set on the Missing
   Values tab (for example `-99` for Don't know) entered the mean, the minimum
   and the outlier bounds in Outliers, Descriptive Statistics and Enumerator
