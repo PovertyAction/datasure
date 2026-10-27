@@ -18,29 +18,67 @@ This document tracks user-facing changes and improvements to help data managers,
 
 ---
 
-## Unreleased
+## Version 1.2.0 — Review and Correct Where You Find the Problem
+
+Released: October 2026
+
+This release lets you deal with a problem on the check page that found it. You can correct or accept flagged outliers, constraint violations and GPS points, resolve duplicate IDs on side-by-side cards, and attribute back check mismatches to whoever caused them. Every decision goes into one correction log that records who made it and where. Summary now shows each check's outstanding and resolved issues and how they changed since yesterday. Back checks gain coverage targets and adjusted error rates. Check pages are quicker to move around and remember your filters.
 
 ### New Features
 
-#### Resolve duplicate and unmatched IDs from the Duplicates tab
+#### Correct or accept flagged values from the Outliers & Constraints tab
 
-Each duplicate ID card now lets you decide, for every record, whether to keep it, give it a new ID or drop it, and save the whole card in one step with a reason and a note. Save stays disabled, with a message saying what's missing, until at most one record keeps the ID and every new ID is valid, so a card can't be half fixed. Unmatched back check cards let you fix the mistyped ID or drop the back check. Every change is logged on the Correct Data page, where you can undo it. The **Resolved** metric now counts the duplicate IDs your corrections have resolved.
+Each row of the constraint violations and outlier tables has a **Review** button. It opens a form with the record and value filled in, where you can change the value, blank it, or **accept** it as correct with a reason. Accepted flags are hidden and no longer counted. Turn on **Show reviewed** to see them, and the values you corrected, highlighted in green with the reason. **Show only flagged values** (on by default) and **Show only reviewed** narrow the tables further. Accepting a value past a hard limit asks you to confirm first. An acceptance lapses, and the value is flagged again, if the value changes.
+
+#### Correct or accept GPS outliers
+
+Each GPS outlier also has a **Review** button. You can enter new coordinates, clear the coordinates, remove the record, or accept the location as correct. Accepted points are drawn in green on the map and left out of the outlier count. The Mapbox token you enter in the GPS settings is now saved securely on your computer and shared by all your projects.
+
+#### Compare and resolve duplicate IDs on cards
+
+The Duplicates tab shows one card per duplicate ID, with the records side by side and the fields that differ highlighted. **Compare all fields** and **Only differing fields** control what each card shows. You can search by ID or KEY, sort the cards, and download every duplicate record as a CSV. Pages with back check data have a **Survey data** / **Backcheck data** switcher, and the back check view also lists back checks whose ID is not in the survey data.
+
+On each card, choose **Keep**, **Modify ID** or **Drop** for every record, give one reason and note, and save the whole card in one step. Save stays disabled, with a message saying what's missing, until at most one record keeps the ID and every new ID is valid, so a card can't be half fixed. Unmatched back check cards let you fix the mistyped ID or drop the back check. Every change is logged on the Correct Data page, where you can undo it. The **Resolved** metric counts the duplicate IDs your corrections have resolved.
+
+#### Attribute back check mismatches and see adjusted error rates
+
+Back check results measure how well data was collected, so mismatches are never corrected or accepted. Instead, click **Review** on a mismatch in the comparison details and say who caused it: the **Enumerator**, the **Backchecker** or the **Respondent**. A note is required for the last two. Select several rows to attribute them together. The **Attribution log** lists every attribution with who made it and when.
+
+The enumerator and back checker statistics now show an **adjusted error rate** next to the regular one. It leaves out the mismatches attributed to someone else, so each person is measured on their own mistakes. The regular error rate never changes. Set an **Error rate target (%)** to highlight every rate above it. The Backchecks summary shows **Mismatches Attributed** and an **Error Rates** section with the total and per-category rates.
+
+#### Track back check coverage against your target
+
+A new **Targets** section shows **Backcheck Coverage** (the share of eligible surveys that have a back check, against your target %) and, when the page has a survey target, **Backchecks vs Expected**. An optional **Eligibility Filter** limits coverage to the surveys that can be back checked, for example consented ones. The enumerator statistics show each enumerator's coverage, including enumerators with no back checks yet.
+
+#### One correction log for every page, with who made each entry
+
+The Correction Log now records which page made each entry and who made it. Set your **Reviewer name** in the sidebar once; until you do, DataSure uses your computer login. **Source** and **Action** filters above the log show, for example, only GPS acceptances. When you build a replication package to share outside your team, tick **Exclude reviewer names** to leave the names out of the exported log.
 
 #### Correct back check data on the Correct Data page
 
 Pages with back check data have a **Survey data** / **Backcheck data** switcher on the Correct Data page. Back check data can only have its ID fixed or a record removed, since back check results measure data quality. Back check data you never prepared can now be corrected too.
+
+#### Faster check pages that remember where you were
+
+Check pages now show the checks in four groups (**Overview**, **Data integrity**, **Field team** and **Exploration**), with buttons for the checks in each group. Only the check you select runs, so pages open faster. The page address names the check, so you can bookmark or share a link to it, and the page reopens on the check you last viewed.
+
+Each check remembers its filters, selections and sort order when you switch checks and when you reopen the app. **Reset filters** beside each check's settings clears that check's choices only. Remembered filters are personal: they are not included in exported setups or replication packages.
+
+A check that can't show results yet is marked **not set up** or **not applicable** with the reason, and a check that fails shows its error without breaking the rest of the page. The Prepare Data and Correct Data pages use the same buttons in place of tabs, and Prepare Data has a **Columns to show** filter for its preview.
+
+#### See every check's status on the Summary tab
+
+Summary's Data Quality section is replaced by a check health list with one row per check, grouped like the check page. Each row shows a status (**No issues**, **Flagged**, **Ready**, **Not set up**, **Not applicable** or **Error**), the issues still **Outstanding**, and the issues already **Resolved** through corrections, acceptances or attributions. **Open →** or **Set up →** takes you to the check. Each number matches what the check itself shows, using that check's settings and corrections. If one check's saved settings no longer fit the data, its row shows the error and the other rows still load.
+
+A **Change** column shows what changed over a period, for example "+3 since yesterday". Pick the period in the **Comparison period** box: Day (the default), 7 days, Week (week to date, with a week start you choose), 30 days or Month. The choice is saved for the project. Changes need a date column; if Summary has none, a note tells you to set one in Summary settings.
+
+GPS Checks counts its outliers here too, using the settings you last chose on the GPS Checks tab. Without a Mapbox token, the GPS Checks tab still lists the outliers; only the map is hidden.
 
 #### Exported project setups include every check setting
 
 An exported project setup now carries your missing-value codes, Descriptive Statistics columns, and the column rules for Duplicates, Outliers, GPS and Backchecks. Before, these had to be set again after applying the setup. When you apply a setup to an existing project, its missing-value codes are added to the project's, and the setup's code wins where both use the same label. Applying a setup exported by an older version shows a note that these settings are not in it.
 
 **Export configuration** in a project's **More** menu now opens a dialog with one option, **Include record-level decisions (corrections and backcheck attribution)**. Untick it to share a setup without decisions about individual records, for example when reusing it for a new survey round.
-
-#### See what changed since yesterday on the Summary tab
-
-Each check in Summary's check health list now shows a **Change** column and how many issues were resolved in the period, for example "+3 since yesterday". Pick the period in the **Comparison period** box above the list: Day (the default), 7 days, Week (week to date, with a week start you choose), 30 days or Month. The choice is saved for the project. Changes need a date column; if Summary has none, a note tells you to set one in Summary settings.
-
-GPS Checks now has its own counts in the list: outliers still to review as outstanding, and accepted or corrected points as resolved. It uses the settings you last chose on the GPS Checks tab, including the **Number of Neighbors** and **Expected Outlier Proportion** sliders, which are now remembered. Without a Mapbox token, the GPS Checks tab still lists the outliers; only the map is hidden.
 
 #### Join columns and convert columns to text or numbers on the Prep page
 
@@ -52,13 +90,17 @@ The Stata replication script does the same steps.
 
 #### A demo that covers the whole workflow
 
-The demo now walks you through reviewing flagged values: accepting and correcting outliers, accepting a GPS outlier, and attributing back check mismatches. It also covers setting your reviewer name, editing and removing check pages, the SurveyCTO import forms (without needing a server or credentials), and exporting the demo project's setup with the new **Export** button on the Start page's demo row. The demo data is the same every time you start it, with the latest submissions dated today, and every check the demo visits has something to show.
+The demo now walks you through reviewing flagged values: accepting and correcting outliers, accepting a GPS outlier, and attributing back check mismatches. It also covers setting your reviewer name, editing and removing check pages, the SurveyCTO import forms (without needing a server or credentials), and exporting the demo project's setup with the new **Export** button on the Start page's demo row. The demo data is the same every time you start it, with the latest submissions dated today, and every check the demo visits has something to show. **Restart** now asks for confirmation and starts the demo from scratch, and the demo ends once, after the replication package step, with options to restart or create a real project.
 
 ### Changes
 
-#### Check health is a list of rows
+#### Back check comparison follows Records to Include and leaves out duplicates
 
-Summary's check health cards are now one row per check, grouped like the sidebar, with **Status**, **Outstanding** and **Resolved** columns. The status shows **No issues**, **Flagged**, **Ready** (set up, but nothing counted yet), **Not set up**, **Not applicable** or **Error**. If one check's saved settings no longer fit the data, its row shows the error and the other rows still load. Outliers & Constraints counts outliers and constraint violations, Backchecks counts mismatches with no error source, and Missing Values reports the share of columns that are entirely missing.
+The back check comparison and coverage now use the same records as the Duplicates tab: the **Records to Include** filters apply, and the page says how many surveys and back checks are compared. The **Duplicate Handling** setting is gone. Records whose ID is duplicated are always left out of the comparison until you resolve the duplicate, and a warning above Comparison Results Details counts them. If a page was set to keep the first or last duplicate, it now leaves duplicates out.
+
+#### Records to Include applies straight away, on each page
+
+The Duplicates **Records to Include** filter now applies as soon as you set it, without an **Apply Filter** button. Each check page keeps its own filter, and a filter that matches no records shows a warning instead of quietly checking every record.
 
 #### Each check page keeps its own Descriptive Statistics columns and consent results
 
@@ -66,21 +108,49 @@ Choosing Descriptive Statistics columns on one check page no longer changes them
 
 The Enumerator report now uses the page's saved consent and outcome settings every time it runs, so it stays current after a data refresh or a settings change. The **Apply Consent and Outcome Settings** button is gone. If consent or outcome is not set up, the **% consent** and **% completed survey** columns are hidden instead of showing 100%, and the consent and outcome columns start empty until you choose them.
 
-#### Back check comparison follows Records to Include and leaves out duplicates
+#### Missing Values on Summary
 
-The back check comparison and coverage now use the same records as the Duplicates tab: the **Records to Include** filters apply, and the page says how many surveys and back checks are compared. The **Duplicate Handling** setting is gone. Records whose ID is duplicated are always left out of the comparison until you resolve the duplicate, and a warning above Comparison Results Details counts them. If a page was set to keep the first or last duplicate, it now leaves duplicates out.
+Summary's Missing Values row reports the share of columns that are entirely missing. Summary no longer has its own **Survey ID** setting, which only fed the old duplicates chart; the Duplicates row uses the Duplicates tab's settings.
+
+#### Legacy Excel files
+
+DataSure now rejects `.xls` files when you add them, with a message to save the file as `.xlsx`. Before, they were accepted and then failed to import.
+
+### Before You Upgrade
+
+Your projects open in 1.2.0 without any steps, but a few results can change:
+
+- **Back check target**: targets saved in earlier versions were never applied, and they are not carried over. Set the target again on the Backchecks tab, or leave it to the page configuration.
+- **Back check duplicates**: records with a duplicated ID are now left out of the comparison until you resolve them, so the number of compared records can drop.
+- **Remove rows steps**: saved steps on columns with blank values may now keep more rows (see Bug Fixes).
+- **Missing-value codes**: codes such as `-99` are no longer counted as values on Outliers & Constraints, Descriptive Statistics and Enumerator Statistics, so their counts and averages can change.
 
 ### Bug Fixes
 
-- **Fixed**: After you applied a project setup that included corrections, the **Outliers & Constraints** and **GPS Checks** tabs could fail with `cannot compare string with numeric type (i32)`. Projects already affected work again after you update; you don't need to import the setup again
+- **Fixed**: New installs crashed on the Prep page and several check pages with `module 'polars' has no attribute 'NUMERIC_DTYPES'`
 - **Fixed**: New installs could not import data, failing with `Resource In Use Error` or `'DuckDBPyConnection' object has no attribute 'pl'`
+- **Fixed**: The app loaded in the browser and then disconnected, with `Expected ASGI message 'http.response.start'` in the terminal
+- **Fixed**: SurveyCTO imports left out submissions completed before 1 January 2024. The next refresh after you upgrade downloads them
+- **Fixed**: **Remove Credentials** said it had removed a SurveyCTO password but left it saved on your computer
+- **Fixed**: A correction that filled a blank cell overwrote the value the field team later entered at source. The field team's value is now kept and the correction shows why it no longer applies
+- **Fixed**: Corrections saved with a value such as `25.0` against a whole number `25` were undone on the next refresh, and **Apply** stayed disabled for a new value of `0`
+- **Fixed**: A prep step or correction that removed every row brought back the raw data on check pages. Check pages now say the dataset has no rows, and the Prepare Data and Correct Data pages keep the controls you need to undo the step
 - **Fixed**: A **Remove rows** step with a condition also removed rows where the selected column was blank. Rows are now removed only when the condition is true, and the step says how many rows were kept because of a blank value. With several columns selected, every condition now removes a row when any column matches. Check the row counts of saved steps on columns with blank values, since they may now keep more rows. Exported Stata scripts match
 - **Fixed**: Missing-value codes such as `-99` were counted as real answers in Outliers & Constraints, Descriptive Statistics and Enumerator Statistics, so they were flagged as outliers and pulled down means and minimums
+- **Fixed**: Constraint violations past a hard limit were reported as soft violations when a soft limit was also set, so hard violations were undercounted
+- **Fixed**: The Outliers tab failed on every load after you deleted an outlier column. Affected pages load again after you update
+- **Fixed**: Duplicates **Records to Include** filters on one check page changed another page's results, and some saved filters came back empty in a new session
+- **Fixed**: The back check target % and **Duplicate Handling** settings had no effect
+- **Fixed**: Back check dates and **Avg Days** were blank when survey and back check records had different KEYs, and back checker statistics were blank when the survey KEY was used as the ID
+- **Fixed**: The Mapbox token entered in the GPS settings was not saved
 - **Fixed**: The Enumerator summary showed wrong first and last submission dates and this week/month counts when data spanned more than one month
-- **Fixed**: **Restart Demo** brought back corrections and settings from your last demo, and **Exit Demo** left demo data behind for your next project. Restart now asks for confirmation and starts the demo from scratch
-- **Fixed**: The demo said it was complete several times before the last step. It now ends once, after the replication package, with options to restart or create a real project
-- **Fixed**: Demo guidance named columns, labels and counts that did not match the demo data or the page, and **Learn More** sat beside the settings instead of above them
-- **Fixed**: A project setup exported from the demo set up nothing when applied, yet reported success. A setup that sets up nothing now shows an error
+- **Fixed**: The Summary tab's outlier % and back check error rate always showed 0. They are replaced by the Outliers & Constraints and Backchecks rows in the check health list
+- **Fixed**: Check settings you had just saved could show their old values for up to a minute when you opened the check again
+- **Fixed**: **Restart Demo** brought back corrections and settings from your last demo, and **Exit Demo** left demo data behind for your next project
+- **Fixed**: The demo said it was complete several times before the last step, and its guidance named columns, labels and counts that did not match the demo data or the page
+- **Fixed**: The Start page listed SPSS as a supported file type. It is not; the supported local formats are CSV, Excel (`.xlsx`), Stata, JSON and Parquet
+
+For problems still open in this release and their workarounds, see [KNOWN_ISSUES.md](KNOWN_ISSUES.md).
 
 ---
 
@@ -235,5 +305,5 @@ DataSure 1.0.0 is the first stable public release. Prior versions were internal 
 
 *This document is maintained alongside the project and updated with each release. For technical details, see [CHANGELOG.md](CHANGELOG.md).*
 
-**Last Updated**: September 2026
-**Document Version**: 1.1.0
+**Last Updated**: October 2026
+**Document Version**: 1.2.0

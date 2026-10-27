@@ -479,6 +479,11 @@ Only proceed to the final stable release (pushing a `vX.Y.Z` tag without a
 pre-release suffix) once at least one developer has confirmed the above on
 the Test PyPI build.
 
+For a release candidate, run the full
+[release test plan](docs/testing/release-test-plan.md) on Windows and macOS,
+and send it to early-access testers. Update its release-specific section from
+the new RELEASENOTES.md section first.
+
 ### Quality Gates
 
 All releases must pass (enforced by the `test` and `build` jobs in release.yml):

@@ -17,6 +17,7 @@ behavior changes.
 | Test/coverage/lint configuration | [pyproject.toml](pyproject.toml), [.pre-commit-config.yaml](.pre-commit-config.yaml) |
 | End-user workflow | [docs/USER_GUIDE.md](docs/USER_GUIDE.md) |
 | Known bugs, workarounds, recent fixes | [KNOWN_ISSUES.md](KNOWN_ISSUES.md) |
+| Release candidate testing | [docs/testing/release-test-plan.md](docs/testing/release-test-plan.md) |
 | Changelog and release-notes style | [docs/changelog_guide.md](docs/changelog_guide.md), [docs/release_notes_guide.md](docs/release_notes_guide.md) |
 | Planned work | [ROADMAP.md](ROADMAP.md) |
 
