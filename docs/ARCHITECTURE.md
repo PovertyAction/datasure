@@ -461,6 +461,13 @@ selection table yet exports the old selection's selected rows as the page's
 own. Importing a page bundled without a selection writes an empty one, so the
 page is not seeded from the destination's old selection.
 
+A host that opens a project read-only (for example a multi-user deployment
+where another user holds the project's write lock) can drop a
+`cache/{project_id}/settings/.readonly` marker. `app.py` then shows the
+marker's text as a warning above every page (`cache_utils.read_only_reason`).
+DataSure only reads the marker; it never creates or deletes it, and does not
+enforce read-only itself.
+
 The `cache/` directory is gitignored.
 
 ## Project configuration bundle

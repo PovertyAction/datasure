@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Read-only notice**: when a project's settings folder contains a
+  `.readonly` marker (`cache_utils.READ_ONLY_MARKER`), `app.py` shows its
+  text as a warning above every page (`cache_utils.read_only_reason`; an
+  empty marker gives a generic message, long text is cut to 300
+  characters, an unreadable marker is ignored). DataSure never writes the
+  marker: a host that opens a project read-only, such as a multi-user
+  deployment where another user holds the project's write lock, drops it
+  so users see why edits won't be saved before they hit a write error
 - **Prep concat** (#388): Add Column has a `concat` method
   (`PrepFunctions.concat`) that joins two or more text columns in selection
   order with a separator stored in the step's `value` (`""`, `" "`, `","`,

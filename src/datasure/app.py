@@ -5,6 +5,7 @@ from pathlib import Path
 
 import streamlit as st
 
+from datasure.utils.cache_utils import read_only_reason
 from datasure.utils.config_utils import ConfigurationService
 from datasure.utils.reviewer import render_reviewer_setting
 
@@ -206,6 +207,15 @@ with st.sidebar:
     st.caption(
         ":material/bug_report: [Report an issue](https://github.com/PovertyAction/datasure/issues)"
     )
+
+# --- READ-ONLY NOTICE --- #
+# Shown above every page of a project that the host opened read-only (see
+# cache_utils.READ_ONLY_MARKER), so viewers learn why edits won't stick
+# before they hit a write error.
+
+_read_only = read_only_reason(st.session_state.st_project_id)
+if _read_only:
+    st.warning(_read_only, icon=":material/lock:")
 
 # --- RUN NAVIGATION --- #
 

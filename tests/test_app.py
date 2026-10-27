@@ -412,3 +412,30 @@ class TestSidebarFooter:
         assert not any(a.endswith("datasure-horizontal.svg") for a in image_args)
         # Captions still render even when branding assets are absent.
         st_mock.caption.assert_called()
+
+
+# ---------------------------------------------------------------------------
+# Read-only notice
+# ---------------------------------------------------------------------------
+
+
+class TestReadOnlyNotice:
+    """A host-provided read-only marker shows a warning above every page."""
+
+    def _import(self, reason):
+        with patch(
+            "datasure.utils.cache_utils.read_only_reason", return_value=reason
+        ) as mock_reason:
+            st_mock, *_ = _import_app(session_state={"st_project_id": "abc12345"})
+        return st_mock, mock_reason
+
+    def test_warning_shown_with_reason(self):
+        st_mock, mock_reason = self._import("Being edited by someone else")
+        mock_reason.assert_called_once_with("abc12345")
+        st_mock.warning.assert_called_once_with(
+            "Being edited by someone else", icon=":material/lock:"
+        )
+
+    def test_no_warning_when_writable(self):
+        st_mock, _ = self._import(None)
+        st_mock.warning.assert_not_called()
