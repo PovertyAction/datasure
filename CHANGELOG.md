@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Headless keyring guidance**: `secure_credentials.keyring_backend_problem`
+  detects a keyring backend that can't hold credentials safely: keyring's
+  "fail" backend (headless Linux with no Secret Service) and plaintext file
+  backends. Keyring errors from `store_scto_credentials` and
+  `test_keyring_availability` now append an explanation that points to the
+  README's new "Running on a server" section. A working plaintext backend
+  still reports success but carries a `warning` that **Keyring Diagnostics**
+  displays, and the diagnostics list a headless-server tip
 - **Prep concat** (#388): Add Column has a `concat` method
   (`PrepFunctions.concat`) that joins two or more text columns in selection
   order with a separator stored in the step's `value` (`""`, `" "`, `","`,

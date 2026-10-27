@@ -550,6 +550,12 @@ kept in the keyring, as one entry shared by every project on the machine; a
 token set by hand in `secrets.toml` is still read as a fallback. Credentials
 are never written to disk, logs, or session state.
 
+`keyring_backend_problem()` flags a backend that can't hold credentials safely:
+keyring's "fail" backend (a headless Linux machine with no Secret Service) and
+plaintext file backends. Keyring errors and **Keyring Diagnostics** append its
+explanation, which points to the README's "Running on a server" section for
+selecting an encrypted backend with `PYTHON_KEYRING_BACKEND`.
+
 ## DataFrames and SQL
 
 Polars is the primary DataFrame library; pandas appears only at interop
