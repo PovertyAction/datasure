@@ -18,7 +18,9 @@ from datasure.checks.outliers.review import (
     TableFilters,
     allowed_actions,
     clear_reviewed_flags,
+    count_resolved_flags,
     filter_table,
+    flagged_cells,
     flagged_only,
     highlight_reviewed_row,
     join_survey_columns,
@@ -236,6 +238,102 @@ class TestClearReviewedFlags:
 
     def test_data_without_review_columns_is_unchanged(self, outlier_flags):
         assert clear_reviewed_flags(outlier_flags, OUTLIERS).equals(outlier_flags)
+
+
+def _results(outliers: list[tuple], violations: list[tuple]) -> list[tuple]:
+    """Build marked results from (KEY, column, flagged, review status) rows."""
+
+    def frame(rows, check):
+        return pl.DataFrame(
+            {
+                "survey_key": [r[0] for r in rows],
+                "column name": [r[1] for r in rows],
+                check.reason_col: ["flagged" if r[2] else check.no_flag for r in rows],
+                REVIEW_STATUS_COL: [r[3] for r in rows],
+            },
+            schema_overrides={REVIEW_STATUS_COL: pl.String},
+        )
+
+    return [
+        (frame(outliers, OUTLIERS), OUTLIERS),
+        (frame(violations, CONSTRAINTS), CONSTRAINTS),
+    ]
+
+
+class TestFlaggedCells:
+    def test_returns_the_flagged_cells_of_each_check(self):
+        results = _results(
+            [("K1", "age", True, None), ("K2", "age", False, None)],
+            [("K1", "age", True, None), ("K3", "income", True, None)],
+        )
+
+        assert flagged_cells(results, "survey_key") == {
+            "outliers": {("K1", "age")},
+            "constraints": {("K1", "age"), ("K3", "income")},
+        }
+
+    def test_empty_results_flag_nothing(self):
+        results = [(pl.DataFrame(), OUTLIERS), (pl.DataFrame(), CONSTRAINTS)]
+
+        assert flagged_cells(results, "survey_key") == {
+            "outliers": set(),
+            "constraints": set(),
+        }
+
+
+class TestCountResolvedFlags:
+    def test_each_accepted_flag_counts(self):
+        # K1 age was accepted as both an outlier and a constraint violation.
+        results = _results(
+            [("K1", "age", True, REVIEWED_BADGE)],
+            [("K1", "age", True, REVIEWED_BADGE)],
+        )
+
+        assert count_resolved_flags(results, "survey_key", {}) == 2
+
+    def test_a_corrected_cell_counts_once_per_check_that_flagged_it(self):
+        # K1 age was an outlier and a constraint violation before the
+        # correction, so correcting it resolves as many flags as accepting
+        # both would.
+        results = _results(
+            [("K1", "age", False, CORRECTED_BADGE)],
+            [("K1", "age", False, CORRECTED_BADGE)],
+        )
+        before = {"outliers": {("K1", "age")}, "constraints": {("K1", "age")}}
+
+        assert count_resolved_flags(results, "survey_key", before) == 2
+
+    def test_a_corrected_cell_flagged_by_one_check_counts_once(self):
+        results = _results(
+            [("K1", "age", False, CORRECTED_BADGE)],
+            [("K1", "age", False, CORRECTED_BADGE)],
+        )
+        before = {"outliers": {("K1", "age")}, "constraints": set()}
+
+        assert count_resolved_flags(results, "survey_key", before) == 1
+
+    def test_a_corrected_cell_never_flagged_resolves_nothing(self):
+        results = _results([("K1", "age", False, CORRECTED_BADGE)], [])
+
+        assert count_resolved_flags(results, "survey_key", {"outliers": set()}) == 0
+
+    def test_a_corrected_cell_still_flagged_by_any_check_resolves_nothing(self):
+        # The outlier is gone, but the corrected value still violates a
+        # constraint.
+        results = _results(
+            [("K1", "age", False, CORRECTED_BADGE)],
+            [("K1", "age", True, CORRECTED_BADGE)],
+        )
+        before = {"outliers": {("K1", "age")}, "constraints": {("K1", "age")}}
+
+        assert count_resolved_flags(results, "survey_key", before) == 0
+
+    def test_results_without_review_columns_resolve_nothing(self, outlier_flags):
+        before = {"outliers": {("K1", "age")}}
+
+        assert (
+            count_resolved_flags([(outlier_flags, OUTLIERS)], "survey_key", before) == 0
+        )
 
 
 class TestHighlightReviewedRow:

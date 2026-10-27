@@ -1478,15 +1478,15 @@ def _review_context(
 class _ReviewedFlags:
     """Outlier and constraint results with accepted flags cleared.
 
-    `flagged_before_correction` holds the (KEY, column) cells flagged in the
-    uncorrected data, so only corrections of flagged values count as
-    resolved.
+    `flagged_before_correction` holds the (KEY, column) cells each check
+    flags in the uncorrected data, by check type, so only corrections of
+    flagged values count as resolved.
     """
 
     outliers: pl.DataFrame
     violations: pl.DataFrame
     survey_key: str
-    flagged_before_correction: set[tuple]
+    flagged_before_correction: dict[str, set[tuple]]
 
     @property
     def results(self) -> list[tuple[pl.DataFrame, FlagCheck]]:
@@ -1544,11 +1544,13 @@ def _computed_flags(
     return _Flags(outlier_data, violations, settings, column_config, missing_codes)
 
 
-def _flagged_before_correction(flags: _Flags, review: ReviewContext) -> set[tuple]:
-    """Return the cells the checks flag in the uncorrected data."""
+def _flagged_before_correction(
+    flags: _Flags, review: ReviewContext
+) -> dict[str, set[tuple]]:
+    """Return the cells each check flags in the uncorrected data, by check type."""
     uncorrected = review.processor.get_uncorrected_data(review.alias)
     if uncorrected.width == 0:
-        return set()
+        return {}
     settings, columns = flags.settings, flags.column_config
     try:
         return flagged_cells(
@@ -1581,7 +1583,7 @@ def _flagged_before_correction(flags: _Flags, review: ReviewContext) -> set[tupl
 def _reviewed(
     flags: _Flags,
     review: ReviewContext | None,
-    flagged_before: set[tuple] | None = None,
+    flagged_before: dict[str, set[tuple]] | None = None,
 ) -> _ReviewedFlags:
     """Mark and clear the flags `review` accepts or corrects.
 
@@ -1606,7 +1608,7 @@ def _reviewed(
             and has_corrected_cells(
                 [(outlier_data, OUTLIERS), (violations, CONSTRAINTS)]
             )
-            else set()
+            else {}
         )
     return _ReviewedFlags(outlier_data, violations, settings.survey_key, flagged_before)
 

@@ -410,9 +410,10 @@ class TestOutliersDelta:
             "source": "outliers",
         }
 
-        # k4's value was flagged by both checks; the corrected cell counts once.
+        # k4's value was flagged by both checks; the corrected cell counts
+        # once for each, as outstanding does.
         assert self._delta(tmp_path, [correction], corrected) == CheckDelta(
-            outstanding=0, resolved=1
+            outstanding=0, resolved=2
         )
         # Undoing it deletes the entry and puts the value back.
         assert self._delta(tmp_path, []) == CheckDelta(outstanding=2, resolved=0)
