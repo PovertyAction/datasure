@@ -47,6 +47,7 @@ from datasure.checks.gpschecks.review import (
     build_gps_entries,
     coordinate_columns,
     gps_corrections,
+    gps_review_history,
     lof_contamination,
     lof_max_neighbors,
     lof_neighbors,
@@ -1014,14 +1015,14 @@ def _gps_review_log(
         if columns is not None
         else pl.DataFrame()
     )
+    log = processor.get_correction_log(alias)
     return GPSReviewLog(
         acceptances=acceptances,
         corrections=gps_corrections(
-            processor.get_correction_log(alias),
-            processor.get_active_corrections(alias, survey_key),
-            columns,
+            log, processor.get_active_corrections(alias, survey_key), columns
         ),
         columns=columns,
+        history=gps_review_history(log),
     )
 
 
@@ -2401,9 +2402,10 @@ def gpschecks_delta(
     Outstanding: the outliers `gpschecks_headline` counts on submissions
     dated after the period start (`window.as_of`). Outliers are not detected
     again on the earlier submissions alone, since that would move every
-    point's neighbourhood. Resolved: the resolved points whose latest
-    resolving log entry was made after the period start; undone corrections
-    and acceptances that no longer apply are not resolved. Takes the
+    point's neighbourhood. Resolved: the resolved points whose first
+    resolving log entry was made after the period start, so a later entry on
+    a point resolved earlier does not count it again; undone corrections and
+    acceptances that no longer apply are not resolved. Takes the
     parameters of `gpschecks_headline`.
 
     Parameters

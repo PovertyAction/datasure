@@ -418,6 +418,42 @@ class TestOutliersDelta:
         # Undoing it deletes the entry and puts the value back.
         assert self._delta(tmp_path, []) == CheckDelta(outstanding=2, resolved=0)
 
+    def test_correcting_a_flag_accepted_before_the_period_is_not_resolved(
+        self, tmp_path
+    ):
+        # k4's flags were accepted at the period start, then corrected in it.
+        corrected = self.DATA.with_columns(
+            pl.when(pl.col("key") == "k4")
+            .then(4.0)
+            .otherwise(pl.col("income"))
+            .alias("income")
+        )
+        correction = {
+            "date": datetime(2026, 10, 26, 8),
+            "KEY": "k4",
+            "action": "modify value",
+            "column": "income",
+            "current_value": "100.0",
+            "new_value": "4.0",
+            "reason": "typo",
+            "source": "outliers",
+        }
+        entries = [*self._accepted(datetime(2026, 10, 25, 23)), correction]
+
+        assert self._delta(tmp_path, entries, corrected) == CheckDelta(
+            outstanding=0, resolved=0
+        )
+
+    def test_one_check_accepted_before_the_period_leaves_the_other(self, tmp_path):
+        # Only the outlier was accepted earlier; the constraint violation is
+        # accepted in the period.
+        outlier, violation = self._accepted(datetime(2026, 10, 25, 23))
+        violation = {**violation, "date": datetime(2026, 10, 26, 8)}
+
+        assert self._delta(tmp_path, [outlier, violation]) == CheckDelta(
+            outstanding=0, resolved=1
+        )
+
     def test_a_key_column_not_in_the_data_is_a_settings_error(self, tmp_path):
         # As for the headline: the row shows why, not a missing column error.
         duckdb_save_table(PROJECT_ID, self.COLUMNS, f"outliers_{PAGE}", "logs")
@@ -546,6 +582,29 @@ class TestGPSDelta:
             outstanding=1, resolved=0
         )
 
+    def test_correcting_a_point_accepted_before_the_period_is_not_resolved(
+        self, tmp_path
+    ):
+        row = self.DATA.filter(pl.col("key") == "k09").row(0, named=True)
+        acceptance = {
+            "date": datetime(2026, 10, 25, 23),
+            "KEY": "k09",
+            "action": "accept",
+            "current_value": json.dumps({"lat": row["lat"], "lon": row["lon"]}),
+            "reason": "market",
+            "check_type": "gps",
+            "source": "gps",
+        }
+        removal = {
+            "date": datetime(2026, 10, 26, 8),
+            "KEY": "k09",
+            "action": "remove row",
+            "reason": "duplicate visit",
+            "source": "gps",
+        }
+
+        assert self._corrected_delta(tmp_path, [acceptance, removal]).resolved == 0
+
     def test_no_delta_without_a_date_column(self, tmp_path):
         duckdb_save_table(PROJECT_ID, self.GPS_COLUMNS, f"gps_columns_{PAGE}", "logs")
         ctx = _ctx(_config(tmp_path, survey_date=None), self.DATA)
@@ -635,6 +694,24 @@ class TestBackchecksDelta:
         self._attribute("Unattributed", datetime(2026, 10, 26, 10))
 
         assert self._delta(tmp_path) == CheckDelta(outstanding=1, resolved=0)
+
+    def test_re_attributing_a_mismatch_attributed_earlier_is_not_resolved(
+        self, tmp_path
+    ):
+        # It was already resolved at the period start.
+        self._attribute("Respondent", datetime(2026, 10, 25, 9))
+        self._attribute("Enumerator", datetime(2026, 10, 26, 9))
+
+        assert self._delta(tmp_path) == CheckDelta(outstanding=0, resolved=0)
+
+    def test_attributing_a_mismatch_cleared_before_the_period_is_resolved(
+        self, tmp_path
+    ):
+        self._attribute("Respondent", datetime(2026, 10, 24, 9))
+        self._attribute("Unattributed", datetime(2026, 10, 25, 9))
+        self._attribute("Enumerator", datetime(2026, 10, 26, 9))
+
+        assert self._delta(tmp_path) == CheckDelta(outstanding=0, resolved=1)
 
     def test_no_delta_without_a_backcheck_date_column(self, tmp_path):
         # The survey date column does not stand in for the backcheck date.

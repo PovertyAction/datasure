@@ -948,9 +948,12 @@ that are still in effect: corrections and acceptances from the correction log
 of the period and a correction made in the period removed one of its records,
 or changed or removed its ID; correcting another column of a record with that
 ID does not count, and neither does a later correction to an ID that was
-already resolved. A GPS point
-counts when the latest correction or acceptance that resolved it was made in
-the period. An undone correction, an acceptance whose value has changed since,
+already resolved. The other checks follow the same rule: a flag, GPS point or
+mismatch counts only if it was not yet resolved at the start of the period. A
+flag that was accepted or corrected before the period and corrected again in
+it does not count, and nor does a GPS point first accepted or corrected
+before the period, or a mismatch attributed before the period and
+re-attributed in it. An undone correction, an acceptance whose value has changed since,
 and an attribution later changed back to Unattributed drop out.
 
 If a row's change cannot be worked out, **Change** shows an error marker and

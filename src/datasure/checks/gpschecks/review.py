@@ -21,7 +21,7 @@ Kept free of Streamlit so the logic can be tested without a running app.
 import json
 import math
 from collections.abc import Sequence
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
 
@@ -406,11 +406,16 @@ class GPSReviewLog:
     columns : CoordinateColumns | None
         The configuration's coordinate columns; None if it stores both in one
         column, so no acceptance applies to it.
+    history : pl.DataFrame
+        Every GPS acceptance and correction in the log, including those no
+        longer in effect (see `gps_review_history`), to date when each point
+        was first resolved.
     """
 
     acceptances: pl.DataFrame
     corrections: pl.DataFrame
     columns: CoordinateColumns | None
+    history: pl.DataFrame = field(default_factory=pl.DataFrame)
 
 
 @dataclass(frozen=True)
@@ -429,8 +434,9 @@ class GPSOutlierSummary:
         Points accepted or corrected from the check and not flagged as
         outstanding now; None when the outliers could not be reviewed.
     resolutions : pl.DataFrame
-        KEY (as text) and the date of the latest log entry that resolved
-        it, one row per resolved point.
+        KEY (as text) and the date of its first GPS acceptance or
+        correction, one row per resolved point. An entry no longer in effect
+        still counts, so a point resolved again later keeps its first date.
     """
 
     outliers: pd.DataFrame
@@ -495,6 +501,26 @@ def gps_corrections(
     return pl.concat(frames, how="diagonal_relaxed")
 
 
+def gps_review_history(log: pl.DataFrame) -> pl.DataFrame:
+    """Return every GPS acceptance and successful GPS correction in the log.
+
+    Unlike `GPSReviewLog.acceptances` and `.corrections`, entries no longer in
+    effect are kept: they still show when a point was first resolved.
+    """
+    if not {"action", "check_type", "source", "status"} <= set(log.columns):
+        return log.clear()
+    return log.filter(
+        ((pl.col("action") == Action.ACCEPT) & (pl.col("check_type") == GPS_CHECK_TYPE))
+        | (
+            pl.col("action").is_in(
+                [Action.MODIFY_VALUE, Action.REMOVE_VALUE, Action.REMOVE_ROW]
+            )
+            & (pl.col("source") == GPS_CHECK_TYPE)
+            & (pl.col("status") == "Successful")
+        )
+    )
+
+
 def summarize_gps_outliers(
     outliers: pd.DataFrame, survey_key: str, *, review: GPSReviewLog | None
 ) -> GPSOutlierSummary:
@@ -550,14 +576,14 @@ def summarize_gps_outliers(
     resolved = keys(is_accepted) | (corrected - outstanding)
     entries = [
         frame.select(pl.col("KEY").cast(pl.String), pl.col("date"))
-        for frame in (review.acceptances, review.corrections)
+        for frame in (review.acceptances, review.corrections, review.history)
         if {"KEY", "date"} <= set(frame.columns) and not frame.is_empty()
     ]
     resolutions = (
         pl.concat(entries, how="vertical_relaxed")
         .filter(pl.col("KEY").is_in(sorted(resolved)))
         .group_by("KEY")
-        .agg(pl.col("date").max())
+        .agg(pl.col("date").min())
         .sort("KEY")
         if entries
         else pl.DataFrame(schema=_RESOLUTIONS_SCHEMA)

@@ -3,7 +3,7 @@
 import logging
 from collections.abc import Callable
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import date, datetime
 from typing import Any, Literal
 
 import duckdb
@@ -924,8 +924,9 @@ def backchecks_delta(
 
     Outstanding: the unattributed mismatches `backchecks_headline` counts,
     less those on the backchecks dated on or before the period start.
-    Resolved: the mismatches whose latest attribution was logged after the
-    period start and still applies. Takes the parameters of
+    Resolved: the mismatches attributed now that were unattributed at the
+    period start, so re-attributing a mismatch does not count it again.
+    Takes the parameters of
     `backchecks_headline`, plus the window, whose backcheck date column the
     backchecks are dated by.
 
@@ -960,13 +961,28 @@ def backchecks_delta(
         )
     )
     before = 0 if then is None else _unattributed(then.comparisons, log, key)[0]
-    # The entries made in the period: a cell's latest entry is among them
-    # only when it was logged in the period.
-    recent = log.filter(logged_after(log, as_of))
     return CheckDelta(
         max(unattributed - before, 0),
-        resolved=_unattributed(total.comparisons, recent, key)[1],
+        resolved=_attributed_since(total.comparisons, log, key, as_of),
     )
+
+
+def _attributed_since(
+    comparisons: pl.DataFrame, log: pl.DataFrame, survey_key: str, as_of: date
+) -> int:
+    """Count the mismatches attributed now that were unattributed at `as_of`.
+
+    A mismatch attributed by `as_of` and attributed again in the period was
+    already resolved, so it does not count.
+    """
+    if comparisons.is_empty():
+        return 0
+    unattributed = str(ErrorSource.UNATTRIBUTED)
+    now = mark_error_sources(comparisons, log, survey_key)[ERROR_SOURCE_COL]
+    then = mark_error_sources(
+        comparisons, log.filter(~logged_after(log, as_of)), survey_key
+    )[ERROR_SOURCE_COL]
+    return ((now != unattributed) & (then == unattributed)).fill_null(False).sum()
 
 
 def _render_overall_error_rates(backcheck_analysis: pl.DataFrame) -> None:

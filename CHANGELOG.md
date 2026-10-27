@@ -78,7 +78,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     (`duplicates_delta`: an ID counts only when its latest removed record or
     changed or removed ID was logged in the period, not for an unrelated
     later entry; `ReviewContext.entries_after`) and `bc_attribution`
-    (`backchecks_delta`); new `outliers_delta`. The check-level delta
+    (`backchecks_delta`); new `outliers_delta`. Every check counts an item
+    only when it was unresolved at the period start: Outliers skips cells a
+    check's flag was accepted or corrected on by then
+    (`ReviewContext.resolved_by_period_start`), Backchecks compares the
+    attributions then and now, and GPS dates a point by its first
+    acceptance or correction (`GPSReviewLog.history`). The check-level delta
     functions take the `DeltaWindow`. Page config dicts move to
     `checks/check_configs.py`
   - A change that cannot be computed shows an error marker and the reason in
@@ -122,7 +127,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Change and "+N since …": `gpschecks_delta` (`health_deltas.gps`)
   counts unaccepted outliers on submissions dated in the
   period (outliers are not detected again on the earlier submissions) and
-  the resolved points whose latest resolving log entry is in the period
+  the resolved points whose first GPS acceptance or correction is in the
+  period
 - **Check health benchmark** (#399): `just bench-health [rows] [repeat]`
   (`scripts/benchmark_check_health.py`) times each check's headline and its
   delta for every comparison period, and Summary's rows without deltas and

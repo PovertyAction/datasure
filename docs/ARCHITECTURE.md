@@ -249,11 +249,15 @@ to appear.
   record, or a changed or removed ID; undo deletes the entry), matched to the
   ID through the KEYs its records had before corrections
   (`DuplicatesBasis.resolved_keys`), so the log's own `ID` is not used, flags marked with only the recent active acceptances and
-  corrections (`ReviewContext.entries_after`), mismatches marked with only
-  the recent `bc_attribution` entries (the latest entry per cell wins, so a
-  cell counts only when its latest entry is recent), and for GPS the
-  resolved points whose latest resolving entry is recent
-  (`GPSOutlierSummary.resolutions`). Deltas share the headline LRU under
+  corrections (`ReviewContext.entries_after`), less the cells a check's
+  flag was already accepted or corrected on by the period start
+  (`ReviewContext.resolved_by_period_start`), mismatches attributed now
+  that `bc_attribution` left unattributed at the period start
+  (`_attributed_since`), and for GPS the resolved points whose first GPS
+  acceptance or correction, active or not (`GPSReviewLog.history`), is
+  recent (`GPSOutlierSummary.resolutions`). Every check counts an item only
+  when it was unresolved at the period start, so a later entry on an item
+  resolved earlier does not count it again. Deltas share the headline LRU under
   the key `("delta", headline_key, window)`, where `headline_key` is the
   row's headline key `(slug, fingerprint, view_key)`, so the period start
   and the row's own view values are part of it. A delta that raises is

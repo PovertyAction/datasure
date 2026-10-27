@@ -612,9 +612,10 @@ def test_summary_resolves_corrected_points_no_longer_flagged(outliers):
 
     assert (summary.outstanding, summary.resolved) == (2, 3)
     assert summary.unreviewed()["KEY"].tolist() == ["K2", 7]
+    # Each point is dated by its first resolving entry.
     assert summary.resolutions.to_dicts() == [
         {"KEY": "K1", "date": pd.Timestamp("2025-01-02").to_pydatetime()},
-        {"KEY": "K3", "date": pd.Timestamp("2025-01-04").to_pydatetime()},
+        {"KEY": "K3", "date": pd.Timestamp("2025-01-03").to_pydatetime()},
         {"KEY": "K9", "date": pd.Timestamp("2025-01-02").to_pydatetime()},
     ]
 

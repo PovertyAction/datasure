@@ -67,7 +67,7 @@ from datasure.checks.outliers.review import (
     select_flag,
 )
 from datasure.checks.outliers.settings_ui import outliers_report_settings
-from datasure.processing.correction_log import HARD_SEVERITY
+from datasure.processing.correction_log import HARD_SEVERITY, Action
 from datasure.processing.corrections import CorrectionProcessor
 from datasure.utils.correction_form import (
     apply_correction_entries,
@@ -224,7 +224,8 @@ class ReviewContext:
 
     One context is built per report run, so lookups shared by both tables
     are cached on it. With `entries_after`, only log entries made after that
-    date count, for the flags resolved in Summary's comparison period.
+    date count, for the flags resolved in Summary's comparison period, and
+    an acceptance of a cell resolved by then does not count.
     """
 
     processor: CorrectionProcessor
@@ -239,11 +240,42 @@ class ReviewContext:
             return log_rows
         return log_rows.filter(logged_after(log_rows, self.entries_after))
 
+    def resolved_by_period_start(self, check_type: str) -> set[tuple]:
+        """Return the (KEY, column) cells whose flag of a check was resolved
+        on or before `entries_after`.
+
+        A cell counts when an acceptance of the check or a successful value
+        correction of the cell was logged by then, even if a later entry
+        replaced it. Empty without `entries_after`.
+        """
+        log = self.processor.get_correction_log(self.alias)
+        if self.entries_after is None or log.is_empty():
+            return set()
+        resolving = (
+            (pl.col("action") == Action.ACCEPT) & (pl.col("check_type") == check_type)
+        ) | (
+            pl.col("action").is_in([Action.MODIFY_VALUE, Action.REMOVE_VALUE])
+            & (pl.col("status") == "Successful")
+        )
+        earlier = log.filter(resolving & ~logged_after(log, self.entries_after))
+        return set(
+            earlier.select(
+                pl.col("KEY").cast(pl.String), pl.col("column").cast(pl.String)
+            ).iter_rows()
+        )
+
     def active_acceptances(self, check_type: str, key_col: str) -> pl.DataFrame:
         """Return the acceptances of a check that still apply to the data."""
-        return self._in_period(
+        acceptances = self._in_period(
             self.processor.get_active_acceptances(self.alias, check_type, key_col)
         )
+        earlier = self.resolved_by_period_start(check_type)
+        if not earlier or acceptances.is_empty():
+            return acceptances
+        cells = pl.DataFrame(
+            list(earlier), schema={"KEY": pl.String, "column": pl.String}, orient="row"
+        )
+        return acceptances.join(cells, on=["KEY", "column"], how="anti")
 
     def active_corrections(self, key_col: str) -> pl.DataFrame:
         """Return the active value corrections, looked up once per run."""
@@ -1771,8 +1803,10 @@ def outliers_delta(
     flags are not recomputed on the earlier submissions alone, since that
     would move the IQR and standard deviation bounds. Resolved: the flags
     accepted or corrected by log entries made after the period start that
-    are still in effect; undone corrections and acceptances that no longer
-    apply drop out. Takes the parameters of
+    are still in effect, unless the cell's flag was already accepted or
+    corrected by the period start (see
+    `ReviewContext.resolved_by_period_start`); undone corrections and
+    acceptances that no longer apply drop out. Takes the parameters of
     `outliers_headline`, the window (the period start and Summary's date
     column), and `basis`: the headline's basis, computed on `data`, so the
     flags are not computed again; None computes them.
@@ -1807,14 +1841,17 @@ def outliers_delta(
         new = sum(_outstanding(_on_keys(now, new_keys.cast(pl.String))))
     resolved = None
     if review is not None:
-        recent = _reviewed(
-            flags,
-            ReviewContext(review.processor, review.alias, entries_after=as_of),
-            now.flagged_before_correction,
+        recent_review = ReviewContext(
+            review.processor, review.alias, entries_after=as_of
         )
-        resolved = count_resolved_flags(
-            recent.results, key, now.flagged_before_correction
-        )
+        recent = _reviewed(flags, recent_review, now.flagged_before_correction)
+        # A cell resolved by the period start was flagged before
+        # correction, but a correction in the period does not resolve it.
+        unresolved_then = {
+            check_type: cells - recent_review.resolved_by_period_start(check_type)
+            for check_type, cells in now.flagged_before_correction.items()
+        }
+        resolved = count_resolved_flags(recent.results, key, unresolved_then)
     return CheckDelta(new, resolved=resolved)
 
 
