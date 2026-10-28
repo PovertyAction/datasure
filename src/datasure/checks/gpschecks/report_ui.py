@@ -77,7 +77,13 @@ from datasure.utils.correction_form import apply_correction_entries, get_current
 from datasure.utils.dataframe_utils import ColumnByType, get_df_columns
 from datasure.utils.navigation import READY, CheckStatus, StatusResult
 from datasure.utils.navigations_utils import demo_callout
-from datasure.utils.onboarding_utils import is_demo_project
+from datasure.utils.onboarding_utils import (
+    DEMO_GPS_ACCEPT,
+    DEMO_SHOW_REVIEWED,
+    DemoColumn,
+    demo_accept_steps,
+    is_demo_project,
+)
 from datasure.utils.settings_utils import page_settings_file
 from datasure.utils.ui_utils import (
     queue_notice,
@@ -1447,6 +1453,22 @@ def _render_gps_outliers_checks(
     """
     section_header("GPS Outliers Detection")
 
+    if is_demo_project():
+        demo_callout(
+            "This section flags GPS points that appear to be in the wrong location. "
+            "Choose one under **Detection Method**:\n\n"
+            "- **Auto-Clustering (LOF)**: Uses the Local Outlier Factor algorithm to "
+            "flag points "
+            "distant from their neighbours. Adjust **Number of Neighbors** and "
+            "**Expected Outlier Proportion** to tune sensitivity.\n"
+            "- **Cluster by Column**: Groups points by a categorical column and flags "
+            f"points far from their group's centroid. Try **{DemoColumn.STATE}** as the "
+            "**Clustering Column** to detect households recorded in the wrong state.\n\n"
+            "Three metrics summarise the results: **Total GPS Points**, "
+            "**Outliers Detected**, and **Outlier Percentage**."
+            + (" Flagged points appear red on the map." if show_map else "")
+        )
+
     go1, go2, go3 = st.columns([0.4, 0.3, 0.3])
 
     with go1:
@@ -1531,6 +1553,27 @@ def _render_gps_outliers_checks(
             clustering_col if detection_method == "Cluster by Column" else None,
             "Outlier",
             marked=review is not None,
+        )
+
+    if is_demo_project():
+        accept = DEMO_GPS_ACCEPT
+        demo_callout(
+            "**Review each GPS outlier.** With **Cluster by Column** and "
+            f"**{DemoColumn.STATE}** selected, expand **View Outliers Data**:\n\n"
+            f"1. Find KEY **{accept.key}** ({DemoColumn.HHID} **{accept.hhid}**). "
+            "It is far from the other Gujarat households, but the household is in "
+            "a real village in north Gujarat, so the point is correct.\n"
+            + demo_accept_steps(
+                REVIEW_BUTTON_LABEL,
+                "Correct or accept GPS outlier",
+                "Village confirmed by the field team",
+            )
+            + "Accepted outliers are no longer counted in **Outliers Detected**. "
+            + DEMO_SHOW_REVIEWED
+            + (", and see it in green on the map" if show_map else "")
+            + ". For a point that is truly wrong, choose **modify coordinates** to "
+            "enter the right ones, **remove coordinates**, or **remove "
+            "observation**. **Download Outliers Data** saves the list as a file."
         )
 
     _render_outliers_data_table(
@@ -2039,9 +2082,10 @@ def gpschecks_settings_section(
             "Click **Add GPS Column Configuration** to tell DataSure which columns "
             "contain your GPS data. In the dialog that opens:\n\n"
             "1. Under **GPS Data Format**, select **Separate Columns**.\n"
-            "2. Set **Latitude Column** to **household_latitude**.\n"
-            "3. Set **Longitude Column** to **household_longitude**.\n"
-            "4. Set **Accuracy Column** to **household_gps_accuracy**.\n"
+            f"2. Set **Latitude Column** to **{DemoColumn.HOUSEHOLD_LATITUDE}**.\n"
+            f"3. Set **Longitude Column** to **{DemoColumn.HOUSEHOLD_LONGITUDE}**.\n"
+            "4. Leave **Altitude Column (Optional)** and **Accuracy Column (Optional)** "
+            "empty; the demo data has no altitude or accuracy columns.\n"
             "5. Enter a short **Configuration Alias** such as **household_gps**.\n"
             "6. Click **Add GPS Configuration** to save.\n\n"
             "If your GPS data is stored as a single delimited column "
@@ -2097,7 +2141,8 @@ def gpschecks_report(
             "- **GPS Coordinates Visualization**: Plot all survey GPS points on an "
             "interactive map, colour-coded by enumerator, team, or any categorical column.\n"
             "- **GPS Outliers Detection**: Flag coordinates that appear to be in the wrong "
-            "location, using statistical (Auto-LOF) or group-based (Cluster by Column) "
+            "location, using statistical (Auto-Clustering (LOF)) or group-based "
+            "(Cluster by Column) "
             "methods.\n"
             "- **GPS Coordinates Comparison**: Compare coordinates from two different GPS "
             "configurations to identify discrepancies beyond a set distance threshold.\n\n"
@@ -2158,7 +2203,8 @@ def gpschecks_report(
         demo_callout(
             "Select a **GPS Configuration** from the dropdown to load your coordinates "
             "onto the map. Use **Color Points By** to colour-code points by a categorical "
-            "column (e.g., **enum_name** to see each enumerator's coverage area). "
+            f"column (e.g., **{DemoColumn.ENUM_NAME}** to see each enumerator's "
+            "coverage area). "
             "Use **Filter Points By** to show only a subset of points. "
             "Hover over any point to see the survey ID, date, enumerator, team, and "
             "coordinates."
@@ -2176,23 +2222,8 @@ def gpschecks_report(
 
     st.write("---")
 
-    # Render GPS outliers detection
-    if is_demo_project():
-        demo_callout(
-            "This section flags GPS points that appear to be in the wrong location. "
-            "Two detection methods are available:\n\n"
-            "- **Auto (LOF)**: Uses the Local Outlier Factor algorithm to flag points "
-            "distant from their neighbours. Adjust **Number of Neighbors** and "
-            "**Expected Outlier Proportion** to tune sensitivity.\n"
-            "- **Cluster by Column**: Groups points by a categorical column and flags "
-            "points far from their group's centroid. Try **state** as the clustering "
-            "column to detect households recorded in the wrong state.\n\n"
-            "Three metrics summarise the results: **Total GPS Points**, "
-            "**Outliers Detected**, and **Outlier Percentage**. "
-            "Flagged points appear red on the map. Expand **View Outliers Data** to "
-            "download the flagged records."
-        )
-
+    # Render GPS outliers detection (its demo guidance shows inside, so it
+    # also shows without a Mapbox token)
     _render_gps_outliers_checks(
         project_id,
         page_name_id,

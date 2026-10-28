@@ -2,7 +2,11 @@ import functools
 import json
 import logging
 import random
+from collections.abc import Iterator
+from contextlib import contextmanager, nullcontext
+from contextvars import ContextVar
 from datetime import date, datetime, time, timedelta
+from enum import StrEnum
 from pathlib import Path
 from typing import ClassVar, NamedTuple
 
@@ -10,6 +14,7 @@ import pandas as pd
 import polars as pl
 import streamlit as st
 
+from datasure.checks.backchecks.attribution import ErrorSource
 from datasure.utils.cache_utils import get_cache_path
 from datasure.utils.duckdb_utils import duckdb_remove_table, duckdb_save_table
 
@@ -17,8 +22,220 @@ logger = logging.getLogger(__name__)
 
 DEMO_PROJECT_NAME = "DataSure Demo"
 DEMO_PROJECT_ID = "demoproject"
+# import_log source of the demo datasets; applying a configuration file
+# rebuilds them with build_demo_datasets instead of importing a file.
+DEMO_DATA_SOURCE = "Demo Data"
 # Seed for the demo data generator, so every demo load draws the same values.
 DEMO_SEED = 360
+
+
+class DemoColumn(StrEnum):
+    """Survey columns that demo guidance names.
+
+    Guidance names a ``demo_survey`` column only through a member, so a test
+    can check each one exists in the demo data. Add a member before naming a
+    new column.
+    """
+
+    KEY = "KEY"
+    HHID = "hhid"
+    ENUM_NAME = "enum_name"
+    TEAM_ID = "team_id"
+    DURATION = "duration"
+    SUBMISSIONDATE = "submissiondate"
+    STATE = "state"
+    CONSENT = "consent"
+    COMPLETION_STATUS = "completion_status"
+    AGE = "age"
+    HOUSEHOLD_COUNT = "household_count"
+    LAND_ACRE = "land_acre"
+    CHILD_LOAN = "child_loan"
+    PVT_SCH = "pvt_sch"
+    MIN_DIST = "min_dist"
+    TRAVEL_SCH = "travel_sch"
+    HOUSEHOLD_LATITUDE = "household_latitude"
+    HOUSEHOLD_LONGITUDE = "household_longitude"
+
+
+class DemoBackcheckColumn(StrEnum):
+    """Backcheck columns that demo guidance names, like ``DemoColumn``."""
+
+    SUBMISSIONDATE = "submissiondate"
+    BCER_NAME = "bcer_name"
+    TEAM_ID = "team_id"
+    AGE = "age"
+    HOUSEHOLD_COUNT = "household_count"
+    MINC_PRI = "minc_pri"
+    NPINC_OUT = "npinc_out"
+    NO_SAVE = "no_save"
+    PRI_GOVT_SCH = "pri_govt_sch"
+
+
+# Every column demo guidance names, by demo dataset alias.
+DEMO_GUIDANCE_COLUMNS: dict[str, type[StrEnum]] = {
+    "demo_survey": DemoColumn,
+    "demo_backcheck": DemoBackcheckColumn,
+}
+
+
+# Demo survey values that guidance names. A test loads the demo data and
+# checks each one, so name a new value here before using it in guidance.
+class DemoDuplicate(NamedTuple):
+    """A duplicated ``hhid`` in the demo survey and how guidance resolves it."""
+
+    hhid: str
+    # KEY of the record guidance changes; the other record is kept
+    key: str
+    # The ID to give that record with Modify ID, or None to Drop it
+    new_hhid: str | None = None
+
+
+DEMO_WRONG_ID = DemoDuplicate(
+    "UP015-005", "uuid:0dk0vt97-786b-250u-34k7-z34615zz820c", "UP015-055"
+)
+DEMO_SHARED_ID = DemoDuplicate(
+    "GJ013-025", "uuid:1qv2hs40-598s-540g-57l8-s35783yl358j", "GJ013-026"
+)
+DEMO_REPEAT_SUBMISSION = DemoDuplicate(
+    "AN002-003", "uuid:0ur3to71-184r-159l-70j6-m68512uv803n"
+)
+DEMO_DUPLICATES = (DEMO_WRONG_ID, DEMO_SHARED_ID, DEMO_REPEAT_SUBMISSION)
+
+
+class DemoRecord(NamedTuple):
+    """A demo survey record that guidance names by ID and KEY."""
+
+    hhid: str
+    key: str
+
+
+class DemoFlag(NamedTuple):
+    """A demo survey value that guidance corrects or accepts as valid."""
+
+    record: DemoRecord
+    column: DemoColumn
+    value: float
+    # The value to correct it to, or None to accept it as valid
+    new_value: float | None = None
+
+
+# Fixed on the Correct Data page
+DEMO_LAND_CORRECTION = DemoFlag(
+    DemoRecord("UP015-001", "uuid:2pb7nd59-391r-425l-40h1-t18527gn249i"),
+    DemoColumn.LAND_ACRE,
+    75.5,
+    5.5,
+)
+
+
+# Check configuration values that guidance names (#361). The walkthrough
+# keeps DEMO_PAGE_NAME throughout: editing changes only the target, and
+# removing uses the throwaway page, since renaming or removing the main page
+# loses its saved settings. Page Name accepts at most 20 characters.
+DEMO_PAGE_NAME = "Household HFCs"
+DEMO_SURVEY_TARGET = 200
+DEMO_EDITED_TARGET = 150
+DEMO_THROWAWAY_PAGE = "Test HFCs"
+
+
+# --- Check-page review guidance (#361) ---
+
+
+class DemoBounds(NamedTuple):
+    """Constraint bounds the Outliers guidance enters for a column."""
+
+    hard_min: float
+    soft_min: float
+    soft_max: float
+    hard_max: float
+
+
+DEMO_AGE_BOUNDS = DemoBounds(18, 25, 60, 100)
+
+
+# Age 24 is below the soft minimum only: unusual but plausible, so accepted
+DEMO_OUTLIER_ACCEPT = DemoFlag(
+    DemoRecord("AN016-034", "uuid:3xf5wk03-411r-454r-42q4-n97169wt312n"),
+    DemoColumn.AGE,
+    24,
+)
+# A misplaced decimal point, corrected in the Review dialog
+DEMO_OUTLIER_CORRECTION = DemoFlag(
+    DemoRecord("AN016-008", "uuid:7yq2ff04-784p-181b-06f6-y09055jv628g"),
+    DemoColumn.LAND_ACRE,
+    62.0,
+    6.2,
+)
+
+
+# Surveyed in Deesa, north Gujarat, far from the other Gujarat households but
+# a real village, so the GPS outlier is accepted as valid
+DEMO_GPS_ACCEPT = DemoRecord("GJ047-006", "uuid:8tp6pf85-928c-834t-16f0-g13614ux693g")
+
+
+class DemoMismatch(NamedTuple):
+    """A demo backcheck mismatch and the error source guidance attributes it to."""
+
+    # The survey record; the backcheck record has its own KEY
+    record: DemoRecord
+    column: DemoBackcheckColumn
+    survey_value: float
+    backcheck_value: float
+    source: ErrorSource
+
+
+# Enumerator attributions need no note
+DEMO_ATTRIBUTION_NO_NOTE = DemoMismatch(
+    DemoRecord("AN043-029", "uuid:6lh1ml39-090a-285w-09t0-l42895pr073w"),
+    DemoBackcheckColumn.AGE,
+    30,
+    40,
+    ErrorSource.ENUMERATOR,
+)
+# Respondent attributions need a note
+DEMO_ATTRIBUTION_WITH_NOTE = DemoMismatch(
+    DemoRecord("UP053-004", "uuid:8um8wz44-940o-168k-35l3-z62845ol734i"),
+    DemoBackcheckColumn.HOUSEHOLD_COUNT,
+    9,
+    10,
+    ErrorSource.RESPONDENT,
+)
+
+
+def demo_accept_steps(review_label: str, dialog_title: str, reason: str) -> str:
+    """Return guidance steps 2 and 3: accept a flag in a Review dialog.
+
+    Step 1, finding the row, is the caller's. The Outliers and GPS checks
+    share the dialog's **Select Action**, **Reason for Correction** and
+    **Apply** inputs, so their guidance shares these steps.
+    """
+    return (
+        f"2. Click **{review_label}** on that row. The **{dialog_title}** "
+        "dialog opens.\n"
+        "3. Set **Select Action** to **accept**, enter a **Reason for "
+        f"Correction** (e.g., *{reason}*) and click **Apply**.\n\n"
+    )
+
+
+# How the Outliers and GPS guidance shows a reviewed flag again
+DEMO_SHOW_REVIEWED = (
+    "Turn on **Show reviewed** to list it again, highlighted green with your reason"
+)
+
+
+class DemoSharedValue(NamedTuple):
+    """A value several demo survey records share in one column."""
+
+    column: DemoColumn
+    value: float
+    hhids: tuple[str, ...]
+
+
+# Other Duplicates on the two GPS columns finds only this repeated longitude;
+# the latitudes differ, so the households are not at the same place
+DEMO_SHARED_LONGITUDE = DemoSharedValue(
+    DemoColumn.HOUSEHOLD_LONGITUDE, 77.074387, ("AN043-038", "AN043-006")
+)
 
 
 # create a coloured container
@@ -43,34 +260,6 @@ class ImportDemoInfo:
         then click **Prepare Your Data** below to continue to the next step.
     """
 
-    PREPARE_DATA_INFO: ClassVar[str] = """
-        What is Data Preparation?
-
-        ##### Data preparation is a crucial step that:
-        - **Cleans and transforms data**: Handles text case changes, date conversions, and mathematical operations
-        - **Creates new variables**: Add calculated fields, unique identifiers, or custom columns for analysis
-        - **Removes problematic data**: Delete unnecessary columns or filter out rows with critical data quality issues
-
-        ##### For this demo, you can:
-        1. **Explore your data**: Switch between the **demo_survey** and **demo_backcheck**
-        dataset buttons at the top to see your survey data and backcheck data.
-        2. **Transform date column**: Add data preparation steps if you want to experiment.
-        Do the following:
-            - Select the **demo_survey** dataset button
-            - Click on the ":material/add: Add data prep step" button
-            - Under "Select Action", choose "Transform Column"
-            - For "Select Column to Transform", choose "submissiondate"
-            - For "Select function", choose "string to datetime". Note that the functions
-              available depend on the type of column selected.
-            - Click on ":material/check: Apply" to save the preparation step.
-            - Review the "submissiondate" column to see the changes.
-        3. **Apply same step to backcheck data**: Select the **demo_backcheck** dataset button and repeat
-        the same steps to transform the "submissiondate" column there as well.
-
-
-        **Ready to continue?** Preview data and try additional transformations.
-    """
-
     PROCEED_TO_CONFIG_INFO: ClassVar[str] = """
         ##### Want to experiment with data preparation?** Try these features:
 
@@ -92,14 +281,6 @@ class ImportDemoInfo:
         Your demo data is already prepared for quality checks, so these steps are optional in the demo.
     """
 
-    DEMO_DATA_INFO: ClassVar[str] = """
-        **Demo Status: Data Import Complete!**
-
-        Your survey data has been successfully imported and is ready for analysis.
-
-        **Next:** Let's move to data preparation where we'll clean and prepare this data for comprehensive quality checks!
-    """
-
     PROCEED_TO_HFCS_INFO: ClassVar[str] = """
         Your configuration is set up and your data is ready for quality analysis.
 
@@ -107,88 +288,23 @@ class ImportDemoInfo:
         configured checks and the reports are ready to review.
     """
 
-    ADD_CHECK_CONFIG_INFO: ClassVar[str] = """
-        ##### Follow these steps to set up data quality checks:
+    SURVEYCTO_INFO: ClassVar[str] = """
+        The sections below connect DataSure to real data sources. Your demo data is
+        already imported, so you need no SurveyCTO server or credentials here. Read
+        how a live project would import a SurveyCTO form, then scroll down to
+        **Preview Imported Data**.
 
-        ##### Step 1: Click ":material/add: Add new check configuration"
-        - A dialog window will appear to guide you through the configuration process
-        - Give your configuration a descriptive name like "Household HFCs" (1-20 characters)
+        1. Under **Manage Credentials**, **Add Credentials** asks for your
+           **Server name**, **Email address** and **Password**.
+           **Connect & Save Credentials** signs in and stores the password in your
+           computer's secure keyring, never in the project.
+        2. Under **Import Data From Sources**, **Add Import Configuration** with
+           **Import Type** set to **SurveyCTO** asks you to
+           **Select Server Credentials**, **Select Form ID** and enter an
+           **Alias**, then **Add Form** adds the form to the import log.
 
-        ##### Step 2: Select your survey dataset
-        - Choose "demo_survey" (your main household survey data) from the dropdown
-        - The column selector will automatically refresh to show available columns
-
-        ##### Step 3: Configure survey key columns:
-        DataSure will categorize your columns by type (datetime, numeric, categorical) to help you choose:
-        - **Key Column**: Choose "KEY" (unique row identifier) - this uniquely identifies each survey record
-        - **ID Column**: Choose "hhid" (Household ID) - identifies each household/respondent
-        - **Enumerator Column**: Choose "enum_name" (shows who collected the data)
-        - **Team Column**: Select "team_id" - indicates the team responsible for data collection
-        - **Form Version Column (optional)**: Select "form_version" - indicates the version of the survey form used. Skip for this demo.
-        - **Duration Column**: Select "duration" (time taken to complete survey)
-        - **Date Column**: Choose "submissiondate" (when the survey was submitted)
-        - **Survey Target** (optional): Enter expected number of interviews (e.g., 200)
-
-        ##### Step 4: Add backcheck dataset (optional)
-        - **Backcheck Dataset**: Choose "demo_backcheck" (from your imported backcheck data)
-        - Configure backcheck columns similarly (date: submissiondate, backchecker: bcer_name, backchecker team: team_id, target percentage: 10)
-
-        ##### Step 5: Click "Submit" to create the configuration
-        - DataSure validates your inputs using Pydantic models for data integrity
-        - If validation passes, a new quality analysis page is automatically created!
-
-        **:material/celebration: What happens next:** DataSure creates a comprehensive quality analysis page with all configured checks!
-    """
-
-    ADD_PREP_STEPS_INFO: ClassVar[str] = """
-        You will need to add a data preparation step to convert the submissiondate
-        column to a date format for both the survey and backcheck surveys. This is a
-        crucial step to ensure accurate date handling in your analysis.
-    """
-
-    ADD_CORRECTION_STEP_INFO: ClassVar[str] = """
-        This page lets you apply targeted corrections to your survey data based on
-        issues identified in the quality reports. Corrections are logged and can be
-        undone at any time.
-
-        **Page structure:** The buttons at the top list one check page per HFC
-        configuration (e.g., "Household HFCs"); the page opens on the check page you
-        last reviewed. For the selected check page you will find:
-        - :material/add: **Add correction step** — open a popover to apply a new correction.
-        - :material/delete: **Remove correction step** — open a popover to undo a previous correction.
-        - **Correction Log** — appears after the first correction or acceptance; shows
-          every correction made so far, plus flags accepted on the check pages without
-          changing the data, with their reasons. Filter it by source or action.
-        - **Preview Corrected Data** — a live preview of the dataset after all corrections
-          have been applied, with row/column/missingness metrics.
-
-        The three correction actions available are:
-        - **Modify Value**: Replace a specific value in a column with a new value.
-        - **Remove Value**: Replace a specific value with null/missing.
-        - **Remove Row**: Delete the entire row from the dataset.
-
-        ##### Instructions for Demo:
-        Fix the duplicate **hhid** found in the Duplicates check. Investigation confirmed that
-        the response with key **uuid:0dk0vt97-786b-250u-34k7-z34615zz820c** has the wrong
-        household ID — it should be **UP015-055**, not **UP015-005**.
-
-        1. Click **:material/add: Add correction step**.
-        2. Under **Select KEY**, choose **uuid:0dk0vt97-786b-250u-34k7-z34615zz820c**.
-        3. Under **Select Action**, choose **modify value**.
-        4. Under **Select Column to Modify**, choose **hhid**.
-           The current value (**UP015-005**) loads automatically.
-        5. Under **New Value**, enter **UP015-055**.
-        6. Under **Reason for Correction**, enter something like
-           *Correcting duplicate HHID after investigation*.
-        7. Click **Apply** to save the correction.
-
-        Once applied, check the **Correction Log** to confirm the entry, and return to
-        the **Duplicates** check in the quality reports to verify the duplicate is resolved.
-
-        **You have completed the DataSure demo!** You have imported data, prepared it,
-        configured quality checks, reviewed every check's report, and applied a
-        correction. Return to the quality reports at any time to see how corrections
-        have improved data quality.
+        You can open these forms to look around, but do not click
+        **Connect & Save Credentials** or **Add Form** in the demo.
     """
 
     @classmethod
@@ -196,14 +312,10 @@ class ImportDemoInfo:
         """Retrieve demo messages based on type."""
         demo_messages = {
             "add_to_session_info": cls.ADD_TO_SESSION_INFO,
-            "prepare_data_info": cls.PREPARE_DATA_INFO,
             "preview_data_info": cls.PREVIEW_DATA_INFO,
             "proceed_to_config_info": cls.PROCEED_TO_CONFIG_INFO,
-            "demo_data_info": cls.DEMO_DATA_INFO,
             "proceed_to_hfcs_info": cls.PROCEED_TO_HFCS_INFO,
-            "add_check_config_info": cls.ADD_CHECK_CONFIG_INFO,
-            "add_prep_steps_info": cls.ADD_PREP_STEPS_INFO,
-            "add_correction_step_info": cls.ADD_CORRECTION_STEP_INFO,
+            "surveycto_info": cls.SURVEYCTO_INFO,
         }
         return demo_messages.get(message_id, "Invalid message ID.")
 
@@ -260,15 +372,16 @@ class OnboardingSteps:
         "description": "Clean and prepare your data for quality checks.",
         "icon": ":material/build:",
         "page": "prep_view.py",
-        "guidance_title": "Data Preparation (Optional)",
-        "guidance_content": """
+        "guidance_title": "Data Preparation",
+        "guidance_content": f"""
         One preparation step is required before you can continue: convert the
-        **submissiondate** column from text to a datetime format in **both** datasets.
+        **{DemoColumn.SUBMISSIONDATE}** column from text to a datetime format in **both** datasets.
+        Every other preparation step is optional.
 
         **:material/arrow_forward: To do this for each dataset (demo_survey and demo_backcheck):**
         1. Click **:material/add: Add data prep step**
-        2. Under **Select Action**, choose **Transform Column**
-        3. Under **Select Column to Transform**, choose **submissiondate**
+        2. Under **Select Action**, choose **transform column(s)**
+        3. Under **Select column to transform**, choose **{DemoColumn.SUBMISSIONDATE}**
         4. Under **Select Function**, choose **string to datetime**
         5. Click **Add** to save the step
 
@@ -283,22 +396,36 @@ class OnboardingSteps:
         "icon": ":material/tune:",
         "page": "config_view.py",
         "guidance_title": "Configure Quality Checks",
-        "guidance_content": """
+        "guidance_content": f"""
         One configuration covers both datasets. Click **:material/add: Add New Check Configuration**
         and fill in the form with these values:
 
-        **Configuration name:** Household HFCs
+        **Page Name:** {DEMO_PAGE_NAME}
 
         **Survey dataset:** demo_survey
-        - Key Column: KEY | ID Column: hhid | Enumerator Column: enum_name
-        - Team Column: team_id | Duration Column: duration | Date Column: submissiondate
-        - Survey Target: 200 (optional)
+        - Key Column: {DemoColumn.KEY} | ID Column: {DemoColumn.HHID} | Enumerator Column: {DemoColumn.ENUM_NAME}
+        - Team Column: {DemoColumn.TEAM_ID} | Duration Column: {DemoColumn.DURATION} | Date Column: {DemoColumn.SUBMISSIONDATE}
+        - Form Version Column: leave empty, the demo data has none
+        - Target Number of responses: {DEMO_SURVEY_TARGET} (optional)
 
         **Backcheck dataset:** demo_backcheck
-        - Date: submissiondate | Backchecker: bcer_name | Team: team_id | Target %: 10
+        - Backcheck Date: {DemoBackcheckColumn.SUBMISSIONDATE} | Backchecker: {DemoBackcheckColumn.BCER_NAME}
+        - Backchecker Team: {DemoBackcheckColumn.TEAM_ID} | Target Percentage: 10
 
-        Click **Submit** — DataSure creates a quality analysis page automatically.
+        Click **Add Check Configuration** — DataSure creates a quality analysis page automatically.
         Once created, the **View Quality Reports** button will appear at the bottom of this page.
+
+        ##### Try editing and removing a configuration (optional):
+        - **Edit:** click **:material/edit: Edit Check Configuration**, choose
+          **{DEMO_PAGE_NAME}** under **Select Check Configuration to Edit**, change
+          **Enter Target Number of responses for the Survey (Optional)** to
+          **{DEMO_EDITED_TARGET}**, and click **Save Changes**. Change only the target:
+          renaming the page would leave its saved check settings behind.
+        - **Remove:** add a second configuration named **{DEMO_THROWAWAY_PAGE}** with the
+          same survey dataset and columns. Then open **Remove Check Configuration**,
+          choose **{DEMO_THROWAWAY_PAGE}** under **Select Check Configuration to Remove**,
+          and click **Remove Check Configuration**. Do not remove **{DEMO_PAGE_NAME}**:
+          the rest of the demo uses it.
         """,
     }
 
@@ -324,6 +451,13 @@ class OnboardingSteps:
           GPS Checks
         - **Field team:** Enumerator Stats, Backchecks
         - **Exploration:** Descriptive Stats
+
+        **Before you correct or accept anything:** open **:material/person: Reviewer:**
+        in the sidebar, below the page list and just above **Demo Help**, and type
+        your name under **Reviewer name**.
+        DataSure records it as the user on every correction and acceptance, for
+        example in the Correction Log. Left blank, your computer login is used.
+        The name is saved for the whole app, so it stays set after the demo.
         """,
     }
 
@@ -334,18 +468,41 @@ class OnboardingSteps:
         "icon": ":material/folder_zip:",
         "page": "replication_view.py",
         "guidance_title": "Export Replication Package",
-        "guidance_content": """
+        "guidance_content": f"""
         This page bundles everything needed to reproduce your corrected dataset into a
         single downloadable zip file — raw data, Stata do-files (import, prepare,
         correct), correction and prep logs, codebooks, and a README.
 
-        ##### Instructions for Demo:
-        1. Under **Page Name**, select **Household HFCs**.
-        2. Review the configuration details that appear, then expand
-           **What's inside the zip?** to see the full directory structure.
-        3. Click **Build Replication Package**. DataSure will assemble the zip in seconds.
-        4. Once the build completes, check the PII confirmation box and click
-           **Download replication package (.zip)**.
+        ##### First, export the project setup:
+        A replication package shares the data; a configuration file shares the
+        setup, so a colleague can start the same project. Export it before you build
+        the package: ticking the PII confirmation at the end completes the demo.
+        1. Open **Start Here** in the sidebar. On the **{DEMO_PROJECT_NAME}** row,
+           click **Export**.
+        2. Keep **Include record-level decisions (corrections and backcheck
+           attribution)** ticked to include your corrections, or untick it to share
+           only the setup.
+        3. Click **Download configuration** to save the `.json` file.
+        4. Click **Export Replication Package** in the sidebar to come back here.
+
+        For your own projects, the **More** menu on each Start Here row also has
+        **Update from configuration**, which applies a configuration file to an
+        existing project, and **Delete project**, which permanently deletes the
+        project and its data. The demo row has neither: use **Restart** to reset it.
+
+        ##### Then build the replication package:
+        1. Under **Page Name**, select **{DEMO_PAGE_NAME}**.
+        2. Just below it, tick **Exclude reviewer names**. The `correction_log.csv`
+           in the zip then leaves the user column blank, so the package does not
+           show who made each correction. The project's own Correction Log keeps
+           the names.
+        3. Review the configuration in **Selected page details**, then expand
+           **What's inside the zip?** at the bottom of the page to see the full
+           directory structure.
+        4. Click **Build Replication Package**. DataSure will assemble the zip in seconds.
+        5. Once the build completes, check the PII confirmation box and click
+           **Download replication package (.zip)**. The completion message then appears:
+           **Restart Demo** starts again, and **Create Real Project** leaves the demo.
 
         The demo dataset is synthetic and contains no real PII. In a live project the
         zip would include raw respondent data and must be stored on an encrypted,
@@ -360,30 +517,44 @@ class OnboardingSteps:
         "icon": ":material/edit:",
         "page": "correction_view.py",
         "guidance_title": "Correct Data Issues",
-        "guidance_content": """
-        ##### In this step you'll:
-        - Learn how to make corrections to your datasets after analyzing Data Quality Reports
+        "guidance_content": f"""
+        This page lets you apply targeted corrections to your data based on issues
+        found in the quality reports. Corrections are logged and can be undone at
+        any time.
+
+        **Page structure:** The buttons at the top list one check page per check
+        configuration (e.g., "Household HFCs"); the page opens on the check page you
+        last reviewed. For the selected check page you will find:
+        - :material/add: **Add correction step** — apply a new correction.
+        - :material/delete: **Remove correction step** — undo a previous correction.
+        - **Correction Log** — every correction made so far, including those saved
+          from the Duplicates cards, plus flags accepted on the check pages without
+          changing the data, with their reasons. Filter it by source or action.
+        - **Preview Corrected Data** — the dataset after all corrections, with
+          row, column and missingness metrics.
+
+        The three correction actions are **modify value** (replace a value),
+        **remove value** (replace a value with missing) and **remove row** (delete
+        the whole row).
 
         ##### Instructions for Demo:
-        - Make the following corrections to the demo_survey dataset:
-            1. For the duplicate records found on hhid "UP015-005", we find out upon investigation that
-            the correct HHID for the response with the key "uuid:0dk0vt97-786b-250u-34k7-z34615zz820c" is "UP015-055". Correct the ID by
-            doing the following:
-                - Click on **:material/add: Add correction** button
-                - Under **Select Key**, choose "uuid:0dk0vt97-786b-250u-34k7-z34615zz820c"
-                - Under **Select Action**, choose "modify value"
-                - Under **Select Column to Modify**, choose "hhid"
-                - You will notice that the current value is loaded automatically.
-                - Under **New Value**, enter "UP015-055"
-                - Add **Reason for Correction** such as "Correcting duplicate HHID after investigation"
-                - Click on **:material/check: Apply** to save the correction.
-                - Go back to the **Duplicates** check to verify that the duplicate has been resolved.
-            2. You can apply a similar correction progress for all corrections. The options for corrections include:
-                - Modify Value: Modify a specific value in a column
-                - Remove Row: Remove an entire row from the dataset
-                - Remove Value: Replace a specific value with null/missing
-
-        After applying corrections, revisit the quality reports to see how the data quality has improved!
+        1. In the **Correction Log**, find the three duplicate ID corrections you
+           saved on the **Duplicates** check.
+        2. Fix a typing slip found by the Outliers check: the household with key
+           **{DEMO_LAND_CORRECTION.record.key}** has **{DEMO_LAND_CORRECTION.value}** acres in
+           **{DEMO_LAND_CORRECTION.column}**; the enumerator confirmed an extra 7 was typed
+           and the household owns **{DEMO_LAND_CORRECTION.new_value}** acres.
+           - Click **:material/add: Add correction step**.
+           - Under **Select KEY**, choose **{DEMO_LAND_CORRECTION.record.key}**.
+           - Under **Select Action**, choose **modify value**.
+           - Under **Select Column to Modify**, choose **{DEMO_LAND_CORRECTION.column}**.
+             The current value (**{DEMO_LAND_CORRECTION.value}**) loads automatically.
+           - Under **New Value**, enter **{DEMO_LAND_CORRECTION.new_value}**.
+           - Under **Reason for Correction**, enter *Typing slip confirmed by enumerator*.
+           - Click **Apply**.
+        3. Check the new entry in the **Correction Log**, then return to
+           **Outliers & Constraints** in the quality reports: the value is no longer
+           flagged, and the Check health row on Summary counts it as resolved.
 
         **Next:** Use the navigation button below or click **Replication Package** in the sidebar to proceed to the final step — exporting a Stata replication package of your corrected dataset.
         """,
@@ -441,25 +612,13 @@ class OutputOnboardingInfo:
     """Class to provide onboarding messages for check output pages."""
 
     SUMMARY: ClassVar[dict] = {
-        "summary_report": {
-            "title": "Data Quality Summary",
-            "content": """
-        ##### Summary of Data Quality Checks
-
-        This check provides an overview of the data quality checks performed on your survey data.
-        It summarizes key metrics such as the number of checks run, issues identified,
-        and overall data quality score.
-
-        **Next**: Click on the :material/settings: settings icon to configure global settings for the Summary check.
-        """,
-        },
         "summary_settings": {
             "title": "Summary Settings",
-            "content": """
+            "content": f"""
         ##### Setup for Summary
         In this section, you can configure global settings for the Summary check, you will notice that some settings are pre-filled based on your check configuration.
         This check contains the following settings:
-        - Survey Date: The date when the survey was conducted or submitted. (e.g., submissiondate, starttime).
+        - Survey Date: The date when the survey was conducted or submitted (e.g., {DemoColumn.SUBMISSIONDATE}).
         - Total Expected Interviews: The total number of survey interviews you expect to have in your dataset (e.g., 1000).
 
         ##### Instructions for Demo:
@@ -476,7 +635,7 @@ class OutputOnboardingInfo:
         - String columns: Number of text-based columns in your dataset.
         - Numeric columns: Number of numeric columns in your dataset (includes int, float)
         - Date columns: Number of date/time columns in your dataset.
-        - Total rows: Total number of rows (records) in your dataset.
+        - Total Columns: Total number of columns in your dataset.
 
         **Next**: Explore the Submission Details section below.
         """,
@@ -486,10 +645,15 @@ class OutputOnboardingInfo:
             "content": """
         ##### Submission Details
         This section provides insights into the submission patterns of your survey data, including:
-        - Today: Number of submissions received today.
-        - This Week: Number of submissions received in the last 7 days.
-        - This Month: Number of submissions received in the last 30 days.
-        - Total Submissions: Total number of submissions received to date.
+        - First Submission and Last Submission: The dates of the earliest and latest submissions.
+        - Today: Number of submissions received today. The change compares with yesterday.
+        - This week: Number of submissions dated on or after the same day last week.
+          The change compares with the week before.
+        - This month: Number of submissions dated on or after the same day last month.
+          The change compares with the month before.
+        - Total: Total number of submissions received to date.
+
+        The demo data is dated so that the latest submissions fall on yesterday and today.
 
         This section also includes a submission trend chart that visualizes the number of submissions over time, helping you identify patterns and peaks in data collection.
 
@@ -498,7 +662,7 @@ class OutputOnboardingInfo:
         },
         "summary_progress": {
             "title": "Progress",
-            "content": """
+            "content": f"""
         ##### Progress
         This section provides an overview of the progress of your survey data collection, including:
         - Submission Progress: A progress bar showing the percentage of completed submissions against the total expected interviews.
@@ -510,7 +674,7 @@ class OutputOnboardingInfo:
 
         ##### Instructions for Demo:
         For the demo, you will explore how to create a table showing progress by subgroups such as enumerator or region.
-        - At "Progress by" dropdown, select "state" to see submission progress by state.
+        - At "Progress by" dropdown, select "{DemoColumn.STATE}" to see submission progress by state.
 
         **Optionally**,
         - you can also explore by selecting other categorical columns.
@@ -522,16 +686,41 @@ class OutputOnboardingInfo:
             "title": "Check health",
             "content": """
         ##### Check health
-        This section shows a row for every other check with its status, the issues still outstanding, and the issues already resolved, such as the duplicate IDs found and those resolved through corrections. Each number comes from its check and uses that check's settings, so it matches what you see when you open the check.
+        This section shows one row for every other check, grouped like the check navigation
+        (Overview, Data integrity, Field team, Exploration). Each number comes from its check
+        and uses that check's settings, so it matches what you see when you open the check.
+        Each row shows:
+        - **Status**: a coloured pill (see below).
+        - **Outstanding**: the issues still to deal with, such as duplicate IDs not yet
+          resolved, with a detail line under the number.
+        - **Change**: how Outstanding changed since the start of the comparison period,
+          for example "▲ 2 new submissions since yesterday".
+        - **Resolved**: the issues already resolved through corrections, acceptances or
+          error-source attributions, with "+N since …" for those resolved in the period,
+          or "—" for checks that resolve nothing.
+        - **Open →** or **Set up →**: go to the check.
 
+        The statuses are:
         - **Flagged** (amber): the check has outstanding issues to review.
         - **No issues** (green): the check has nothing outstanding, or only describes the data, like Progress.
-        - **Ready** (blue): the check is ready, but its issues are not counted here, like GPS Checks. Open it to see them.
+        - **Ready** (blue): the check is ready, but Summary does not count its issues yet,
+          for example GPS Checks before outliers can be detected. Open it to see them.
         - **Not set up** (grey): the check needs settings first. Click **Set up →** to configure it.
-        - **Not applicable** (grey): the check has nothing to work with on this page, for example Backchecks without backcheck data.
+        - **Not applicable** (grey): the check has nothing to work with on this page.
         - **Error** (red): the check or its numbers could not be computed; the row says why.
 
-        Click **Open →** on a row to go to that check. Rows for checks you have not set up yet, such as Outliers & Constraints, show their numbers once you set them up — return here afterwards to see them.
+        Under **Compare with**, the **Comparison period** box above the rows sets what
+        **Change** compares with: **Day** (the default, the end of yesterday), **7 days**, **Week** (the start of this
+        week; choose **Week starts on**), **30 days**, or **Month** (the start of this month).
+        The choice applies to every check page in the project.
+
+        ##### Instructions for Demo:
+        - The demo's latest submissions fall on yesterday and today, so with **Day**
+          selected the **Progress** row shows today's new submissions under **Change**.
+        - Open the **Comparison period** box and switch to **7 days** to see the changes grow.
+        - Rows for checks you have not set up yet, such as Outliers & Constraints, show their
+          numbers once you set them up. After you resolve the duplicate IDs on the
+          **Duplicates** check, return here to see them move from **Outstanding** to **Resolved**.
         """,
         },
     }
@@ -548,19 +737,20 @@ class OutputOnboardingInfo:
         },
         "progress_report_settings": {
             "title": "Progress Settings",
-            "content": """
+            "content": f"""
         ##### Setup for Progress
         In this section, you can configure global settings for the Progress check, you will notice that some settings are pre-filled based on your check configuration.
         This check contains the following settings:
-        - Survey ID: The main identifier for your survey respondents (e.g., household ID, Respondent ID).
-        - Date: The column indicating the date when the survey was conducted or submitted. (e.g., submissiondate, starttime).
-        - Enumerator: The column indicating who collected the data (e.g., enumerator name or ID).
+        - Survey ID: The main identifier for your survey respondents (e.g., {DemoColumn.HHID}).
+        - Survey Date: The column indicating the date when the survey was conducted or submitted (e.g., {DemoColumn.SUBMISSIONDATE}).
+        - Enumerator ID: The column indicating who collected the data (e.g., {DemoColumn.ENUM_NAME}).
         - Total Expected Interviews: The total number of survey interviews you expect to collect (e.g., 200).
-        - Target Submissions Per Period: The number of submissions you aim to collect per day, week, or month. This sets the threshold line on the Progress Over Time chart.
+        - Target Submissions Per Period: The number of submissions you aim to collect in each period shown on the Progress Over Time chart. This sets its threshold line.
 
         ##### Instructions for Demo:
         - Set **Total Expected Interviews** to **200**.
-        - Set **Target Submissions Per Period** to **5** (roughly 5 interviews per day).
+        - Set **Target Submissions Per Period** to **3**. The demo team averages a little over
+          2 submissions a day, so some days meet this daily target and others fall short.
 
         **Next**: Explore the **Progress Summary** section below.
         """,
@@ -585,9 +775,13 @@ class OutputOnboardingInfo:
         Bars are color-coded: **green** when the number of submissions meets or exceeds the threshold, **red** when below. The threshold is the **Target Submissions Per Period** if set in settings, otherwise the overall average.
 
         ##### Instructions for Demo:
-        - Switch between "Day", "Week", and "Month" views using the pills above the chart.
-        - Notice that some bars are red — these are periods where submissions fell below the average.
-        - If you set a **Target Submissions Per Period** in settings, the threshold line will reflect that target instead of the average.
+        - With the **Daily** pill selected, notice that some bars are green and some are red:
+          red days fell short of the target of 3 submissions.
+        - Switch to **Weekly** and **Monthly** using the pills above the chart. The same target
+          applies to every period, so the weekly and monthly bars all meet it; a target is
+          most useful for the period you track.
+        - Set **Target Submissions Per Period** back to **0** in settings to compare each
+          period with the average instead.
 
         **Next**: Explore the **Attempted Interviews** section below.
         """,
@@ -609,7 +803,7 @@ class OutputOnboardingInfo:
         },
         "display_progress_chart": {
             "title": "Consent and Completion Progress",
-            "content": """
+            "content": f"""
         ##### Consent and Completion Progress
         This section helps you monitor the consent and completion rates of your survey data collection, including:
         - Consent Rate: Percentage of respondents who provided consent.
@@ -617,8 +811,8 @@ class OutputOnboardingInfo:
 
         ##### Instructions for Demo:
         For the demo, you will setup the consent and completion criteria as follows:
-        - Consent Criteria: Select the "consent" column and set the value to "yes".
-        - Completion Criteria: Select the "completion_status" column and set the value to "complete".
+        - Consent Criteria: Select the "{DemoColumn.CONSENT}" column and set the value to "yes".
+        - Completion Criteria: Select the "{DemoColumn.COMPLETION_STATUS}" column and set the value to "complete".
         **Next**: Explore the other checks for more data quality insights.
         """,
         },
@@ -627,18 +821,18 @@ class OutputOnboardingInfo:
     DUPLICATES: ClassVar[dict] = {
         "duplicates_report_settings": {
             "title": "Duplicates Settings",
-            "content": """
+            "content": f"""
         ##### Duplicates Settings
         These settings control which columns identify a unique survey record and how
         duplicate detection is performed.
 
-        - **Survey Key**: The unique row identifier for each submission (e.g., KEY).
+        - **Survey Key**: The unique row identifier for each submission (e.g., {DemoColumn.KEY}).
           Different from Survey ID — every submission has a unique key even if two share
           the same respondent ID.
         - **Survey ID**: The respondent or household identifier checked for duplicates
-          (e.g., hhid).
-        - **Survey Date**: The submission or interview date column (e.g., submissiondate).
-        - **Enumerator ID**: The column identifying who collected the data (e.g., enum_name).
+          (e.g., {DemoColumn.HHID}).
+        - **Survey Date**: The submission or interview date column (e.g., {DemoColumn.SUBMISSIONDATE}).
+        - **Enumerator ID**: The column identifying who collected the data (e.g., {DemoColumn.ENUM_NAME}).
         - **Duplicates Conditions**: Optional filter to restrict the check to a subset of
           records. Use the toggle to treat missing values as duplicates.
 
@@ -646,10 +840,10 @@ class OutputOnboardingInfo:
         Your settings are pre-filled from the check configuration you set up earlier.
         Confirm the following values are selected, then close the panel and explore the
         sections below:
-        - Survey Key: **KEY**
-        - Survey ID: **hhid**
-        - Survey Date: **submissiondate**
-        - Enumerator ID: **enum_name**
+        - Survey Key: **{DemoColumn.KEY}**
+        - Survey ID: **{DemoColumn.HHID}**
+        - Survey Date: **{DemoColumn.SUBMISSIONDATE}**
+        - Enumerator ID: **{DemoColumn.ENUM_NAME}**
         """,
         },
     }
@@ -664,8 +858,8 @@ class OutputOnboardingInfo:
         These codes tell DataSure which numeric values in your data represent survey-specific
         non-responses (e.g., -99 = Don't Know).
 
-        The check then provides five sections:
-        - **Missing Data Statistics**: High-level summary metrics.
+        The check then provides six sections:
+        - **Missing data**: Four summary metrics.
         - **Missingness by Column**: Per-column breakdown with a filter slider.
         - **Compare Missing Data Within Groups**: Missing rates broken down by a grouping variable.
         - **Missingness Over Time**: Trend chart showing how missingness changes over the survey period.
@@ -681,28 +875,24 @@ class OutputOnboardingInfo:
         ##### Missingness by Column
         This section provides a detailed view of missing data by column, including:
         - A table showing each column in the dataset with the following details:
-            - Column Name: Name of the column.
+            - Column: Name of the column.
             - Total Missing: Total number of missing values in the column.
             - % Total Missing: Percentage of missing values in the column.
             - Null Values: Count of null or NaN values in the column.
             - % Null Values: Percentage of null or NaN values in the column.
-            - Don't Know: Count of values marked as "Don't Know".
-            - % Don't Know: Percentage of values marked as "Don't Know".
-            - Refused to Answer: Count of values marked as "Refused to Answer".
-            - % Refused to Answer: Percentage of values marked as "Refused to Answer".
-            - Not Applicable: Count of values marked as "Not Applicable".
-            - % Not Applicable: Percentage of values marked as "Not Applicable".
+            - One count and one percentage column for each missing code you added, named
+              after its label (e.g., "Don't Know" and "% Don't Know").
         - The table can be sorted by any of the columns to help identify which columns have the highest or lowest missing data.
-        - The table also includes a "Filter Report by % missing" slider at the top right to allow you to filter the report based on a minimum percentage of missing data.
+        - The table also includes a "Filter by % missing:" slider at the top right to allow you to filter the report based on a minimum percentage of missing data.
 
         ##### Instructions for Demo:
-        For the demo, use the "% missing" slider to filter the report to only show columns with 100% missing values.
+        For the demo, use the "Filter by % missing:" slider to filter the report to only show columns with 100% missing values.
         **Next**: Explore the **Compare missing data within groups** section below.
         """,
         },
         "missing_compare": {
             "title": "Compare Missing Data Within Groups",
-            "content": """
+            "content": f"""
         ##### Compare Missing Data Within Groups
         This section allows you to compare missing data patterns within different groups in your dataset, including:
         - A dropdown to select a categorical column (e.g., enumerator, region, etc.) to group the data by.
@@ -711,26 +901,26 @@ class OutputOnboardingInfo:
 
         ##### Instructions for Demo:
         For the demo:
-         - **first** - at the **Select column to group by** dropdown, choose "state" to see how missing data varies across different states in the dataset.
-         - **then** - at the **Select columns to compare** dropdown, choose "land_acre", "child_loan" and "pvt_sch" to see how missing data varies for these specific columns across different states.
+         - **first** - at the **Group by column** dropdown, choose "{DemoColumn.STATE}" to see how missing data varies across different states in the dataset.
+         - **then** - at the **Compare columns** dropdown, choose "{DemoColumn.LAND_ACRE}", "{DemoColumn.CHILD_LOAN}" and "{DemoColumn.PVT_SCH}" to see how missing data varies for these specific columns across different states.
         **Next**: Explore the **Missingness over time** section below.
         """,
         },
         "missing_over_time": {
             "title": "Missingness Over Time",
-            "content": """
+            "content": f"""
         ##### Missingness Over Time
         This section visualizes missing data patterns over time, helping you identify trends and changes in data quality during the survey period, including:
-        - A line chart showing the percentage of missing values over time.
+        - An area chart showing the percentage of missing values over time.
         - A dropdown to select a specific date column to use for analysis.
         ##### Instructions for Demo:
-        For the demo, at the **Select column to analyze missingness over time** dropdown, choose "submissiondate" to see how missing data varies over the survey period.
+        For the demo, at the **Select date column** dropdown, choose "{DemoColumn.SUBMISSIONDATE}" to see how missing data varies over the survey period.
         **Next**: Explore the **Nullity Correlation** section below.
         """,
         },
         "missing_correlation": {
             "title": "Nullity Correlation",
-            "content": """
+            "content": f"""
         ##### Nullity Correlation
         This section provides insights into the correlation of missing data between different columns in your dataset, helping you identify patterns and relationships in missingness, including:
         - A heatmap visualizing the correlation of missing values between columns.
@@ -739,8 +929,8 @@ class OutputOnboardingInfo:
 
         ##### Instructions for Demo:
         For the demo:
-        - Turn off the **All columns** toggle, then at the **Select columns** dropdown, choose "min_dist" and "travel_sch".
-        - You will notice that whenever "min_dist" is missing, "travel_sch" is also missing. This makes sense: if the distance to school is not recorded, the mode of travel is also likely missing.
+        - Turn off the **All columns** toggle, then at the **Select columns for correlation** dropdown, choose "{DemoColumn.MIN_DIST}" and "{DemoColumn.TRAVEL_SCH}".
+        - You will notice that whenever "{DemoColumn.MIN_DIST}" is missing, "{DemoColumn.TRAVEL_SCH}" is also missing. This makes sense: if the distance to school is not recorded, the mode of travel is also likely missing.
 
         This insight can help identify potential data collection issues or patterns in missingness that may require further investigation.
         **Next**: Explore the **Nullity Matrix** section.
@@ -758,55 +948,56 @@ class OutputOnboardingInfo:
     OUTLIERS: ClassVar[dict] = {
         "outliers_report_settings": {
             "title": "Outliers & Constraints Settings",
-            "content": """
+            "content": f"""
         ##### Outliers & Constraints Settings
         These settings identify the key columns DataSure uses to contextualise flagged
         records in the report tables.
 
-        - **Survey Key**: Unique row identifier for each submission (e.g., KEY).
-        - **Survey ID**: Respondent or household identifier (e.g., hhid).
-        - **Survey Date**: Submission or interview date column (e.g., submissiondate).
-        - **Enumerator ID**: Column identifying the data collector (e.g., enum_name).
-        - **Team ID**: Column identifying the team (e.g., team_id).
+        - **Survey Key**: Unique row identifier for each submission (e.g., {DemoColumn.KEY}).
+        - **Survey ID**: Respondent or household identifier (e.g., {DemoColumn.HHID}).
+        - **Survey Date**: Submission or interview date column (e.g., {DemoColumn.SUBMISSIONDATE}).
+        - **Enumerator ID**: Column identifying the data collector (e.g., {DemoColumn.ENUM_NAME}).
+        - **Team ID**: Column identifying the team (e.g., {DemoColumn.TEAM_ID}).
 
         ##### Instructions for Demo:
         Your settings are pre-filled from the check configuration. Confirm the following
         are selected, then close the panel and proceed to configure outlier columns below:
-        - Survey Key: **KEY**
-        - Survey ID: **hhid**
-        - Survey Date: **submissiondate**
-        - Enumerator ID: **enum_name**
-        - Team ID: **team_id**
+        - Survey Key: **{DemoColumn.KEY}**
+        - Survey ID: **{DemoColumn.HHID}**
+        - Survey Date: **{DemoColumn.SUBMISSIONDATE}**
+        - Enumerator ID: **{DemoColumn.ENUM_NAME}**
+        - Team ID: **{DemoColumn.TEAM_ID}**
         """,
         },
     }
     ENUMERATORS: ClassVar[dict] = {
         "enumerator_report_settings": {
             "title": "Enumerator Statistics Settings",
-            "content": """
+            "content": f"""
         ##### Enumerator Statistics Settings
         These settings identify the key columns DataSure uses to track enumerator
         performance across the report.
 
-        - **Survey Key**: Unique row identifier for each submission (e.g., KEY).
-        - **Survey ID**: Respondent or household identifier (e.g., hhid).
-        - **Survey Date**: Submission or interview date column (e.g., submissiondate).
-        - **Enumerator ID**: Column identifying the data collector (e.g., enum_name).
-        - **Team**: Column identifying the team (e.g., team_id).
-        - **Duration Column**: Column recording how long each interview took (e.g., duration).
+        - **Survey Key**: Unique row identifier for each submission (e.g., {DemoColumn.KEY}).
+        - **Survey ID**: Respondent or household identifier (e.g., {DemoColumn.HHID}).
+        - **Survey Date**: Submission or interview date column (e.g., {DemoColumn.SUBMISSIONDATE}).
+        - **Enumerator ID**: Column identifying the data collector (e.g., {DemoColumn.ENUM_NAME}).
+        - **Team**: Column identifying the team (e.g., {DemoColumn.TEAM_ID}).
+        - **Duration Column**: Column recording how long each interview took (e.g., {DemoColumn.DURATION}).
         - **Duration Unit**: Unit of the duration column — seconds, minutes, or hours.
-        - **Form Version Column**: Column recording the form version used (e.g., formdef_version).
+        - **Form Version Column**: Column recording the form version used, if your form has one.
         - **Consent and Outcome Settings**: Configure which column and value indicate consent
           and which indicate a completed survey. The report uses them as soon as you change them.
 
         ##### Instructions for Demo:
-        Your Survey Key, Survey ID, Survey Date, Enumerator ID, and Form Version are
-        pre-filled from earlier configuration. Confirm and complete the remaining fields:
-        - Duration Column: **duration**
+        Your Survey Key, Survey ID, Survey Date, Enumerator ID, Team, and Duration Column
+        are pre-filled from earlier configuration. Confirm them and complete the remaining fields:
+        - Duration Column: **{DemoColumn.DURATION}**
         - Duration Unit: **seconds**
-        - Team: **team_id**
-        - Consent Column: **consent** | Valid Consent Values: **yes**
-        - Outcome Column: **completion_status** | Completed Survey Values: **complete**
+        - Team: **{DemoColumn.TEAM_ID}**
+        - Form Version Column: leave empty, the demo data has no form version column
+        - Consent Column: **{DemoColumn.CONSENT}** | Valid Consent Values: **yes**
+        - Outcome Column: **{DemoColumn.COMPLETION_STATUS}** | Completed Survey Values: **complete**
 
         Then close the panel and explore the sections below.
         """,
@@ -816,7 +1007,7 @@ class OutputOnboardingInfo:
     DESCRIPTIVE_STATS: ClassVar[dict] = {
         "descriptive_report": {
             "title": "Descriptive Statistics",
-            "content": """
+            "content": f"""
         This check lets you explore the distribution and characteristics of any column
         in your dataset. Use the **column selector** below to choose which columns to
         analyse, then explore three sections:
@@ -829,45 +1020,46 @@ class OutputOnboardingInfo:
           Switch between table and chart view, and toggle between count and percentage.
 
         ##### Instructions for Demo:
-        1. In the **column selector**, check **age** and **household_count** — or use the
+        1. In the **column selector**, check **{DemoColumn.AGE}** and **{DemoColumn.HOUSEHOLD_COUNT}** — or use the
            **Select by Type** pill and choose **Numeric** to select all numeric columns at once.
         2. Click **Apply Selection** to load the analysis.
         3. In **Summary Stats**, compare the mean and median for each column to spot skewed distributions.
-        4. In **Histogram**, select **age** and try adjusting the **Bins** slider.
-        5. In **Value Counts**, switch the column to **state** or **enum_name** to see how
+        4. In **Histogram**, select **{DemoColumn.AGE}** and try adjusting the **Bins** slider.
+        5. In **Value Counts**, switch the column to **{DemoColumn.STATE}** or **{DemoColumn.ENUM_NAME}** to see how
            responses are distributed across categories. Note that categorical columns like
-           **state** are only available here if you included them in your column selection —
+           **{DemoColumn.STATE}** are only available here if you included them in your column selection —
            if you selected numeric columns only, go back to the column selector and add
-           **state** or **enum_name**.
+           **{DemoColumn.STATE}** or **{DemoColumn.ENUM_NAME}**.
         """,
         },
     }
     BACKCHECKS: ClassVar[dict] = {
         "backchecks_report_settings": {
             "title": "Backcheck Analysis Settings",
-            "content": """
+            "content": f"""
         ##### Backcheck Analysis Settings
         These settings link your survey dataset to your backcheck dataset so DataSure
         can match records and compare values.
 
-        - **Survey Key**: Unique row identifier in the survey dataset (e.g., KEY).
-        - **Survey ID**: Respondent or household identifier (e.g., hhid).
-        - **Survey Date**: Date column in the survey dataset (e.g., submissiondate).
-        - **Backcheck Date**: Date column in the backcheck dataset (e.g., bc_date).
-        - **Enumerator**: Column identifying the original data collector (e.g., enum_name).
-        - **Backchecker**: Column in the backcheck dataset identifying who conducted
-          the back check (e.g., backchecker_name).
+        - **Survey Key (required)**: Unique row identifier in the survey dataset (e.g., {DemoColumn.KEY}).
+        - **Survey ID (required)**: Respondent or household identifier (e.g., {DemoColumn.HHID}).
+        - **Survey Date**: Date column in the survey dataset (e.g., {DemoColumn.SUBMISSIONDATE}).
+        - **Backcheck Date**: Date column in the backcheck dataset (e.g., {DemoBackcheckColumn.SUBMISSIONDATE}).
+        - **Enumerator**: Column identifying the original data collector (e.g., {DemoColumn.ENUM_NAME}).
+        - **Back Checker**: Column in the backcheck dataset identifying who conducted
+          the back check (e.g., {DemoBackcheckColumn.BCER_NAME}).
         - **Backcheck target (%)**: Percentage of surveys to backcheck. Defaults to
           the page configuration target, or 10% if neither is set.
-        - **Eligibility Filter**: Optional column and values that mark a survey
-          eligible for backchecks (e.g., consent = 1).
-        - **Additional Options**: Duplicate handling (Drop All / Keep First / Keep Last),
-          No Differences Values, Exclude Values, and String Comparison Options
-          (case sensitivity, trim spaces, remove symbols).
+        - **Eligibility column** and **Eligible values**: Optional column and values that
+          mark a survey eligible for backchecks (e.g., {DemoColumn.CONSENT} = yes).
+        - **Additional Options**: No differences values, exclude values, and string
+          comparison settings (case, trim spaces, ignore symbols). Records with a duplicated
+          survey ID are left out of the comparison until the duplicate is resolved in the
+          Duplicates check.
 
         ##### Instructions for Demo:
-        Your Survey Key, Survey ID, Survey Date, Enumerator, and Backchecker are
-        pre-filled from earlier configuration. Confirm they are set, then close the
+        Your Survey Key, Survey ID, Survey Date, Backcheck Date, Enumerator, and Back Checker
+        are pre-filled from earlier configuration. Confirm they are set, then close the
         panel and proceed to the **Backchecks Columns Configuration** section below.
         """,
         },
@@ -876,27 +1068,27 @@ class OutputOnboardingInfo:
     GPSCHECKS: ClassVar[dict] = {
         "gpschecks_report_settings": {
             "title": "GPS Checks Settings",
-            "content": """
+            "content": f"""
         ##### GPS Checks Settings
         These settings identify the key columns DataSure uses to label records on maps
         and in report tables.
 
-        - **Survey Key**: Unique row identifier for each submission (e.g., KEY).
-        - **Survey ID**: Respondent or household identifier (e.g., hhid).
-        - **Survey Date**: Submission or interview date column (e.g., submissiondate).
-        - **Enumerator ID**: Column identifying the data collector (e.g., enum_name).
-        - **Team**: Column identifying the team (e.g., team_id).
+        - **Survey Key**: Unique row identifier for each submission (e.g., {DemoColumn.KEY}).
+        - **Survey ID**: Respondent or household identifier (e.g., {DemoColumn.HHID}).
+        - **Survey Date**: Submission or interview date column (e.g., {DemoColumn.SUBMISSIONDATE}).
+        - **Enumerator ID**: Column identifying the data collector (e.g., {DemoColumn.ENUM_NAME}).
+        - **Team**: Column identifying the team (e.g., {DemoColumn.TEAM_ID}).
         - **Mapbox API Token**: Required to render map visualizations. Enter your token
           in the **Mapbox API Token Configuration** section and click **Save Mapbox Token**.
 
         ##### Instructions for Demo:
         Your settings are pre-filled from the check configuration. Confirm the following
         are selected, then close the panel:
-        - Survey Key: **KEY**
-        - Survey ID: **hhid**
-        - Survey Date: **submissiondate**
-        - Enumerator ID: **enum_name**
-        - Team: **team_id**
+        - Survey Key: **{DemoColumn.KEY}**
+        - Survey ID: **{DemoColumn.HHID}**
+        - Survey Date: **{DemoColumn.SUBMISSIONDATE}**
+        - Enumerator ID: **{DemoColumn.ENUM_NAME}**
+        - Team: **{DemoColumn.TEAM_ID}**
 
         If you have a Mapbox API token, enter it under **Mapbox API Token Configuration**
         and click **Save Mapbox Token** to enable all map visualizations.
@@ -1040,7 +1232,11 @@ def show_demo_banner():
 
 
 def show_next_steps(current_step: int):
-    """Show next steps and navigation options."""
+    """Show the next onboarding step.
+
+    Nothing is shown after the last step: the demo's completion message is
+    ``navigations_utils.show_demo_completion_message``.
+    """
     if not is_demo_project():
         return
 
@@ -1059,23 +1255,6 @@ def show_next_steps(current_step: int):
             st.markdown("""
             **Ready to continue?** Click "Import Data" in the navigation menu to start importing your demo survey data!
             """)
-    else:
-        st.success("""
-        **Congratulations!** You've completed the DataSure demo.
-
-        **What you've learned:**
-        - How to import and prepare survey data
-        - How to run comprehensive data quality checks
-        - How to interpret quality reports and take action
-
-        **Ready to use DataSure with your own data?**
-        """)
-
-        if st.button("Start New Project", type="primary"):
-            # Clear demo project and redirect to start
-            st.session_state.st_project_id = ""
-            st.session_state.pop("onboarding_step", None)
-            st.rerun()
 
 
 def create_demo_project():
@@ -1266,6 +1445,41 @@ def load_csv_flexibly(file_path: Path) -> pl.DataFrame:
     return df
 
 
+def build_demo_datasets(today: date | None = None) -> dict[str, pl.DataFrame]:
+    """Build the demo survey and backcheck data, keyed by alias.
+
+    The packaged CSVs only hold the base records; the generated fields
+    (dates, backcheck fields) are added here, so anything that needs the
+    demo data - the demo itself or a project set up from a demo
+    configuration file - builds it through this function.
+
+    Parameters
+    ----------
+    today : date | None
+        The day the latest demo survey submission falls on. Defaults to the
+        current date; every other value in the data is the same on every load.
+
+    Raises
+    ------
+    FileNotFoundError
+        If the packaged demo files are missing.
+    """
+    assets_dir = Path(__file__).parent.parent / "assets"
+    survey_path = assets_dir / "demo_survey.csv"
+    backcheck_path = assets_dir / "demo_backcheck.csv"
+
+    if not survey_path.exists() or not backcheck_path.exists():
+        raise FileNotFoundError("Demo data files not found")
+
+    survey_df = DemoDataGenerator(
+        load_csv_flexibly(survey_path), today=today
+    ).add_demo_fields()
+    backcheck_df = DemoDataGenerator(
+        load_csv_flexibly(backcheck_path), today=today
+    ).add_demo_fields("backcheck", survey_df=survey_df)
+    return {"demo_survey": survey_df, "demo_backcheck": backcheck_df}
+
+
 def load_demo_data(today: date | None = None) -> bool:
     """Load demo data files into the demo project.
 
@@ -1275,41 +1489,25 @@ def load_demo_data(today: date | None = None) -> bool:
         The day the latest demo survey submission falls on. Defaults to the
         current date; every other value in the data is the same on every load.
     """
-    # Get asset paths
-    assets_dir = Path(__file__).parent.parent / "assets"
-    survey_path = assets_dir / "demo_survey.csv"
-    backcheck_path = assets_dir / "demo_backcheck.csv"
-
-    if not survey_path.exists() or not backcheck_path.exists():
+    try:
+        datasets = build_demo_datasets(today)
+    except FileNotFoundError:
         st.error("Demo data files not found. Please check the installation.")
         return False
-
-    # Load survey data with flexible CSV parsing
-    try:
-        survey_df = load_csv_flexibly(survey_path)
     except Exception:
         return False
-
-    try:
-        backcheck_df = load_csv_flexibly(backcheck_path)
-    except Exception:
-        return False
-
-    survey_df = DemoDataGenerator(survey_df, today=today).add_demo_fields()
 
     # Save to raw database (for import system)
-    duckdb_save_table(DEMO_PROJECT_ID, survey_df, "demo_survey", "raw")
+    duckdb_save_table(DEMO_PROJECT_ID, datasets["demo_survey"], "demo_survey", "raw")
 
     # clean prep/corrected entries
     duckdb_remove_table(DEMO_PROJECT_ID, "demo_survey", "prep")
     duckdb_remove_table(DEMO_PROJECT_ID, "demo_survey", "corrected")
 
-    backcheck_df = DemoDataGenerator(backcheck_df, today=today).add_demo_fields(
-        "backcheck", survey_df=survey_df
-    )
-
     # Save to raw database (for import system)
-    duckdb_save_table(DEMO_PROJECT_ID, backcheck_df, "demo_backcheck", "raw")
+    duckdb_save_table(
+        DEMO_PROJECT_ID, datasets["demo_backcheck"], "demo_backcheck", "raw"
+    )
 
     # clean prep/corrected entries
     duckdb_remove_table(DEMO_PROJECT_ID, "demo_backcheck", "prep")
@@ -1328,7 +1526,7 @@ def load_demo_data(today: date | None = None) -> bool:
             "alias": "demo_survey",
             "filename": "demo_survey.csv",
             "sheet_name": None,
-            "source": "Demo Data",
+            "source": DEMO_DATA_SOURCE,
             "server": None,
             "username": None,
             "form_id": None,
@@ -1342,7 +1540,7 @@ def load_demo_data(today: date | None = None) -> bool:
             "alias": "demo_backcheck",
             "filename": "demo_backcheck.csv",
             "sheet_name": None,
-            "source": "Demo Data",
+            "source": DEMO_DATA_SOURCE,
             "server": None,
             "username": None,
             "form_id": None,
@@ -1372,31 +1570,25 @@ def is_demo_complete() -> bool:
     return get_onboarding_step() >= len(onboarding_steps)
 
 
-def show_demo_completion_message():
-    """Show completion message and options."""
-    if not is_demo_project() or not is_demo_complete():
-        return
+# Where demo_expander draws while a demo_guidance_above block is open.
+_DEMO_GUIDANCE_SLOT: ContextVar = ContextVar("demo_guidance_slot", default=None)
 
-    st.balloons()
 
-    st.success("""
-    **Demo Complete!**
+@contextmanager
+def demo_guidance_above() -> Iterator[None]:
+    """Draw the demo guidance raised inside the block above it.
 
-    You've successfully learned how to use DataSure for survey data quality management!
-    """)
-
-    col1, col2 = st.columns(2)
-
-    with col1:
-        if st.button("Restart Demo", width="stretch"):
-            set_onboarding_step(1)
-            st.rerun()
-
-    with col2:
-        if st.button("Create Real Project", type="primary", width="stretch"):
-            st.session_state.st_project_id = ""
-            st.session_state.pop("onboarding_step", None)
-            st.switch_page("pages/start_view.py")
+    Wrap a block whose elements sit on one row, such as a settings expander
+    with an action beside it, so the guidance a decorated function draws
+    comes above the row instead of joining it. The slot is a placeholder, so
+    it draws nothing when the block has no guidance.
+    """
+    slot = st.empty() if is_demo_project() else None
+    token = _DEMO_GUIDANCE_SLOT.set(slot)
+    try:
+        yield
+    finally:
+        _DEMO_GUIDANCE_SLOT.reset(token)
 
 
 def demo_expander(title: str, content: str, expanded: bool = True):
@@ -1404,5 +1596,9 @@ def demo_expander(title: str, content: str, expanded: bool = True):
     if not is_demo_project():
         return
 
-    with st.expander(f"**Learn More: {title}**", expanded=expanded):
+    slot = _DEMO_GUIDANCE_SLOT.get()
+    with (
+        slot.container() if slot is not None else nullcontext(),
+        st.expander(f"**Learn More: {title}**", expanded=expanded),
+    ):
         demo_container(content)

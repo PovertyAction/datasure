@@ -137,6 +137,50 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   budget. None is over it: the slowest delta, Outliers, is about 0.3 s on the
   generated form in every period, and the deltas add 0.7 to 0.9 s to the
   rows end to end, so every delta is still computed on load
+- **Demo project guidance** (#361 items 5-9, #365): demo guidance now covers
+  the project-level features.
+  - The Start page demo row (`start_view._render_demo_row`) has an **Export**
+    button (key `demo_export`) next to Resume and Restart, shown once the demo
+    exists. It opens the existing `_export_config_dialog` with
+    `DEMO_PROJECT_NAME`, so the demo exports like any project; the bundle is
+    built only when the dialog opens
+  - `OnboardingSteps.OUTPUTS` asks for the sidebar **Reviewer name** before
+    the first correction. `OnboardingSteps.CONFIGURE` edits only the survey
+    target of the main page and removes a throwaway second page, so the
+    walkthrough page survives; the page names and targets are named once in
+    `DEMO_PAGE_NAME`, `DEMO_SURVEY_TARGET`, `DEMO_EDITED_TARGET` and
+    `DEMO_THROWAWAY_PAGE`. `OnboardingSteps.REPLICATION` starts with a project
+    export from the demo row, since ticking the PII confirmation at the end
+    completes the demo, then builds the package in page order (**Page Name**,
+    **Exclude reviewer names** just below it, then **Selected page details**).
+    It explains Update from configuration and Delete project without running
+    them
+  - New `ImportDemoInfo.SURVEYCTO_INFO` replaces the Import Data callout above
+    Manage Credentials. It walks through the SurveyCTO credential and import
+    forms without a server or credentials and says not to submit them
+  - Tests: `TestProjectGuidance` checks that each label the new guidance names
+    is in the guidance and in the source file that renders it, and that the
+    loaded demo exports a bundle; `TestRenderDemoRow` covers the Export button
+  - Files: `src/datasure/utils/onboarding_utils.py`,
+    `src/datasure/views/start_view.py`, `src/datasure/views/import_view.py`
+- **Demo guidance for check-page reviews** (#361, #365): `demo_callout`s walk
+  through accepting a soft age violation and correcting a land outlier in
+  the Outliers **Review** dialog (with **Show reviewed**), accepting a GPS
+  outlier, attributing two backcheck mismatches (Enumerator without a note,
+  Respondent with one) and reading the **Attribution log**, and checking the
+  GPS columns under **Other Duplicates**. The values they name are new
+  entries in `onboarding_utils.py` (`DEMO_AGE_BOUNDS`, `DEMO_OUTLIER_ACCEPT`,
+  `DEMO_OUTLIER_CORRECTION`, `DEMO_GPS_ACCEPT`, `DEMO_ATTRIBUTION_NO_NOTE`,
+  `DEMO_ATTRIBUTION_WITH_NOTE`, `DEMO_SHARED_LONGITUDE`), each tested
+  against the real demo data in `TestReviewGuidanceValues`. Records are a
+  `DemoRecord` (hhid, KEY); `DemoFlag` and `DemoMismatch` hold one, and
+  `DemoFlag` also replaces `DemoCorrection` for `DEMO_LAND_CORRECTION`. The
+  Outliers and GPS callouts share `demo_accept_steps` and
+  `DEMO_SHOW_REVIEWED`, and name the Review button by `REVIEW_BUTTON_LABEL`.
+  The backcheck callout (`_attribution_guidance`) names the column by
+  `ERROR_SOURCE_LABEL` ("Error Source"), the header users see. The GPS
+  outliers guidance moved into `_render_gps_outliers_checks`, so it also
+  shows without a Mapbox token
 
 ### Changed
 
@@ -244,6 +288,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Demo Learn More shared a row with check settings** (#365): on Summary,
+  Progress, Duplicates, Outliers, GPS, Enumerator and Backchecks, the "Learn
+  More" expander sat beside the settings expander instead of above it. The
+  settings function draws it, and `reset_filters_beside` runs that function in
+  a horizontal row. `reset_filters_beside` now wraps the row in
+  `onboarding_utils.demo_guidance_above`, which reserves an `st.empty()` slot
+  above the row, and `demo_expander` draws there
+- **Demo configuration file set up nothing** (#365): a configuration exported
+  from the demo's **Export** button imported 0 datasets and created 0 pages,
+  and the result still showed as a success
+  - Root cause: the demo's import_log rows use source `"Demo Data"`, which
+    `_import_dataset` did not handle. `ImportSourceEntry.source` was a plain
+    string, so the bundle passed validation and the Import button was enabled
+  - Solution: `_import_dataset` dispatches to one helper per source, and the
+    new `_import_demo_dataset` rebuilds the dataset with
+    `onboarding_utils.build_demo_datasets`, split out of `load_demo_data`.
+    The packaged CSVs can't be imported as local files instead: they lack the
+    generated date and backcheck fields the pages use.
+    `ImportSourceEntry.source` is now `Literal["SurveyCTO", "local storage",
+    "Demo Data"]`, so a bundle with any other source is rejected when read.
+    `_render_config_apply_result` shows an error when nothing was set up
+- **Stale demo guidance on check pages** (#361, #365): the Backchecks Summary
+  callout said four metrics (five show, including Mismatches Attributed), the
+  GPS outliers callout said the outliers could only be downloaded, and the
+  Other Duplicates callout said to skip the section
 - **Restart Demo did not reset the demo** (#357): After Restart, correction
   logs, page settings and per-check configs from the previous demo came back
   when the "Household HFCs" page was recreated, and Exit Demo left demo
@@ -280,6 +349,32 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `src/datasure/views/start_view.py`,
     `src/datasure/utils/navigations_utils.py`,
     `src/datasure/utils/onboarding_utils.py`
+- **Demo ended three times** (#362, #365): The Backchecks comparison
+  callout and the Correct Data guidance both said the demo was complete
+  before the Replication step, and Replication said it again in a text-only
+  callout; the completion message with Restart and Create Real Project was
+  never shown
+  - Root cause: each page added its own ending, and
+    `show_demo_completion_message` was never called. Its Restart only set the
+    onboarding step to 1, so it would not have reset the demo
+  - Solution: `show_demo_completion_message` moved to
+    `utils/navigations_utils.py` and is called once, from
+    `views/replication_view.py` after the PII confirmation is ticked. Its
+    balloons show once per demo run (session flag `DEMO_CELEBRATED_KEY`,
+    cleared by Restart and Exit with the rest of the demo's session state),
+    not on every rerun of the page. Its Restart opens the same confirm dialog as the sidebar Restart and runs
+    `reset_demo_project()` (`_restart_demo`, shared by both); Create Real
+    Project calls `exit_demo()` and opens the Start page. The other endings
+    are removed, along with the unreachable "Congratulations" branch of
+    `show_next_steps`
+  - Tests (#364): `TestShowDemoCompletionMessage` and
+    `test_completion_message_is_the_only_demo_complete_message` in
+    `tests/utils/test_navigations_utils.py`; `TestDemoCompletion` in
+    `tests/views/test_replication_view.py`
+  - Files: `src/datasure/utils/navigations_utils.py`,
+    `src/datasure/utils/onboarding_utils.py`,
+    `src/datasure/views/replication_view.py`,
+    `src/datasure/checks/backchecks/report_ui.py`
 - **Demo data seeded and complete** (#360, #365): Every Start or Restart
   Demo drew new random dates, consent and completion values, so reports
   changed between runs; backchecks could predate their survey; and several
@@ -310,6 +405,49 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     `src/datasure/assets/demo_survey.csv`,
     `src/datasure/assets/demo_backcheck.csv`,
     `scripts/benchmark_check_health.py`
+- **Stale demo guidance** (#356, #365): Demo guidance named columns, widget
+  labels and counts that no longer matched the demo data or the UI, showed
+  two instruction sets on the Correct Data and Replication pages, and gave
+  worked examples that produced little or nothing
+  - Root cause: guidance text hard-coded column names and labels, so it
+    drifted as the UI and the demo data changed
+  - Solution: `DemoColumn` and `DemoBackcheckColumn` (`StrEnum`s in
+    `utils/onboarding_utils.py`, collected in `DEMO_GUIDANCE_COLUMNS` by
+    dataset alias) list every demo column guidance names, and the guidance
+    f-strings use them, so adding a column to guidance means adding a member.
+    The demo values guidance names (the duplicate `hhid`s, their KEYs and
+    new IDs in `DEMO_DUPLICATES`, and the `land_acre` correction 75.5 to 5.5
+    in `DEMO_LAND_CORRECTION`) are named once next to them, and the Prepare
+    page's check for the `submissiondate` conversion reads the column from
+    them too. Labels, section counts and metric names now match the Missing, Summary,
+    Progress, Outliers, GPS, Enumerator, Backchecks, Prepare and Configure
+    pages (for example `household_count` for `household_size`, no GPS
+    accuracy or form version column, "Auto-Clustering (LOF)", "Total
+    Columns"). Worked examples use the seeded data: a progress target of 3 a
+    day against the demo's ~2.4, `household_count` and `land_acre` as
+    outlier columns, and Modify ID / Drop on the Duplicates cards for all
+    three duplicate `hhid`s (UP015-005, GJ013-025, and AN002-003, whose
+    dropped record is a near-empty submission). The
+    `summary_check_health` guidance describes the Check health columns,
+    statuses and Comparison period. The Correct Data page keeps only the
+    `OnboardingSteps.CORRECT` step guidance, now a `land_acre` correction;
+    `ImportDemoInfo.ADD_CORRECTION_STEP_INFO` and its expander in
+    `correction_view.render_page_header` are removed. The Replication page
+    drops its copy of the `OnboardingSteps.REPLICATION` text
+  - Tests (#364): `TestRealDemoData.test_every_column_named_in_guidance_exists`
+    checks every `DEMO_GUIDANCE_COLUMNS` member against the real demo data;
+    the `TestRealDemoData` duplicate and correction tests check that each
+    duplicate pair and KEY exists, each new ID is unused, the dropped
+    AN002-003 record is the emptier one, and 75.5 is an IQR outlier while
+    5.5 is not
+  - Files: `src/datasure/utils/onboarding_utils.py`,
+    `src/datasure/checks/duplicates.py`,
+    `src/datasure/checks/backchecks/report_ui.py`,
+    `src/datasure/checks/enumerator/report_ui.py`,
+    `src/datasure/checks/gpschecks/report_ui.py`,
+    `src/datasure/checks/outliers/report_ui.py`,
+    `src/datasure/views/correction_view.py`,
+    `src/datasure/views/prep_view.py`, `src/datasure/views/replication_view.py`
 - **DuckDB 2.0 compatibility** (#393): Fresh installs that resolved duckdb
   2.0 failed on the first table read or write, so data could not be imported
   - Root cause: duckdb 2.0 removed `.pl()` from `execute()` results and

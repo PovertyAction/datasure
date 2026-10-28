@@ -489,8 +489,8 @@ def _base_reload_patches(configs=None, extra_patches=()):
     return stack
 
 
-class TestModuleLevelCodeCoverage:
-    """Cover module-level page execution branches via importlib.reload."""
+class _ReloadHarness:
+    """Run the page's module-level code via importlib.reload."""
 
     @pytest.fixture(autouse=True)
     def _restore_module(self):
@@ -544,6 +544,10 @@ class TestModuleLevelCodeCoverage:
             _st.cache_data = orig_cd
             _st.columns = orig_cols
             _st.stop.side_effect = None
+
+
+class TestModuleLevelCodeCoverage(_ReloadHarness):
+    """Cover module-level page execution branches via importlib.reload."""
 
     def test_page_selected_covers_selector_config_and_preview(self):
         """Reload with a selected page covers session-state cleanup (324-326),
@@ -607,3 +611,39 @@ class TestModuleLevelCodeCoverage:
             }
         )
         self._reload(configs=empty, stop_raises=True)
+
+
+class TestDemoCompletion(_ReloadHarness):
+    """The demo ends here: the completion message shows once the PII box is ticked."""
+
+    def _reload_with_package(self, pii_confirmed):
+        """Build the package; return the completion message mock."""
+        completion = MagicMock()
+        try:
+            self._reload(
+                selectbox_val="Household HFCs",
+                button_val=True,
+                checkbox_val=pii_confirmed,
+                extra_patches=(
+                    patch(
+                        "datasure.utils.navigations_utils.show_demo_completion_message",
+                        completion,
+                    ),
+                ),
+            )
+        finally:
+            _st.session_state.pop("_replication_zip", None)
+            _st.session_state.pop("_replication_filename", None)
+        return completion
+
+    def test_confirmed_package_shows_completion_message(self):
+        """Ticking the PII box after building ends the demo."""
+        completion = self._reload_with_package(pii_confirmed=True)
+
+        completion.assert_called_once_with()
+
+    def test_unconfirmed_package_does_not_end_the_demo(self):
+        """Without the PII confirmation the demo is not over yet."""
+        completion = self._reload_with_package(pii_confirmed=False)
+
+        completion.assert_not_called()

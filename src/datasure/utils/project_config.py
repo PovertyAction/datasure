@@ -50,6 +50,7 @@ from datasure.utils.duckdb_utils import (
     missing_codes_table_name,
     name_id,
 )
+from datasure.utils.onboarding_utils import DEMO_DATA_SOURCE, build_demo_datasets
 from datasure.utils.reapply_utils import ReapplyFailure, warn_reapply_failures
 from datasure.utils.secure_credentials import list_stored_credentials
 from datasure.utils.view_state import (
@@ -548,6 +549,113 @@ def _merge_missing_codes(project_id: str, rows: list[dict]) -> None:
     duckdb_save_table(project_id, merged, alias=table, db_name="logs")
 
 
+def _import_local_dataset(
+    project_id: str, ds: ImportSourceEntry, local_file_paths: dict[str, str]
+) -> tuple[bool, str | None]:
+    """Import a "local storage" dataset from the path the user supplied."""
+    path = local_file_paths.get(ds.alias)
+    if not path:
+        return False, "No file path was provided"
+    try:
+        file_config = FileConfig(
+            alias=ds.alias, filename=path, sheet_name=ds.sheet_name
+        )
+    except ValidationError as e:
+        return False, str(e)
+    _append_import_log_row(
+        project_id,
+        {
+            "refresh": True,
+            "load": True,
+            "source": "local storage",
+            "alias": file_config.alias,
+            "filename": file_config.filename,
+            "sheet_name": file_config.sheet_name or "",
+            "server": "",
+            "username": "",
+            "form_id": "",
+            "private_key": "",
+            "save_to": "",
+            "attachments": False,
+        },
+    )
+    load_local_data(
+        project_id, file_config.alias, file_config.filename, file_config.sheet_name
+    )
+    return True, None
+
+
+def _import_surveycto_dataset(
+    project_id: str, ds: ImportSourceEntry
+) -> tuple[bool, str | None]:
+    """Download a SurveyCTO dataset with the project's stored credentials."""
+    username = _stored_username_for_server(project_id, ds.server or "") or ds.username
+    if not ds.server or not username:
+        return False, "No SurveyCTO credentials were provided for this server"
+    form_config = FormConfig(
+        alias=ds.alias,
+        form_id=ds.form_id or "",
+        server=ds.server,
+        username=username,
+        attachments=ds.attachments,
+    )
+    _append_import_log_row(
+        project_id,
+        {
+            "refresh": True,
+            "load": True,
+            "source": "SurveyCTO",
+            "alias": form_config.alias,
+            "filename": "",
+            "sheet_name": "",
+            "server": form_config.server,
+            "username": form_config.username or "",
+            "form_id": form_config.form_id,
+            "private_key": "",
+            "save_to": "",
+            "attachments": form_config.attachments,
+        },
+    )
+    download_forms(project_id, [form_config])
+    return True, None
+
+
+def _import_demo_dataset(
+    project_id: str, ds: ImportSourceEntry
+) -> tuple[bool, str | None]:
+    """Rebuild a demo dataset, as the demo builds it.
+
+    The demo's raw tables are generated from the packaged files, not read
+    from a file the user has, so there is nothing to resolve.
+    """
+    try:
+        data = build_demo_datasets().get(ds.alias)
+    except Exception as e:
+        logger.exception("Failed to build the demo data for %s", ds.alias)
+        return False, f"The demo data could not be built: {e}"
+    if data is None:
+        return False, f"The demo has no dataset named '{ds.alias}'"
+    _append_import_log_row(
+        project_id,
+        {
+            "refresh": True,
+            "load": True,
+            "source": DEMO_DATA_SOURCE,
+            "alias": ds.alias,
+            "filename": ds.filename or "",
+            "sheet_name": "",
+            "server": "",
+            "username": "",
+            "form_id": "",
+            "private_key": "",
+            "save_to": "",
+            "attachments": False,
+        },
+    )
+    duckdb_save_table(project_id, data, alias=ds.alias, db_name="raw")
+    return True, None
+
+
 def _import_dataset(
     project_id: str, ds: ImportSourceEntry, local_file_paths: dict[str, str]
 ) -> tuple[bool, str | None]:
@@ -559,70 +667,11 @@ def _import_dataset(
         (True, None) on success, or (False, reason) if it was skipped.
     """
     if ds.source == "local storage":
-        path = local_file_paths.get(ds.alias)
-        if not path:
-            return False, "No file path was provided"
-        try:
-            file_config = FileConfig(
-                alias=ds.alias, filename=path, sheet_name=ds.sheet_name
-            )
-        except ValidationError as e:
-            return False, str(e)
-        _append_import_log_row(
-            project_id,
-            {
-                "refresh": True,
-                "load": True,
-                "source": "local storage",
-                "alias": file_config.alias,
-                "filename": file_config.filename,
-                "sheet_name": file_config.sheet_name or "",
-                "server": "",
-                "username": "",
-                "form_id": "",
-                "private_key": "",
-                "save_to": "",
-                "attachments": False,
-            },
-        )
-        load_local_data(
-            project_id, file_config.alias, file_config.filename, file_config.sheet_name
-        )
-        return True, None
-
+        return _import_local_dataset(project_id, ds, local_file_paths)
     if ds.source == "SurveyCTO":
-        username = (
-            _stored_username_for_server(project_id, ds.server or "") or ds.username
-        )
-        if not ds.server or not username:
-            return False, "No SurveyCTO credentials were provided for this server"
-        form_config = FormConfig(
-            alias=ds.alias,
-            form_id=ds.form_id or "",
-            server=ds.server,
-            username=username,
-            attachments=ds.attachments,
-        )
-        _append_import_log_row(
-            project_id,
-            {
-                "refresh": True,
-                "load": True,
-                "source": "SurveyCTO",
-                "alias": form_config.alias,
-                "filename": "",
-                "sheet_name": "",
-                "server": form_config.server,
-                "username": form_config.username or "",
-                "form_id": form_config.form_id,
-                "private_key": "",
-                "save_to": "",
-                "attachments": form_config.attachments,
-            },
-        )
-        download_forms(project_id, [form_config])
-        return True, None
-
+        return _import_surveycto_dataset(project_id, ds)
+    if ds.source == DEMO_DATA_SOURCE:
+        return _import_demo_dataset(project_id, ds)
     return False, f"Unknown import source: {ds.source}"
 
 
@@ -794,10 +843,14 @@ def _render_config_apply_result(result: ConfigApplyResult) -> None:
     """Render a summary of what applying a configuration did."""
     import streamlit as st
 
-    st.success(
+    summary = (
         f"Imported {len(result.datasets_imported)} dataset(s) and created "
         f"{len(result.pages_created)} HFC page(s)."
     )
+    if result.datasets_imported or result.pages_created:
+        st.success(summary)
+    else:
+        st.error(f"{summary} Nothing was set up; the reasons are listed below.")
     warn_reapply_failures(
         result.datasets_skipped, "Some datasets could not be imported"
     )

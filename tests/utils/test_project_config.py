@@ -8,6 +8,7 @@ from unittest.mock import Mock, patch
 import polars as pl
 import pytest
 from polars.testing import assert_frame_equal
+from pydantic import ValidationError
 
 from datasure.checks.health import PERIOD_SCOPE
 from datasure.models.schemas import (
@@ -22,8 +23,17 @@ from datasure.utils.duckdb_utils import (
     duckdb_table_exists,
 )
 from datasure.utils.nav_ui import PROJECT_VIEW_FILE
+from datasure.utils.onboarding_utils import (
+    DEMO_DATA_SOURCE,
+    DEMO_PAGE_NAME,
+    DEMO_PROJECT_ID,
+    DEMO_PROJECT_NAME,
+    load_demo_data,
+)
 from datasure.utils.project_config import (
     BUNDLE_VERSION,
+    ConfigApplyResult,
+    _render_config_apply_result,
     _render_config_summary,
     _stored_username_for_server,
     apply_project_config,
@@ -1196,3 +1206,112 @@ class TestAddConfigurationRerun:
         )
 
         mock_st.rerun.assert_not_called()
+
+
+# === DEMO BUNDLES === #
+
+
+def _demo_page_service():
+    service = Mock()
+    service.get_all_configurations.return_value = pl.DataFrame(
+        {
+            "page_name": [DEMO_PAGE_NAME],
+            "survey_data_name": ["demo_survey"],
+            "survey_key": ["KEY"],
+        }
+    )
+    service.page_name_exists.return_value = False
+    return service
+
+
+@patch("datasure.utils.project_config.CorrectionProcessor")
+@patch("datasure.utils.project_config.ConfigurationService")
+class TestDemoBundle:
+    """A configuration exported from the demo sets up a project when applied."""
+
+    def test_applying_a_demo_export_rebuilds_the_demo_data(
+        self, mock_service_cls, mock_correction_cls, real_duckdb
+    ):
+        """The demo datasets are rebuilt as the demo builds them; the page is made."""
+        mock_service_cls.return_value = _demo_page_service()
+        assert load_demo_data()
+        bundle = parse_project_config(
+            export_project_config(DEMO_PROJECT_ID, DEMO_PROJECT_NAME).model_dump_json()
+        )
+
+        result = apply_project_config(DST_PROJECT, bundle, local_file_paths={})
+
+        assert result.datasets_imported == ["demo_survey", "demo_backcheck"]
+        assert result.datasets_skipped == []
+        assert result.pages_created == [DEMO_PAGE_NAME]
+        for alias in ("demo_survey", "demo_backcheck"):
+            demo = duckdb_get_table(DEMO_PROJECT_ID, alias, "raw")
+            copy = duckdb_get_table(DST_PROJECT, alias, "raw")
+            assert copy.columns == demo.columns
+            assert copy.height == demo.height
+        import_log = duckdb_get_table(DST_PROJECT, "import_log", "logs")
+        assert import_log["source"].to_list() == [DEMO_DATA_SOURCE] * 2
+
+    def test_a_demo_bundle_needs_nothing_resolved(self, *_mocks):
+        """Demo datasets need no file path or sign-in, so Import is enabled."""
+        bundle = ProjectConfigBundle(
+            exported_from_project=DEMO_PROJECT_NAME,
+            exported_at="t",
+            datasets=[ImportSourceEntry(alias="demo_survey", source=DEMO_DATA_SOURCE)],
+        )
+
+        assert missing_local_files(bundle) == []
+        assert missing_credentials(PROJECT_ID, bundle) == []
+
+    def test_an_unknown_demo_alias_is_skipped_with_a_reason(
+        self, mock_service_cls, mock_correction_cls, real_duckdb
+    ):
+        bundle = ProjectConfigBundle(
+            exported_from_project=DEMO_PROJECT_NAME,
+            exported_at="t",
+            datasets=[ImportSourceEntry(alias="other", source=DEMO_DATA_SOURCE)],
+        )
+
+        result = apply_project_config(DST_PROJECT, bundle, local_file_paths={})
+
+        assert result.datasets_imported == []
+        assert result.datasets_skipped == [
+            ReapplyFailure("other", "The demo has no dataset named 'other'")
+        ]
+
+
+class TestImportSourceValidation:
+    def test_a_bundle_with_an_unsupported_source_is_rejected(self):
+        """A source DataSure can't import fails when read, not when applied."""
+        raw = json.dumps(
+            {
+                "exported_from_project": "p",
+                "exported_at": "t",
+                "datasets": [{"alias": "household", "source": "Dropbox"}],
+            }
+        )
+
+        with pytest.raises(ValidationError, match="source"):
+            parse_project_config(raw)
+
+
+class TestApplyResult:
+    @pytest.mark.parametrize(
+        ("result", "shown"),
+        [
+            (ConfigApplyResult(datasets_imported=["household"]), "success"),
+            (ConfigApplyResult(pages_created=[PAGE_NAME]), "success"),
+            (
+                ConfigApplyResult(
+                    datasets_skipped=[ReapplyFailure("household", "No file")]
+                ),
+                "error",
+            ),
+        ],
+    )
+    def test_success_only_when_something_was_set_up(self, result, shown):
+        with patch("streamlit.success") as success, patch("streamlit.error") as error:
+            _render_config_apply_result(result)
+
+        assert success.called is (shown == "success")
+        assert error.called is (shown == "error")

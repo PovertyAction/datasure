@@ -1,5 +1,8 @@
 """Tests for the navigation utilities module."""
 
+import re
+from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -14,6 +17,7 @@ from datasure.utils.navigations_utils import (
     demo_callout,
     demo_sidebar_help,
     page_navigation,
+    show_demo_completion_message,
     show_demo_next_action,
 )
 
@@ -650,3 +654,160 @@ class TestDemoSidebarHelp:
 
         mock_exit.assert_called_once_with()
         mock_st.switch_page.assert_called_once_with("views/start.py")
+
+
+class _SessionState(dict):
+    """Session state stand-in with dict and attribute access."""
+
+    def __getattr__(self, name):
+        try:
+            return self[name]
+        except KeyError as e:
+            raise AttributeError(name) from e
+
+    def __setattr__(self, name, value):
+        self[name] = value
+
+
+class TestShowDemoCompletionMessage:
+    """The demo's single completion message, shown after the Replication step."""
+
+    @pytest.fixture
+    def page(self):
+        """Patch the message's collaborators; return them with a render helper.
+
+        The demo is active and complete unless a test changes
+        ``page.is_demo_project`` or ``page.is_demo_complete``.
+        """
+        module = "datasure.utils.navigations_utils"
+        with (
+            patch(f"{module}.st") as mock_st,
+            patch(f"{module}.is_demo_project", return_value=True) as is_demo,
+            patch(f"{module}.is_demo_complete", return_value=True) as complete,
+            patch(f"{module}.reset_demo_project") as reset_demo,
+            patch(f"{module}.confirm_dialog") as dialog,
+            patch(f"{module}.exit_demo") as exit_demo,
+            patch(f"{module}.queue_notice") as queue,
+        ):
+            mock_st.session_state = _SessionState(
+                st_start_page="views/start.py",
+                st_import_data_page="views/import.py",
+            )
+            mock_st.columns.return_value = [MagicMock(), MagicMock()]
+
+            def render(clicked=None):
+                """Render the message with button ``clicked`` pressed.
+
+                Buttons rendered: Restart Demo, Create Real Project.
+                """
+                assert clicked in (None, "Restart Demo", "Create Real Project")
+                mock_st.button.side_effect = lambda label, **_kw: label == clicked
+                show_demo_completion_message()
+
+            yield SimpleNamespace(
+                st=mock_st,
+                is_demo_project=is_demo,
+                is_demo_complete=complete,
+                reset_demo=reset_demo,
+                dialog=dialog,
+                exit_demo=exit_demo,
+                queue_notice=queue,
+                render=render,
+            )
+
+    def test_non_demo_renders_nothing(self, page):
+        """Outside the demo nothing is shown."""
+        page.is_demo_project.return_value = False
+
+        page.render()
+
+        page.st.balloons.assert_not_called()
+        page.st.success.assert_not_called()
+        page.st.button.assert_not_called()
+
+    def test_incomplete_demo_renders_nothing(self, page):
+        """Before the last step nothing is shown."""
+        page.is_demo_complete.return_value = False
+
+        page.render()
+
+        page.st.balloons.assert_not_called()
+        page.st.success.assert_not_called()
+        page.st.button.assert_not_called()
+
+    def test_complete_demo_celebrates_and_offers_next_steps(self, page):
+        """A completed demo shows balloons, the message and both actions."""
+        page.render()
+
+        page.st.balloons.assert_called_once()
+        page.st.success.assert_called_once()
+        labels = [c.args[0] for c in page.st.button.call_args_list]
+        assert labels == ["Restart Demo", "Create Real Project"]
+
+    def test_balloons_show_once_per_demo_run(self, page):
+        """Reruns keep the message and buttons but do not repeat the balloons."""
+        page.render()
+        page.render()
+        page.render()
+
+        page.st.balloons.assert_called_once()
+        assert page.st.success.call_count == 3
+
+    def test_restart_asks_for_confirmation_first(self, page):
+        """Restart opens the same confirm dialog as the sidebar Restart."""
+        page.render(clicked="Restart Demo")
+
+        page.dialog.assert_called_once()
+        assert page.dialog.call_args.args[1] == RESTART_DEMO_MESSAGE
+        page.reset_demo.assert_not_called()
+        page.st.switch_page.assert_not_called()
+
+    def test_confirming_restart_does_the_full_reset(self, page):
+        """Confirming Restart runs the full demo reset and opens the import page."""
+        page.render(clicked="Restart Demo")
+
+        page.dialog.call_args.kwargs["on_confirm"]()
+
+        page.reset_demo.assert_called_once_with()
+        page.st.switch_page.assert_called_once_with("views/import.py")
+
+    def test_failed_restart_opens_start_page_with_the_error(self, page):
+        """A failed reset shows its error on the Start page, as in the sidebar."""
+        page.reset_demo.return_value = False
+        page.render(clicked="Restart Demo")
+
+        page.dialog.call_args.kwargs["on_confirm"]()
+
+        page.queue_notice.assert_called_once_with(
+            DEMO_NOTICE_SCOPE, "error", DEMO_RESET_FAILED_MESSAGE
+        )
+        page.st.switch_page.assert_called_once_with("views/start.py")
+
+    def test_create_real_project_exits_demo_to_start_page(self, page):
+        """Create Real Project leaves the demo and opens the Start page."""
+        page.render(clicked="Create Real Project")
+
+        page.exit_demo.assert_called_once_with()
+        page.st.switch_page.assert_called_once_with("views/start.py")
+
+
+def test_completion_message_is_the_only_demo_complete_message(datasure_sources):
+    """Only show_demo_completion_message tells the user the demo is complete.
+
+    The demo used to end in three places at once (Backchecks, Correct Data and
+    Replication); this catches a second completion message coming back.
+    """
+    wording = re.compile(
+        r"(completed|end of|finished) (the )?(DataSure )?demo"
+        r"|demo complete|congratulations",
+        re.IGNORECASE,
+    )
+    found = [
+        f"{path}:{lineno}"
+        for path, text in datasure_sources
+        for lineno, line in enumerate(text.splitlines(), start=1)
+        if wording.search(line)
+    ]
+
+    assert len(found) == 1, found
+    assert found[0].startswith(str(Path("utils", "navigations_utils.py")))

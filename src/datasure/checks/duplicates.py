@@ -57,7 +57,15 @@ from datasure.utils.duckdb_utils import (
 )
 from datasure.utils.navigation import READY, CheckStatus, StatusResult
 from datasure.utils.navigations_utils import demo_callout
-from datasure.utils.onboarding_utils import demo_output_onboarding, is_demo_project
+from datasure.utils.onboarding_utils import (
+    DEMO_REPEAT_SUBMISSION,
+    DEMO_SHARED_ID,
+    DEMO_SHARED_LONGITUDE,
+    DEMO_WRONG_ID,
+    DemoColumn,
+    demo_output_onboarding,
+    is_demo_project,
+)
 from datasure.utils.settings_utils import (
     load_check_settings,
     save_check_settings,
@@ -2309,17 +2317,37 @@ def duplicates_report(
 
     if is_demo_project():
         demo_callout(
-            "This section shows one card for each **hhid** (household ID) shared "
-            "by more than one survey record. Each card compares the records side "
-            "by side and highlights the fields that differ. "
+            f"This section shows one card for each **{DemoColumn.HHID}** (household "
+            "ID) shared by more than one survey record. Each card compares the "
+            "records side by side and highlights the fields that differ. "
             "Use **Compare all fields** on a card to see every column, and "
             "expand **:material/clarify: Show more columns in report** to add "
-            "context columns such as **enum_name** or **state** to every card.\n\n"
+            f"context columns such as **{DemoColumn.ENUM_NAME}** or "
+            f"**{DemoColumn.STATE}** to every card.\n\n"
             "To resolve a card, choose **Keep**, **Modify ID** or **Drop** for "
-            "each record so that at most one record keeps the ID, then give a "
-            "reason and a note and click **Save**. The card disappears, and "
-            "**Resolved** counts the duplicate IDs that corrections have "
-            "resolved. Undo a save on the **Correct Data** page."
+            "each record so that at most one record keeps the ID, then choose a "
+            "**Reason**, write a **Note** and click **Save**. The card disappears, "
+            "and **Resolved** counts the duplicate IDs that corrections have "
+            "resolved. Undo a save on the **Correct Data** page.\n\n"
+            "##### Instructions for Demo:\n"
+            "The demo data has three duplicate household IDs. Resolve each card:\n"
+            f"- **{DEMO_WRONG_ID.hhid}**: the record with KEY "
+            f"**{DEMO_WRONG_ID.key}** belongs to household "
+            f"**{DEMO_WRONG_ID.new_hhid}**. Choose **Modify ID** for it, enter "
+            f"**{DEMO_WRONG_ID.new_hhid}**, and **Keep** the other record. "
+            "Reason: **Wrong ID entered**.\n"
+            f"- **{DEMO_SHARED_ID.hhid}**: two different respondents share the ID. "
+            "Choose **Modify ID** for the record with KEY "
+            f"**{DEMO_SHARED_ID.key}** and enter **{DEMO_SHARED_ID.new_hhid}**; "
+            "**Keep** the other record. Reason: **Wrong ID entered**.\n"
+            f"- **{DEMO_REPEAT_SUBMISSION.hhid}**: the record with KEY "
+            f"**{DEMO_REPEAT_SUBMISSION.key}** is a near-empty submission for the "
+            "same household: it lists no household members and leaves most "
+            "answers blank. Choose **Drop** for it and **Keep** the other record. "
+            "Reason: **Duplicate submission**.\n\n"
+            "Add a short **Note** to each card, such as *Confirmed with the field "
+            "team*, and click **Save**. When all three cards are gone, open "
+            "**Overview → Summary** to see them under **Resolved** in Check health."
         )
 
     # Build both views first: the switcher shows each one's duplicate count.
@@ -2377,10 +2405,22 @@ def duplicates_report(
 
     if is_demo_project():
         demo_callout(
-            "Use **Add Duplicates Column(s)** to check any column for duplicate values — "
-            "for example, a phone number or unique ID number. "
-            "The demo dataset has no additional columns that should be duplicate-free beyond "
-            "the household ID, so you can skip adding columns here."
+            "Use **Add Duplicates Column(s)** to check any other column for duplicate "
+            "values, such as a phone number or national ID number. Two households "
+            "rarely share exact GPS coordinates, so check those:\n\n"
+            "1. Click **Add Duplicates Column(s)**. Leave **Search type** as "
+            "**exact** and, under **Select columns to check for duplicates**, select "
+            f"**{DemoColumn.HOUSEHOLD_LATITUDE}** and "
+            f"**{DemoColumn.HOUSEHOLD_LONGITUDE}**.\n"
+            "2. Click **Add Duplicates Configuration**.\n\n"
+            "**Columns Checked** shows 2 and **Columns with Duplicates** shows 1. "
+            "Under **Select column to check for duplicates**, choose "
+            f"**{DEMO_SHARED_LONGITUDE.column}**: households "
+            f"**{' and '.join(DEMO_SHARED_LONGITUDE.hhids)}** share the longitude "
+            f"**{DEMO_SHARED_LONGITUDE.value}**. Their latitudes differ, so they "
+            "are not at the same place and need no correction. Use "
+            "**:material/clarify: Show more columns in report** to add "
+            f"**{DemoColumn.HOUSEHOLD_LATITUDE}** to the table and compare."
         )
 
     all_columns = data.columns

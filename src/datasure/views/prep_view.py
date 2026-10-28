@@ -57,6 +57,8 @@ from datasure.utils.navigations_utils import (
     show_demo_next_action,
 )
 from datasure.utils.onboarding_utils import (
+    DemoBackcheckColumn,
+    DemoColumn,
     ImportDemoInfo,
     demo_expander,
     is_demo_project,
@@ -1332,7 +1334,8 @@ def render_dataset(item: NavItem, step_index: int, tables: PrepTables) -> None:
     if is_demo_project():
         demo_callout(
             "Use **:material/add: Add data prep step** to transform your data. "
-            "The only required step is converting **submissiondate** to datetime — "
+            f"The only required step is converting **{DemoColumn.SUBMISSIONDATE}** "
+            "to datetime — "
             "all other transformations are optional.",
         )
 
@@ -1383,7 +1386,8 @@ def render_dataset(item: NavItem, step_index: int, tables: PrepTables) -> None:
         if is_demo_project():
             demo_callout(
                 f"Here's your **{alias}** data. Notice the data quality issues like missing values "
-                f"({miss_perc:.1f}% missing) that we'll identify in **Configure Quality Checks**.",
+                f"({miss_perc:.1f}% missing) that the quality reports will find once "
+                "you configure your checks.",
                 "info",
             )
 
@@ -1481,17 +1485,19 @@ if is_demo_project():
 
     if not prep_log_survey.is_empty() and not prep_log_backcheck.is_empty():
         # check that the correct prep steps have been added
-        pattern = r'"submissiondate"\s+updated\s+using\s+string\s+to\s+datetime'
-        if prep_log_survey["description"].str.contains(pattern).any():
-            enable_next_count += 1
-
-        if prep_log_backcheck["description"].str.contains(pattern).any():
-            enable_next_count += 1
+        for prep_log, date_column in (
+            (prep_log_survey, DemoColumn.SUBMISSIONDATE),
+            (prep_log_backcheck, DemoBackcheckColumn.SUBMISSIONDATE),
+        ):
+            pattern = rf'"{date_column}"\s+updated\s+using\s+string\s+to\s+datetime'
+            if prep_log["description"].str.contains(pattern).any():
+                enable_next_count += 1
 
     if enable_next_count < 2:
         demo_callout(
             "The **Configure Quality Checks** button will be enabled once you have converted "
-            "the **submissiondate** column to datetime in both **demo_survey** and **demo_backcheck**. "
+            f"the **{DemoColumn.SUBMISSIONDATE}** column to datetime in both "
+            "**demo_survey** and **demo_backcheck**. "
             "Follow the guidance at the top of the page to complete this step.",
             "warning",
         )

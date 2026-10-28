@@ -857,6 +857,57 @@ class TestRenderDemoRow:
         for deleted in ("corrections", "check pages", "settings", "data preparation"):
             assert deleted in message
 
+    def test_export_opens_the_export_dialog_for_the_demo(self, monkeypatch):
+        """The demo can be exported, using the same dialog as other projects."""
+        monkeypatch.setattr(
+            _st,
+            "button",
+            MagicMock(side_effect=lambda *a, key=None, **k: key == "demo_export"),
+        )
+
+        with (
+            patch("datasure.views.start_view.show_demo_intro"),
+            patch(
+                "datasure.views.start_view.load_projects",
+                return_value={DEMO_PROJECT_ID: {}},
+            ),
+            patch("datasure.views.start_view._export_config_dialog") as mock_dialog,
+        ):
+            start_view._render_demo_row()
+
+        mock_dialog.assert_called_once_with("DataSure Demo", DEMO_PROJECT_ID)
+
+    def test_rendering_demo_row_builds_no_export_bundle(self, monkeypatch):
+        """Showing the Export button must not export the demo on every rerun."""
+        monkeypatch.setattr(_st, "button", MagicMock(return_value=False))
+
+        with (
+            patch("datasure.views.start_view.show_demo_intro"),
+            patch(
+                "datasure.views.start_view.load_projects",
+                return_value={DEMO_PROJECT_ID: {}},
+            ),
+            patch("datasure.views.start_view.export_project_config") as mock_export,
+            patch("datasure.views.start_view._export_config_dialog") as mock_dialog,
+        ):
+            start_view._render_demo_row()
+
+        mock_export.assert_not_called()
+        mock_dialog.assert_not_called()
+
+    def test_no_export_before_the_demo_exists(self, monkeypatch):
+        mock_button = MagicMock(return_value=False)
+        monkeypatch.setattr(_st, "button", mock_button)
+
+        with (
+            patch("datasure.views.start_view.show_demo_intro"),
+            patch("datasure.views.start_view.load_projects", return_value={}),
+        ):
+            start_view._render_demo_row()
+
+        keys = [c.kwargs.get("key") for c in mock_button.call_args_list]
+        assert "demo_export" not in keys
+
     def test_start_demo_when_no_demo_exists(self, monkeypatch):
         monkeypatch.setattr(_st, "button", MagicMock(return_value=True))
 

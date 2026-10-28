@@ -15,8 +15,8 @@ from datasure.utils.config_utils import ConfigurationService
 from datasure.utils.duckdb_utils import duckdb_get_table
 from datasure.utils.navigations_utils import (
     add_demo_navigation,
-    demo_callout,
     demo_sidebar_help,
+    show_demo_completion_message,
 )
 from datasure.utils.scto_api import (
     SurveyCTOAPIClient,
@@ -270,26 +270,6 @@ page_header(
     "your corrected dataset from the raw source data.",
 )
 
-demo_callout(
-    """
-    This page bundles everything needed to reproduce your corrected dataset into a
-    single downloadable zip file — raw data, Stata do-files (import, prepare,
-    correct), correction and prep logs, codebooks, and a README.
-
-    ##### Instructions for Demo:
-    1. Under **Page Name**, select **Household HFCs**.
-    2. Review the configuration details that appear below the selector, then
-       expand **What's inside the zip?** to see the full directory structure.
-    3. Click **Build Replication Package**. DataSure will assemble the zip in seconds.
-    4. Once the build completes, check the PII confirmation box and click
-       **Download replication package (.zip)**.
-
-    The demo dataset is synthetic and contains no real PII. In a live project the
-    zip would include raw respondent data and must be stored on an encrypted,
-    access-controlled drive in accordance with IPA data policy.
-    """
-)
-
 st.error(
     "**This package contains personally identifiable information (PII).** "
     "The zip file includes raw survey data with respondent PII. "
@@ -413,15 +393,8 @@ if "_replication_zip" in st.session_state:
     )
 
     if pii_confirmed:
-        demo_callout(
-            "You have completed the DataSure demo! You have gone through the full "
-            "workflow — importing data, preparing it, configuring quality checks, "
-            "reviewing reports, correcting data issues, and exporting a replication "
-            "package.\n\n"
-            "To exit the demo and return to the project selection screen, click the "
-            "**Exit Demo** button in the sidebar.",
-            type="success",
-        )
+        # Replication is the demo's last step, so the demo ends here.
+        show_demo_completion_message()
 
 # ── Preview ───────────────────────────────────────────────────────────────────
 
