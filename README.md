@@ -90,6 +90,27 @@ uv tool upgrade datasure
 - **Storage**: 1GB free space for application and data cache
 - **Internet**: Required for SurveyCTO integration and updates
 
+### Running on a server
+
+DataSure keeps SurveyCTO passwords and the Mapbox token in the operating
+system's keyring and never writes them to disk unencrypted. Desktops provide a
+keyring (Windows Credential Manager, macOS Keychain, GNOME Keyring or KWallet).
+A headless Linux server or container usually has none, so saving credentials
+fails until you configure one:
+
+- Install an **encrypted** keyring backend that suits your environment, such
+  as `keyrings.cryptfile` (an encrypted file whose key comes from an
+  environment variable or secret store) or a backend for your platform's
+  secret manager, into the same environment as DataSure.
+- Select it with the `PYTHON_KEYRING_BACKEND` environment variable, for
+  example `PYTHON_KEYRING_BACKEND=keyrings.cryptfile.cryptfile.CryptFileKeyring`.
+- Plaintext file backends (such as `keyrings.alt.file.PlaintextKeyring`) are
+  not supported: **Import Data → Keyring Diagnostics** warns when one is
+  active.
+
+**Import Data → Keyring Diagnostics → Test Keyring Availability** shows which
+backend is active and whether it is usable.
+
 ## Data Quality Check Modules
 
 DataSure includes 9 specialized modules for comprehensive survey data quality monitoring:
