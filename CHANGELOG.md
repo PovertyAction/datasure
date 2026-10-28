@@ -288,6 +288,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **SurveyCTO date and datetime questions imported blank** (#395): every form
+  question of type `date`, `datetime` or `time` imported as an all-null
+  `Datetime` column. The standard columns (`SubmissionDate`, `starttime`,
+  `endtime`, `CompletionDate`) and local-file imports were not affected
+  - Root cause: `DataProcessor._convert_column_by_type` parsed them with
+    `format="%+"` (ISO 8601 with an offset) and `strict=False`. The wide JSON
+    API sends `"Mar 7, 2025"` and `"Mar 7, 2025 4:06:12 PM"`, so every value
+    turned null without a warning
+  - Solution: `date` parses strictly with `"%b %d, %Y"` to `Date`, and
+    `datetime` with `SurveyCTOConfig.date_format` to a naive `Datetime`. A
+    value in any other format raises, and the existing `PolarsError` handler
+    keeps the column as text and logs a warning. `time` stays text because its
+    wide-JSON format is not confirmed. Skipped answers are already null after
+    `standardize_missing_values`, so they don't fail the column. The next
+    import fills the columns in. #397 replaces this parsing in 1.3.0
 - **Demo Learn More shared a row with check settings** (#365): on Summary,
   Progress, Duplicates, Outliers, GPS, Enumerator and Backchecks, the "Learn
   More" expander sat beside the settings expander instead of above it. The
