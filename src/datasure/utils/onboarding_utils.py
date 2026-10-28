@@ -2,9 +2,9 @@ import functools
 import json
 import logging
 import random
-from datetime import datetime, timedelta
+from datetime import date, datetime, time, timedelta
 from pathlib import Path
-from typing import ClassVar
+from typing import ClassVar, NamedTuple
 
 import pandas as pd
 import polars as pl
@@ -17,6 +17,8 @@ logger = logging.getLogger(__name__)
 
 DEMO_PROJECT_NAME = "DataSure Demo"
 DEMO_PROJECT_ID = "demoproject"
+# Seed for the demo data generator, so every demo load draws the same values.
+DEMO_SEED = 360
 
 
 # create a coloured container
@@ -1105,142 +1107,147 @@ def create_demo_project():
     return DEMO_PROJECT_ID
 
 
+def unregister_demo_project() -> None:
+    """Remove the demo project from ``projects.json``, leaving its folder."""
+    projects_file = get_cache_path("projects.json")
+    if not projects_file.exists():
+        return
+    with open(projects_file) as f:
+        projects = json.load(f)
+    if projects.pop(DEMO_PROJECT_ID, None) is None:
+        return
+    with open(projects_file, "w") as f:
+        json.dump(projects, f, indent=4)
+
+
+class InterviewTimes(NamedTuple):
+    """When one demo interview started, ended and was submitted.
+
+    Field names are the demo data's date columns.
+    """
+
+    starttime: datetime
+    endtime: datetime
+    submissiondate: datetime
+
+
 class DemoDataGenerator:
-    """Class to generate demo data with realistic date fields."""
+    """Add seeded date, consent and completion fields to the demo data.
 
-    def __init__(self, df: pl.DataFrame):
+    Every load draws the same values from ``seed``, so the demo data is
+    identical between loads apart from one whole-day offset: dates are laid
+    out so the latest survey submission falls on ``today``. Backcheck rows
+    are dated after the latest survey submission with the same ``hhid``.
+    """
+
+    DATE_COLUMNS: ClassVar[tuple[str, ...]] = InterviewTimes._fields
+    DATE_FORMAT: ClassVar[str] = "%Y-%m-%d %H:%M:%S"
+    SURVEY_ID: ClassVar[str] = "hhid"
+    SPAN_DAYS: ClassVar[int] = 60
+
+    def __init__(
+        self,
+        df: pl.DataFrame,
+        today: date | None = None,
+        seed: int = DEMO_SEED,
+    ):
         self.df = df
+        self.today = today or date.today()
+        self.rng = random.Random(seed)
 
-    def _gen_starttime(self) -> pl.DataFrame:
-        """Generate starttime column with random dates within the last 60 days."""
-        end_date = datetime.now()
-        start_date = end_date - timedelta(days=60)
-        random_dates = [
-            start_date
-            + timedelta(
-                days=random.randint(0, 60),
-                hours=random.randint(0, 23),
-                minutes=random.randint(0, 59),
+    def _interview_times(self, start: datetime) -> InterviewTimes:
+        """Return start, end and submission times for an interview at ``start``."""
+        end = start + timedelta(minutes=self.rng.randint(15, 136))
+        submitted = end + timedelta(minutes=self.rng.randint(1, 30))
+        return InterviewTimes(start, end, submitted)
+
+    def _time_of_day(self) -> time:
+        return time(self.rng.randint(7, 16), self.rng.randint(0, 59))
+
+    def _survey_dates(self) -> list[InterviewTimes]:
+        """Spread interviews over the last ``SPAN_DAYS`` days, latest today."""
+        draws = [
+            (self.rng.randint(0, self.SPAN_DAYS - 1), self._time_of_day())
+            for _ in range(self.df.height)
+        ]
+        latest = min((days_ago for days_ago, _ in draws), default=0)
+        return [
+            self._interview_times(
+                datetime.combine(self.today - timedelta(days=days_ago - latest), at)
             )
-            for _ in range(self.df.height)
+            for days_ago, at in draws
         ]
 
+    def _backcheck_dates(self, survey_df: pl.DataFrame) -> list[InterviewTimes]:
+        """Date each backcheck 1-5 days after its survey, never after today."""
+        surveyed = dict(
+            survey_df.select(
+                self.SURVEY_ID,
+                pl.col("submissiondate").str.to_datetime(self.DATE_FORMAT),
+            )
+            .group_by(self.SURVEY_ID)
+            .agg(pl.col("submissiondate").max())
+            .iter_rows()
+        )
+        fallback = iter(self._survey_dates())
+        dates = []
+        for survey_id in self.df[self.SURVEY_ID]:
+            lag_days = self.rng.randint(1, 5)
+            at = self._time_of_day()
+            survey_submitted = surveyed.get(survey_id)
+            if survey_submitted is None:
+                dates.append(next(fallback))
+                continue
+            day = min(survey_submitted.date() + timedelta(days=lag_days), self.today)
+            start = datetime.combine(day, at)
+            if start <= survey_submitted:
+                start = survey_submitted + timedelta(hours=1)
+            dates.append(self._interview_times(start))
+        return dates
+
+    def _set_dates(self, dates: list[InterviewTimes]) -> None:
         self.df = self.df.with_columns(
-            [
-                pl.Series("starttime", random_dates),
-            ]
+            pl.Series(
+                name, [getattr(row, name).strftime(self.DATE_FORMAT) for row in dates]
+            )
+            for name in self.DATE_COLUMNS
         )
 
-        return self.df
+    def _set_choice(self, name: str, values: list[str], weights: list[float]):
+        self.df = self.df.with_columns(
+            pl.Series(
+                name,
+                [self.rng.choices(values, weights)[0] for _ in range(self.df.height)],
+            )
+        )
 
-    def _gen_endtime(self) -> pl.DataFrame:
-        """Generate endtime to be starttime + random minutes between 15 and
-        136 minutes.
+    def add_demo_fields(
+        self, datatype: str = "survey", survey_df: pl.DataFrame | None = None
+    ) -> pl.DataFrame:
+        """Add the date fields, plus consent and completion for survey data.
+
+        Parameters
+        ----------
+        datatype : str
+            ``"survey"`` or ``"backcheck"``.
+        survey_df : pl.DataFrame | None
+            For backcheck data, the survey data returned by
+            ``add_demo_fields("survey")``. Backchecks are then dated after
+            their survey; without it they are dated like surveys.
         """
-        end_times = [
-            start + timedelta(minutes=random.randint(15, 136))
-            for start in self.df["starttime"]
-        ]
-
-        self.df = self.df.with_columns(
-            [
-                pl.Series("endtime", end_times),
-            ]
-        )
-        return self.df
-
-    def _gen_submissiondate(self) -> pl.DataFrame:
-        """Generate submissiondate to be endtime + random minutes between 1
-        and 30 minutes.
-        """
-        submission_dates = [
-            end + timedelta(minutes=random.randint(1, 30)) for end in self.df["endtime"]
-        ]
-
-        self.df = self.df.with_columns(
-            [
-                pl.Series("submissiondate", submission_dates),
-            ]
-        )
-        return self.df
-
-    def _gen_dates(self) -> pl.DataFrame:
-        """Generate all date columns."""
-        self._gen_starttime()
-        self._gen_endtime()
-        self._gen_submissiondate()
-
-        # convert datetime columns to string
-        self.df = self.df.with_columns(
-            [
-                pl.col("starttime").cast(pl.Utf8),
-                pl.col("endtime").cast(pl.Utf8),
-                pl.col("submissiondate").cast(pl.Utf8),
-            ]
-        )
-
-        # remove milliseconds from the datetime strings
-        self.df = self.df.with_columns(
-            [
-                pl.col("starttime").str.replace(r"\.\d{3}", "", literal=False),
-                pl.col("endtime").str.replace(r"\.\d{3}", "", literal=False),
-                pl.col("submissiondate").str.replace(r"\.\d{3}", "", literal=False),
-            ]
-        )
-
-        # convert seconds from 5 digits to 2 digits
-        self.df = self.df.with_columns(
-            [
-                pl.col("starttime").str.replace(
-                    r":(\d{2})\d{3}", r":00", literal=False
-                ),
-                pl.col("endtime").str.replace(r":(\d{2})\d{3}", r":00", literal=False),
-                pl.col("submissiondate").str.replace(
-                    r":(\d{2})\d{3}", r":00", literal=False
-                ),
-            ]
-        )
-
-        return self.df
-
-    def _gen_consent_status(self):
-        """Generate consent column with 'yes' or 'no' values."""
-        consent_values = ["yes", "no"]
-        random_consents = [
-            random.choices(consent_values, weights=[0.98, 0.02])[0]
-            for _ in range(self.df.height)
-        ]
-
-        self.df = self.df.with_columns(
-            [
-                pl.Series("consent", random_consents),
-            ]
-        )
-
-        return self.df
-
-    def _gen_completion_status(self):
-        """Generate completion_status column with 'complete' or 'incomplete' values."""
-        status_values = ["complete", "incomplete"]
-        random_statuses = [
-            random.choices(status_values, weights=[0.95, 0.05])[0]
-            for _ in range(self.df.height)
-        ]
-
-        self.df = self.df.with_columns(
-            [
-                pl.Series("completion_status", random_statuses),
-            ]
-        )
-
-        return self.df
-
-    def add_demo_fields(self, datatype: str = "survey") -> pl.DataFrame:
-        """Add all demo fields."""
-        self._gen_dates()
+        if (
+            datatype == "backcheck"
+            and survey_df is not None
+            and self.SURVEY_ID in self.df.columns
+        ):
+            self._set_dates(self._backcheck_dates(survey_df))
+        else:
+            self._set_dates(self._survey_dates())
         if datatype == "survey":
-            self._gen_consent_status()
-            self._gen_completion_status()
+            self._set_choice("consent", ["yes", "no"], [0.98, 0.02])
+            self._set_choice(
+                "completion_status", ["complete", "incomplete"], [0.95, 0.05]
+            )
         return self.df
 
 
@@ -1259,8 +1266,15 @@ def load_csv_flexibly(file_path: Path) -> pl.DataFrame:
     return df
 
 
-def load_demo_data() -> bool:
-    """Load demo data files into the demo project."""
+def load_demo_data(today: date | None = None) -> bool:
+    """Load demo data files into the demo project.
+
+    Parameters
+    ----------
+    today : date | None
+        The day the latest demo survey submission falls on. Defaults to the
+        current date; every other value in the data is the same on every load.
+    """
     # Get asset paths
     assets_dir = Path(__file__).parent.parent / "assets"
     survey_path = assets_dir / "demo_survey.csv"
@@ -1281,7 +1295,7 @@ def load_demo_data() -> bool:
     except Exception:
         return False
 
-    survey_df = DemoDataGenerator(survey_df).add_demo_fields()
+    survey_df = DemoDataGenerator(survey_df, today=today).add_demo_fields()
 
     # Save to raw database (for import system)
     duckdb_save_table(DEMO_PROJECT_ID, survey_df, "demo_survey", "raw")
@@ -1290,12 +1304,9 @@ def load_demo_data() -> bool:
     duckdb_remove_table(DEMO_PROJECT_ID, "demo_survey", "prep")
     duckdb_remove_table(DEMO_PROJECT_ID, "demo_survey", "corrected")
 
-    # Load backcheck data with flexible CSV parsing
-    backcheck_df = pl.read_csv(
-        str(backcheck_path), truncate_ragged_lines=True, ignore_errors=True
+    backcheck_df = DemoDataGenerator(backcheck_df, today=today).add_demo_fields(
+        "backcheck", survey_df=survey_df
     )
-
-    backcheck_df = DemoDataGenerator(backcheck_df).add_demo_fields("backcheck")
 
     # Save to raw database (for import system)
     duckdb_save_table(DEMO_PROJECT_ID, backcheck_df, "demo_backcheck", "raw")

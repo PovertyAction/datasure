@@ -2,16 +2,23 @@
 
 import streamlit as st
 
+from datasure.utils.demo_lifecycle import (
+    DEMO_NOTICE_SCOPE,
+    DEMO_RESET_FAILED_MESSAGE,
+    RESTART_DEMO_MESSAGE,
+    exit_demo,
+    reset_demo_project,
+)
 from datasure.utils.onboarding_utils import (
     OnboardingSteps,
     get_onboarding_step,
     is_demo_project,
-    load_demo_data,
     set_onboarding_step,
     show_demo_banner,
     show_next_steps,
     show_progress_indicator,
 )
+from datasure.utils.ui_utils import confirm_dialog, queue_notice
 
 ONBOARDING_STEPS = OnboardingSteps.get_all_steps()  # List of onboarding steps
 
@@ -105,6 +112,19 @@ def demo_callout(message: str, type: str = "info"):
     render.get(type, st.info)(message)
 
 
+def _restart_demo_from_sidebar() -> None:
+    """Reset the demo and open the import page.
+
+    A failed reset has left the demo, so the error is queued for the Start
+    page's demo row and the Start page is opened.
+    """
+    if reset_demo_project():
+        st.switch_page(st.session_state.st_import_data_page)
+        return
+    queue_notice(DEMO_NOTICE_SCOPE, "error", DEMO_RESET_FAILED_MESSAGE)
+    st.switch_page(st.session_state.st_start_page)
+
+
 def demo_sidebar_help():
     """Add demo-specific help to the sidebar."""
     if not is_demo_project():
@@ -127,25 +147,13 @@ def demo_sidebar_help():
         st.markdown("---")
 
         if st.button("Restart Demo", width="stretch"):
-            st.session_state["_sidebar_confirm_restart"] = True
-
-        if st.session_state.get("_sidebar_confirm_restart"):
-            st.warning(
-                "This will reset all demo progress and data.",
-                icon=":material/warning:",
+            confirm_dialog(
+                "Restart demo",
+                RESTART_DEMO_MESSAGE,
+                confirm_label="Restart demo",
+                on_confirm=_restart_demo_from_sidebar,
             )
-            if st.button(
-                "Confirm restart", type="primary", key="_sidebar_restart_confirm"
-            ):
-                st.session_state.pop("_sidebar_confirm_restart", None)
-                load_demo_data()
-                set_onboarding_step(2)
-                st.switch_page(st.session_state.st_import_data_page)
-            if st.button("Cancel", key="_sidebar_restart_cancel"):
-                st.session_state.pop("_sidebar_confirm_restart", None)
-                st.rerun()
 
         if st.button("Exit Demo", width="stretch"):
-            st.session_state.st_project_id = ""
-            st.session_state.pop("onboarding_step", None)
+            exit_demo()
             st.switch_page(st.session_state.st_start_page)

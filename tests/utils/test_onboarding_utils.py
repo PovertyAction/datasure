@@ -3,6 +3,7 @@
 import importlib
 import json
 import pkgutil
+from datetime import date, datetime, timedelta
 from unittest.mock import MagicMock, patch
 
 import polars as pl
@@ -912,74 +913,60 @@ class TestDemoDataGenerator:
         generator = DemoDataGenerator(df)
         assert generator.df.height == 3
 
-    def test_gen_starttime(self):
-        """Test generating starttime column."""
-        df = pl.DataFrame({"id": [1, 2, 3]})
-        generator = DemoDataGenerator(df)
-        result_df = generator._gen_starttime()
+    def test_dates_are_ordered_strings_ending_today(self):
+        """Each interview starts, ends, then is submitted; the latest is today."""
+        df = pl.DataFrame({"id": list(range(50))})
+        result_df = DemoDataGenerator(df, today=date(2026, 3, 10)).add_demo_fields()
 
-        assert "starttime" in result_df.columns
-        assert result_df.height == 3
+        for col in DemoDataGenerator.DATE_COLUMNS:
+            assert result_df[col].dtype == pl.Utf8
+        start, end, submitted = (
+            result_df[col].str.to_datetime(DemoDataGenerator.DATE_FORMAT)
+            for col in DemoDataGenerator.DATE_COLUMNS
+        )
+        assert (start < end).all()
+        assert (end < submitted).all()
+        assert submitted.dt.date().max() == date(2026, 3, 10)
+        assert start.min() >= datetime(2026, 1, 9)
 
-    def test_gen_endtime(self):
-        """Test generating endtime column."""
-        df = pl.DataFrame({"id": [1, 2, 3]})
-        generator = DemoDataGenerator(df)
-        generator._gen_starttime()
-        result_df = generator._gen_endtime()
+    def test_same_seed_gives_same_fields(self):
+        """The generator is seeded, so two runs agree."""
+        df = pl.DataFrame({"id": list(range(20))})
 
-        assert "endtime" in result_df.columns
-        assert result_df.height == 3
+        first = DemoDataGenerator(df, today=date(2026, 3, 10)).add_demo_fields()
+        second = DemoDataGenerator(df, today=date(2026, 3, 10)).add_demo_fields()
 
-    def test_gen_submissiondate(self):
-        """Test generating submissiondate column."""
-        df = pl.DataFrame({"id": [1, 2, 3]})
-        generator = DemoDataGenerator(df)
-        generator._gen_starttime()
-        generator._gen_endtime()
-        result_df = generator._gen_submissiondate()
+        assert first.equals(second)
 
-        assert "submissiondate" in result_df.columns
-        assert result_df.height == 3
-
-    def test_gen_dates(self):
-        """Test generating all date columns."""
-        df = pl.DataFrame({"id": [1, 2, 3]})
-        generator = DemoDataGenerator(df)
-        result_df = generator._gen_dates()
-
-        assert "starttime" in result_df.columns
-        assert "endtime" in result_df.columns
-        assert "submissiondate" in result_df.columns
-        # Verify dates are strings
-        assert result_df["starttime"].dtype == pl.Utf8
-
-    def test_gen_consent_status(self):
-        """Test generating consent status column."""
-        # Large sample so the weighted-draw check below cannot flake
+    def test_consent_and_completion_values(self):
+        """Consent is mostly yes and completion mostly complete."""
         df = pl.DataFrame({"id": list(range(1000))})
-        generator = DemoDataGenerator(df)
-        result_df = generator._gen_consent_status()
+        result_df = DemoDataGenerator(df).add_demo_fields()
 
-        assert "consent" in result_df.columns
-        assert result_df.height == 1000
-        # Check that values are either 'yes' or 'no'
-        consent_values = result_df["consent"].to_list()
-        assert all(val in ["yes", "no"] for val in consent_values)
-        # Most should be 'yes' given 98% weight (expected ~980, sd ~4.4)
-        assert consent_values.count("yes") >= 900
+        consent = result_df["consent"].to_list()
+        status = result_df["completion_status"].to_list()
+        assert set(consent) <= {"yes", "no"}
+        assert consent.count("yes") >= 900
+        assert set(status) <= {"complete", "incomplete"}
+        assert status.count("complete") >= 900
 
-    def test_gen_completion_status(self):
-        """Test generating completion status column."""
-        df = pl.DataFrame({"id": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]})
-        generator = DemoDataGenerator(df)
-        result_df = generator._gen_completion_status()
+    def test_backcheck_is_dated_after_its_survey(self):
+        """A backcheck starts after the survey of the same household."""
+        survey = DemoDataGenerator(
+            pl.DataFrame({"hhid": ["A", "B", "C"]}), today=date(2026, 3, 10)
+        ).add_demo_fields()
+        backcheck = DemoDataGenerator(
+            pl.DataFrame({"hhid": ["C", "A"]}), today=date(2026, 3, 10)
+        ).add_demo_fields("backcheck", survey_df=survey)
 
-        assert "completion_status" in result_df.columns
-        assert result_df.height == 10
-        # Check that values are either 'complete' or 'incomplete'
-        status_values = result_df["completion_status"].to_list()
-        assert all(val in ["complete", "incomplete"] for val in status_values)
+        joined = backcheck.join(survey, on="hhid", suffix="_survey")
+        assert (
+            joined["starttime"].str.to_datetime()
+            > joined["submissiondate_survey"].str.to_datetime()
+        ).all()
+        assert joined["submissiondate"].str.to_datetime().dt.date().max() <= date(
+            2026, 3, 10
+        )
 
     def test_add_demo_fields_survey(self):
         """Test adding all demo fields for survey data."""
@@ -1226,3 +1213,168 @@ class TestLoadDemoData:
         result = load_demo_data()
 
         assert result is False
+
+
+@pytest.fixture
+def load_real_demo(tmp_path, monkeypatch):
+    """Load the shipped demo CSVs into a fresh cache and return the raw tables.
+
+    Each call builds its own empty cache directory, so every load is a fresh
+    first-time load of ``assets/demo_survey.csv`` and ``demo_backcheck.csv``.
+    """
+    from datasure.utils.duckdb_utils import duckdb_get_table
+
+    def _load(today=None):
+        cache_root = tmp_path / f"run{len(list(tmp_path.iterdir()))}"
+        cache_root.mkdir()
+        (cache_root / "pyproject.toml").write_text("")
+        monkeypatch.chdir(cache_root)
+        create_demo_project()
+        with patch("datasure.utils.onboarding_utils.st"):
+            assert load_demo_data(today=today) is True
+        return (
+            duckdb_get_table(DEMO_PROJECT_ID, "demo_survey", "raw"),
+            duckdb_get_table(DEMO_PROJECT_ID, "demo_backcheck", "raw"),
+        )
+
+    return _load
+
+
+class TestRealDemoData:
+    """Load the real demo assets through load_demo_data (#360, #364)."""
+
+    def test_two_fresh_loads_on_the_same_day_are_identical(self, load_real_demo):
+        """Restarting the demo on the same day gives the same data."""
+        survey_a, backcheck_a = load_real_demo(today=date(2026, 3, 10))
+        survey_b, backcheck_b = load_real_demo(today=date(2026, 3, 10))
+
+        assert survey_a.equals(survey_b)
+        assert backcheck_a.equals(backcheck_b)
+
+    def test_loads_on_different_days_differ_only_by_the_date_offset(
+        self, load_real_demo
+    ):
+        """A later load moves every date by whole days and changes nothing else."""
+        date_cols = list(DemoDataGenerator.DATE_COLUMNS)
+        date_format = DemoDataGenerator.DATE_FORMAT
+        earlier = load_real_demo(today=date(2026, 3, 10))
+        later = load_real_demo(today=date(2026, 3, 17))
+
+        for before, after in zip(earlier, later, strict=True):
+            assert before.drop(date_cols).equals(after.drop(date_cols))
+            for col in date_cols:
+                shifted = before[col].str.to_datetime(date_format) + timedelta(days=7)
+                assert after[col].str.to_datetime(date_format).equals(shifted)
+
+    def test_latest_submissions_fall_on_yesterday_and_today(self, load_real_demo):
+        """Check health deltas need submissions on the last two days."""
+        today = date(2026, 3, 10)
+        survey, _ = load_real_demo(today=today)
+
+        days = set(survey["submissiondate"].str.to_datetime().dt.date())
+
+        assert max(days) == today
+        assert today - timedelta(days=1) in days
+
+    def test_default_load_puts_the_latest_submission_today(self, load_real_demo):
+        """Without an explicit date the demo is anchored on the current day."""
+        survey, _ = load_real_demo()
+
+        latest = survey["submissiondate"].str.to_datetime().dt.date().max()
+
+        assert latest == date.today()
+
+    def test_every_backcheck_follows_its_survey(self, load_real_demo):
+        """A backcheck never starts before its household's survey was submitted."""
+        survey, backcheck = load_real_demo(today=date(2026, 3, 10))
+
+        latest_survey = survey.group_by("hhid").agg(
+            pl.col("submissiondate").str.to_datetime().max().alias("surveyed")
+        )
+        joined = backcheck.join(latest_survey, on="hhid", how="left")
+
+        assert joined["surveyed"].null_count() == 0
+        assert (joined["starttime"].str.to_datetime() > joined["surveyed"]).all()
+        assert joined["submissiondate"].str.to_datetime().dt.date().max() <= date(
+            2026, 3, 10
+        )
+
+    def test_state_values_are_states(self, load_real_demo):
+        """``state`` holds Indian states, not districts such as Anantapur."""
+        states = {"Andhra Pradesh", "Gujarat", "Uttar Pradesh"}
+        for data in load_real_demo(today=date(2026, 3, 10)):
+            assert set(data["state"].unique()) == states
+
+    def test_survey_has_refused_values(self, load_real_demo):
+        """-88 ("Refused") shows up in the Missing check."""
+        survey, _ = load_real_demo(today=date(2026, 3, 10))
+
+        refused = sum(
+            (survey[col] == -88).sum()
+            for col in survey.columns
+            if survey[col].dtype.is_numeric()
+        )
+
+        assert refused >= 10
+
+    def test_land_acre_is_a_populated_numeric_outlier_example(self, load_real_demo):
+        """The Outliers guidance needs a numeric column with values to flag."""
+        survey, _ = load_real_demo(today=date(2026, 3, 10))
+        land = survey["land_acre"]
+
+        assert land.dtype.is_numeric()
+        assert land.null_count() <= survey.height // 10
+        valid = land.filter(land >= 0)
+        q1, q3 = valid.quantile(0.25), valid.quantile(0.75)
+        assert (valid > q3 + 3 * (q3 - q1)).sum() >= 2
+
+    def test_recommended_backcheck_columns_have_mismatches(self, load_real_demo):
+        """Each column the Backchecks guidance adds shows non-zero error rates."""
+        from datasure.checks.backchecks.compute import compute_backcheck_analysis
+        from datasure.checks.backchecks.models import BackcheckSettings
+
+        survey, backcheck = load_real_demo(today=date(2026, 3, 10))
+        # The columns, categories and OK ranges from the demo guidance
+        guidance = {
+            "age": (1, [-1, 1]),
+            "household_count": (2, None),
+            "minc_pri": (1, None),
+            "npinc_out": (1, None),
+            "no_save": (1, None),
+            "pri_govt_sch": (1, None),
+        }
+        column_settings = pl.DataFrame(
+            {
+                "search_type": ["exact"] * len(guidance),
+                "pattern": list(guidance),
+                "column_name": [[col] for col in guidance],
+                "category": [category for category, _ in guidance.values()],
+                "ok_range_type": [
+                    "number" if ok else None for _, ok in guidance.values()
+                ],
+                "ok_range_values": [ok for _, ok in guidance.values()],
+                "ttest": [False] * len(guidance),
+                "prtest": [False] * len(guidance),
+                "signrank": [False] * len(guidance),
+                "reliability": [False] * len(guidance),
+            }
+        )
+        settings = BackcheckSettings(
+            survey_key="KEY",
+            survey_id="hhid",
+            enumerator="enum_id",
+            backchecker="bcer_id",
+        )
+
+        analysis = compute_backcheck_analysis(
+            survey, backcheck, settings, column_settings
+        )
+        mismatches = dict(
+            analysis.filter(pl.col("match_status") == "mismatch")
+            .group_by("column_name")
+            .len()
+            .iter_rows()
+        )
+
+        for col in guidance:
+            assert mismatches.get(col, 0) >= 2, col
