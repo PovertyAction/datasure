@@ -16,6 +16,14 @@ To check which version you have, run `datasure --version`. Versions with `a`, `b
 
 ## Open issues
 
+### KI-032: Date and datetime questions from SurveyCTO import as blank
+
+- **Status:** 🟡 Planned for 1.2.0
+- **Affected versions:** 1.0.0 – 1.2.0rc1
+- **Symptom:** After you import a form from SurveyCTO, every `date` and `datetime` question in the form shows as blank. These columns can look like skipped questions on the **Missing Values** tab. Submission dates, start and end times, and data imported from a local file are not affected.
+- **Workaround:** Export the data from SurveyCTO as a CSV and import it as a local file. After you update to the release with the fix, import the form again.
+- **Issue:** [#395](https://github.com/PovertyAction/datasure/issues/395)
+
 ### KI-031: New installs fail to import data with `Resource In Use Error` or `no attribute 'pl'`
 
 - **Status:** 🟡 Planned for 1.2.0 (fixed in 1.2.0a7)

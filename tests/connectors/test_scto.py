@@ -1,6 +1,7 @@
 """Tests for the SurveyCTO connector module."""
 
-from datetime import UTC, datetime
+import logging
+from datetime import UTC, date, datetime
 from pathlib import Path
 from unittest.mock import Mock, patch
 
@@ -27,6 +28,7 @@ from datasure.connectors.scto import (
 from datasure.connectors.scto import (
     ValidationError as SctoValidationError,
 )
+from datasure.utils.dataframe_utils import standardize_missing_values
 from datasure.utils.scto_api import SurveyCTOAPIError
 from datasure.utils.settings_utils import ProjectID
 
@@ -542,34 +544,68 @@ class TestDataProcessor:
         data = pl.DataFrame(
             {
                 "age": ["25", "30"],
-                "birth_date": ["2000-01-15", "1995-05-20"],
+                # Formats the SurveyCTO wide JSON API sends
+                "birth_date": ["Jan 15, 2000", "May 20, 1995"],
+                "visit_at": ["Mar 7, 2025 4:06:12 PM", "Mar 17, 2025 12:30:00 AM"],
                 "survey_time": ["10:30:00", "14:15:00"],
                 "notes": ["Note 1", "Note 2"],
             }
         )
         questions = pl.DataFrame(
             {
-                "type": ["integer", "date", "time", "note"],
-                "name": ["age", "birth_date", "survey_time", "notes"],
+                "type": ["integer", "date", "datetime", "time", "note"],
+                "name": ["age", "birth_date", "visit_at", "survey_time", "notes"],
             }
         )
 
         result = processor.convert_data_types(data, questions)
 
         assert result["age"].dtype == pl.Float64
-        assert result["birth_date"].dtype in [
-            pl.Datetime,
-            pl.Datetime("ms"),
-            pl.Datetime("us"),
-            pl.Datetime("ns"),
+        assert result["birth_date"].dtype == pl.Date
+        assert result["birth_date"].to_list() == [
+            date(2000, 1, 15),
+            date(1995, 5, 20),
         ]
-        assert result["survey_time"].dtype in [
-            pl.Datetime,
-            pl.Datetime("ms"),
-            pl.Datetime("us"),
-            pl.Datetime("ns"),
+        assert result["visit_at"].dtype == pl.Datetime
+        assert result["visit_at"].to_list() == [
+            datetime(2025, 3, 7, 16, 6, 12),
+            datetime(2025, 3, 17, 0, 30, 0),
         ]
+        # time fields stay text: their wide-JSON format is not confirmed
+        assert result["survey_time"].to_list() == ["10:30:00", "14:15:00"]
         assert "notes" not in result.columns  # Note fields are dropped
+
+    def test_convert_data_types_dates_keep_skipped_answers_null(self):
+        """Skipped date answers stay null without failing the column (#395)."""
+        processor = DataProcessor()
+        data = standardize_missing_values(
+            pl.DataFrame(
+                {
+                    "visit_date": ["Mar 7, 2025", ""],
+                    "visit_at": ["", "Mar 7, 2025 4:06:12 PM"],
+                }
+            )
+        )
+        questions = pl.DataFrame(
+            {"type": ["date", "datetime"], "name": ["visit_date", "visit_at"]}
+        )
+
+        result = processor.convert_data_types(data, questions)
+
+        assert result["visit_date"].to_list() == [date(2025, 3, 7), None]
+        assert result["visit_at"].to_list() == [None, datetime(2025, 3, 7, 16, 6, 12)]
+
+    def test_convert_data_types_unexpected_date_format_stays_text(self, caplog):
+        """A date in an unexpected format keeps the column as text (#395)."""
+        processor = DataProcessor()
+        data = pl.DataFrame({"visit_date": ["Mar 7, 2025", "2025-03-08"]})
+        questions = pl.DataFrame({"type": ["date"], "name": ["visit_date"]})
+
+        with caplog.at_level(logging.WARNING):
+            result = processor.convert_data_types(data, questions)
+
+        assert result["visit_date"].to_list() == ["Mar 7, 2025", "2025-03-08"]
+        assert "Failed to convert column visit_date" in caplog.text
 
     def test_convert_data_types_with_repeat_fields(self):
         """Test converting data types with repeat fields."""

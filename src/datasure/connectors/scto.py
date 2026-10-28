@@ -274,9 +274,17 @@ class DataProcessor:
     ) -> pl.DataFrame:
         """Convert a single column based on its field type."""
         try:
-            if field_type in ["date", "datetime", "time"]:
+            # The wide JSON sends dates as "Mar 7, 2025" and datetimes as
+            # "Mar 7, 2025 4:06:12 PM". Strict: a value in another format
+            # raises below and the column stays text, instead of turning null.
+            # `time` stays text: its wide-JSON format is not confirmed.
+            if field_type == "date":
                 return data.with_columns(
-                    pl.col(col).str.strptime(pl.Datetime, format="%+", strict=False)
+                    pl.col(col).str.strptime(pl.Date, format="%b %d, %Y")
+                )
+            elif field_type == "datetime":
+                return data.with_columns(
+                    pl.col(col).str.strptime(pl.Datetime, format=self.date_format)
                 )
             elif field_type in ["integer", "decimal"]:
                 return data.with_columns(pl.col(col).cast(pl.Float64, strict=False))
