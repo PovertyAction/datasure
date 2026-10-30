@@ -203,7 +203,45 @@ class TestVariableEditor:
         assert editor["Type"].tolist() == ["continuous", "categorical"]
 
 
+def _navigable_app(data, settings_file):
+    """Render the section unless the test has navigated away from the page."""
+    import streamlit as st
+
+    from datasure.checks.enumerator.models import EnumeratorSettings
+    from datasure.checks.enumerator.response_patterns.report_ui import (
+        render_response_patterns,
+    )
+
+    if st.session_state.get("away"):
+        st.write("Another page")
+        return
+    render_response_patterns(
+        data,
+        settings_file,
+        EnumeratorSettings(survey_key="key", survey_id="key", enumerator="enum"),
+        None,
+    )
+
+
 class TestSettingsPersistence:
+    def test_returning_to_the_page_shows_the_saved_selection(
+        self, team_data, settings_file
+    ):
+        at = AppTest.from_function(_navigable_app, args=(team_data, settings_file))
+        at.run()
+        # The user ticks "age"; the edit is saved, then they leave the page
+        _save(settings_file, selected_variables=["age"])
+        at.session_state["away"] = True
+        at.run()
+
+        at.session_state["away"] = False
+        at.run()
+
+        assert not at.exception
+        editor = at.dataframe(key="rp_variable_editor").value
+        assert editor["Select"].tolist() == [True, False]
+        assert "rp_dp_enumerators" in [d.key for d in at.dataframe]
+
     def test_thresholds_survive_a_new_session(self, team_data, settings_file):
         _save(settings_file, selected_variables=["age"])
         at = _run(team_data, settings_file)
