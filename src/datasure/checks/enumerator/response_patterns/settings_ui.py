@@ -12,7 +12,9 @@ from datasure.checks.enumerator.response_patterns.compute import (
     infer_variable_types,
 )
 from datasure.checks.enumerator.response_patterns.models import (
+    MODERATE_MARGIN,
     SETTINGS_KEY,
+    THRESHOLD_LEVELS,
     VARIABLE_TYPES,
     ResponsePatternSettings,
 )
@@ -26,6 +28,7 @@ logger = logging.getLogger(__name__)
 
 # Session state flag save_check_settings checks before writing the settings
 SAVE_STATE: str = f"{TAB_NAME}_{SETTINGS_KEY}"
+DP_THRESHOLD_KEY = "rp_dp_threshold"
 _EDITOR_KEY = "rp_variable_editor"
 _EDITOR_BASE_KEY = "rp_variable_editor_base"
 
@@ -132,6 +135,32 @@ def _render_variable_editor(
     return selected, overrides
 
 
+def digit_preference_description(threshold: int) -> str:
+    """Explain what flagging Digit Preference at ``threshold`` means."""
+    ratio = f"{1 + threshold / 100:.2f}".rstrip("0").rstrip(".")
+    return (
+        f"Flags an enumerator when their answers end in 0 or 5 at least "
+        f"{ratio} times as often as the rest of the team's (score "
+        f"{threshold} or more)."
+    )
+
+
+def _render_threshold_level(label: str, key: str, default: int) -> int:
+    """Render a check's flag-threshold levels and return the chosen threshold."""
+    return st.segmented_control(
+        label,
+        options=list(THRESHOLD_LEVELS),
+        format_func=THRESHOLD_LEVELS.get,
+        default=default,
+        required=True,
+        key=key,
+        help="Higher sensitivity flags enumerators at a lower score. "
+        f"Enumerators within {MODERATE_MARGIN} points below the threshold "
+        "are marked Moderate.",
+        on_change=mark_settings_changed,
+    )
+
+
 def response_pattern_settings(
     settings_file: str,
     data: pl.DataFrame,
@@ -140,8 +169,7 @@ def response_pattern_settings(
 ) -> ResponsePatternSettings:
     """Render the shared settings expander and return the current settings.
 
-    The caller saves the settings with ``save_response_pattern_settings``
-    once the sub-tabs' thresholds are added.
+    Saves the settings when a widget changed them on this run.
 
     Parameters
     ----------
@@ -197,11 +225,22 @@ def response_pattern_settings(
                 on_change=mark_settings_changed,
             )
 
-    return saved.model_copy(
+        st.markdown("**Flag thresholds**")
+        dp_threshold = _render_threshold_level(
+            "Digit Preference sensitivity",
+            DP_THRESHOLD_KEY,
+            saved.digit_preference_threshold,
+        )
+        st.caption(digit_preference_description(dp_threshold))
+
+    settings = saved.model_copy(
         update={
             "selected_variables": selected,
             "type_overrides": overrides,
             "min_sample": int(min_sample),
             "warn_sample": int(warn_sample),
+            "digit_preference_threshold": dp_threshold,
         }
     )
+    save_response_pattern_settings(settings_file, settings)
+    return settings
