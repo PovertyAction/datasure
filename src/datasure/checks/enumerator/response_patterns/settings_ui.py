@@ -9,6 +9,7 @@ from pydantic import ValidationError
 from datasure.checks import missing
 from datasure.checks.enumerator.models import TAB_NAME
 from datasure.checks.enumerator.response_patterns.compute import (
+    CATEGORICAL_POINTS_PER_PP,
     SHIFT_POINTS_PER_SD,
     infer_variable_types,
 )
@@ -31,6 +32,7 @@ logger = logging.getLogger(__name__)
 SAVE_STATE: str = f"{TAB_NAME}_{SETTINGS_KEY}"
 DP_THRESHOLD_KEY = "rp_dp_threshold"
 RC_THRESHOLD_KEY = "rp_rc_threshold"
+CAT_THRESHOLD_KEY = "rp_cat_threshold"
 _EDITOR_KEY = "rp_variable_editor"
 _EDITOR_BASE_KEY = "rp_variable_editor_base"
 
@@ -133,7 +135,8 @@ def _render_variable_editor(
                 required=True,
                 help="Change the type if the inferred one is wrong. Digit "
                 "Preference and Range Compression use integer and continuous "
-                "variables.",
+                "variables; Categorical Response Patterns uses categorical "
+                "ones, such as numerically coded single-choice questions.",
             ),
         },
         on_change=mark_settings_changed,
@@ -169,6 +172,16 @@ def range_compression_description(threshold: int) -> str:
         f"(SD ratio {ratio} or less), or their average sits about {shift} or "
         f"more of the team's standard deviations away from the team's (score "
         f"{threshold} or more)."
+    )
+
+
+def categorical_description(threshold: int) -> str:
+    """Explain what flagging Categorical Response Patterns at ``threshold`` means."""
+    gap = f"{threshold / CATEGORICAL_POINTS_PER_PP:g}"
+    return (
+        f"Flags an enumerator when, on any checked question, their share of "
+        f"one answer option differs from the rest of the team's by at least "
+        f"{gap} percentage points (score {threshold} or more)."
     )
 
 
@@ -267,6 +280,12 @@ def response_pattern_settings(
             saved.range_compression_threshold,
         )
         st.caption(range_compression_description(rc_threshold))
+        cat_threshold = _render_threshold_level(
+            "Categorical Response Patterns sensitivity",
+            CAT_THRESHOLD_KEY,
+            saved.categorical_threshold,
+        )
+        st.caption(categorical_description(cat_threshold))
 
     settings = saved.model_copy(
         update={
@@ -276,6 +295,7 @@ def response_pattern_settings(
             "warn_sample": int(warn_sample),
             "digit_preference_threshold": dp_threshold,
             "range_compression_threshold": rc_threshold,
+            "categorical_threshold": cat_threshold,
         }
     )
     save_response_pattern_settings(settings_file, settings)
