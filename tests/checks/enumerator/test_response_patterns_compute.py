@@ -820,6 +820,23 @@ class TestCategoricalOptions:
         (question,) = _categorical(results, "A").questions
         assert all(o.flagged for o in question.options)
 
+    def test_scoring_option_can_be_one_the_enumerator_avoids(self):
+        # Team a/b/c 60/20/20, A 0/50/50: never choosing a (-60) sets the
+        # score; b is the first of the over-chosen options (+30)
+        data = _frame(
+            {
+                "A": _choices({"b": 20, "c": 20}),
+                "B": _choices({"a": 24, "b": 8, "c": 8}),
+            }
+        )
+
+        results = compute_response_patterns(data, _settings(), ENUM, None)
+
+        (question,) = _categorical(results, "A").questions
+        assert question.score == pytest.approx(100)
+        assert question.scoring_option == "a"
+        assert question.dominant_option == "b"
+
     def test_consistent_question_is_not_flagged_and_has_no_dominant_option(self):
         data = _frame(
             {

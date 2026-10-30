@@ -374,7 +374,12 @@ def mask_text_missing_codes(
         `df` with the missing codes in the text columns of `cols` set to null.
     """
     codes = _get_all_missing_codes(missing_codes_df)
-    text_cols = [c for c in cols if df.schema[c] in (pl.String, pl.Categorical)]
+    text_cols = [
+        c
+        for c in cols
+        if df.schema[c] in (pl.String, pl.Categorical)
+        or isinstance(df.schema[c], pl.Enum)
+    ]
     if not codes or not text_cols:
         return df
     return df.with_columns(

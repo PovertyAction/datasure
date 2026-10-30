@@ -237,9 +237,10 @@ class CategoricalQuestion(BaseModel):
     """One enumerator's Categorical Response Patterns result on one question.
 
     ``options`` are in the order of their values. ``largest_gap`` is the
-    largest absolute gap on any option, in percentage points.
-    ``dominant_option`` is the option the enumerator chose most often
-    relative to the team, if any.
+    largest absolute gap on any option, in percentage points, and
+    ``scoring_option`` the option it is on, which may be one the enumerator
+    chose less often than the team. ``dominant_option`` is the option the
+    enumerator chose most often relative to the team, if any.
     """
 
     variable: str
@@ -247,6 +248,7 @@ class CategoricalQuestion(BaseModel):
     sample_band: SampleBand
     score: float
     largest_gap: float
+    scoring_option: str
     flagged: bool
     dominant_option: str | None = None
     options: list[CategoricalOption]

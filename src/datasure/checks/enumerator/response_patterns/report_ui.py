@@ -671,12 +671,25 @@ def _option_chart(q: CategoricalQuestion, enumerator: str) -> go.Figure:
 
 def _render_question_verdict(q: CategoricalQuestion, enumerator: str) -> None:
     """Show whether one option dominates the enumerator's answers."""
-    dominant = next((o for o in q.options if o.option == q.dominant_option), None)
-    if q.flagged and dominant:
+    by_option = {o.option: o for o in q.options}
+    scoring = by_option[q.scoring_option]
+    dominant = by_option.get(q.dominant_option)
+    if q.flagged and scoring.gap < 0 and dominant:
+        # The score comes from an option the enumerator avoids
         st.warning(
-            f"{enumerator} chose **{dominant.option}** in "
-            f"{dominant.enum_pct:.1f}% of answers, against "
-            f"{dominant.team_pct:.1f}% for the rest of the team. One option "
+            f"{enumerator} chose **{scoring.option}** in only "
+            f"{scoring.enum_pct:.1f}% of answers, against "
+            f"{scoring.team_pct:.1f}% for the rest of the team, and chose "
+            f"**{dominant.option}** instead ({dominant.enum_pct:.1f}% against "
+            f"{dominant.team_pct:.1f}%). One option dominates; check how they "
+            "are asking this question.",
+            icon=":material/flag:",
+        )
+    elif q.flagged:
+        st.warning(
+            f"{enumerator} chose **{scoring.option}** in "
+            f"{scoring.enum_pct:.1f}% of answers, against "
+            f"{scoring.team_pct:.1f}% for the rest of the team. One option "
             "dominates; check how they are asking this question.",
             icon=":material/flag:",
         )
