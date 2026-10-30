@@ -148,6 +148,20 @@ class TestEnumeratorTable:
             at.warning
         )
 
+    def test_tiles_show_one_number_with_the_team_underneath(
+        self, team_data, settings_file
+    ):
+        _save(settings_file, selected_variables=["age"])
+
+        at = _run(team_data, settings_file)
+
+        tab = next(t for t in at.tabs if t.label == "Digit Preference")
+        rounding, responses = tab.metric
+        assert [m.label for m in tab.metric] == ["Ending in 0 or 5", "Responses"]
+        assert rounding.value == "60.0%"
+        assert rounding.delta == "Rest of team: 20.0%"
+        assert responses.value == "40"
+
     def test_chart_y_axis_always_spans_0_to_100(self, team_data, settings_file):
         _save(settings_file, selected_variables=["age"])
 
