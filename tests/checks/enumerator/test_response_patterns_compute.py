@@ -325,3 +325,279 @@ class TestInferVariableTypes:
             "money": "continuous",
             "choice": "categorical",
         }
+
+
+# =============================================================================
+# Range Compression
+# =============================================================================
+
+# 40 values with a mean of 49.5 and a sample SD of about 11.7
+BASE = [float(v) for v in range(30, 70)]
+
+
+def _scaled(values: list[float], factor: float, shift: float = 0.0) -> list[float]:
+    """Return ``values`` spread ``factor`` times as widely and moved by ``shift``."""
+    mean = sum(values) / len(values)
+    return [mean + (v - mean) * factor + shift for v in values]
+
+
+def _sd(values: list[float]) -> float:
+    mean = sum(values) / len(values)
+    return (sum((v - mean) ** 2 for v in values) / (len(values) - 1)) ** 0.5
+
+
+def _range(results, name: str):
+    return next(
+        e for e in results.range_compression.enumerators if e.enumerator == name
+    )
+
+
+class TestRangeCompressionScore:
+    @pytest.mark.parametrize(("factor", "score"), [(1.0, 0), (0.5, 50), (0.0, 100)])
+    def test_compression_score_falls_with_the_sd_ratio(self, factor, score):
+        data = _frame({"A": _scaled(BASE, factor), "B": BASE})
+
+        results = compute_response_patterns(data, _settings(), ENUM, None)
+
+        a = _range(results, "A")
+        assert a.score == pytest.approx(score)
+        assert a.signal == "compression"
+        (var,) = a.variables
+        assert var.sd_ratio == pytest.approx(factor)
+        assert var.compression_score == pytest.approx(score)
+        assert var.shift_score == pytest.approx(0)
+
+    def test_wider_spread_than_the_team_scores_0(self):
+        data = _frame({"A": _scaled(BASE, 2.0), "B": BASE})
+
+        results = compute_response_patterns(data, _settings(), ENUM, None)
+
+        assert _range(results, "A").score == pytest.approx(0)
+
+    @pytest.mark.parametrize(
+        ("team_sds", "score"), [(0, 0), (50 / 33, 50), (100 / 33, 100), (5, 100)]
+    )
+    def test_shift_score_rises_33_points_per_team_sd(self, team_sds, score):
+        data = _frame({"A": _scaled(BASE, 1.0, shift=team_sds * _sd(BASE)), "B": BASE})
+
+        results = compute_response_patterns(data, _settings(), ENUM, None)
+
+        a = _range(results, "A")
+        assert a.score == pytest.approx(score)
+        (var,) = a.variables
+        assert var.shift_score == pytest.approx(score)
+        assert var.compression_score == pytest.approx(0)
+        assert var.enum_mean - var.team_mean == pytest.approx(team_sds * _sd(BASE))
+
+    def test_shift_below_the_team_scores_the_same_as_above(self):
+        data = _frame({"A": _scaled(BASE, 1.0, shift=-50 / 33 * _sd(BASE)), "B": BASE})
+
+        results = compute_response_patterns(data, _settings(), ENUM, None)
+
+        assert _range(results, "A").score == pytest.approx(50)
+        assert _range(results, "A").signal == "shift"
+
+    def test_both_signals_fire_and_the_higher_sets_the_score(self):
+        # Half the spread (compression 50) and 2 team SDs up (shift 66)
+        data = _frame({"A": _scaled(BASE, 0.5, shift=2 * _sd(BASE)), "B": BASE})
+
+        results = compute_response_patterns(data, _settings(), ENUM, None)
+
+        a = _range(results, "A")
+        assert a.score == pytest.approx(66)
+        assert a.signal == "shift"
+        assert a.badge == "High"
+        assert a.compression_variables == ["x"]
+        assert a.shift_variables == ["x"]
+
+    def test_only_signals_reaching_the_threshold_are_listed(self):
+        data = _frame({"A": _scaled(BASE, 0.4, shift=1 * _sd(BASE)), "B": BASE})
+
+        results = compute_response_patterns(data, _settings(), ENUM, None)
+
+        a = _range(results, "A")
+        assert a.signal == "compression"
+        assert a.compression_variables == ["x"]
+        assert a.shift_variables == []
+
+    def test_baseline_leaves_out_the_enumerator_being_scored(self):
+        # A's rest of team is B and C, who answer identically, so its SD is
+        # B's. A project-wide SD would include A's own narrow answers.
+        data = _frame({"A": _scaled(BASE, 0.5), "B": BASE, "C": BASE})
+
+        results = compute_response_patterns(data, _settings(), ENUM, None)
+
+        (var,) = _range(results, "A").variables
+        assert var.team_sd == pytest.approx(_sd(BASE + BASE))
+        assert var.team_mean == pytest.approx(49.5)
+        b_var = _range(results, "B").variables[0]
+        assert b_var.team_sd == pytest.approx(_sd(_scaled(BASE, 0.5) + BASE))
+
+    def test_enumerator_score_is_the_highest_variable_score(self):
+        data = pl.DataFrame(
+            {
+                ENUM: ["A"] * 40 + ["B"] * 40,
+                "x": _scaled(BASE, 0.8) + BASE,
+                "y": _scaled(BASE, 0.3) + BASE,
+            }
+        )
+        settings = _settings(selected_variables=["x", "y"])
+
+        results = compute_response_patterns(data, settings, ENUM, None)
+
+        a = _range(results, "A")
+        assert a.score == pytest.approx(70)
+        assert [v.variable for v in a.variables] == ["y", "x"]
+        assert a.variables[1].score == pytest.approx(20)
+
+
+class TestRangeCompressionSkips:
+    def test_team_sd_of_zero_skips_the_variable_with_no_variation(self):
+        # The rest of the team always answers 50, so A's comparison has no SD
+        data = pl.DataFrame(
+            {
+                ENUM: ["A"] * 40 + ["B"] * 40,
+                "x": BASE + [50.0] * 40,
+                "y": _scaled(BASE, 0.5) + BASE,
+            }
+        )
+        settings = _settings(selected_variables=["x", "y"])
+
+        results = compute_response_patterns(data, settings, ENUM, None)
+
+        a = _range(results, "A")
+        assert a.skipped_variables == {
+            "x": "no variation in the rest of the team's responses"
+        }
+        assert [v.variable for v in a.variables] == ["y"]
+        assert a.score == pytest.approx(50)
+        # B's rest of team (A) does vary, so B is scored on x
+        assert "x" in [v.variable for v in _range(results, "B").variables]
+
+    def test_no_variation_across_the_project_is_skipped_for_everyone(self):
+        data = pl.DataFrame(
+            {ENUM: ["A"] * 40 + ["B"] * 40, "x": BASE + BASE, "same": [7] * 80}
+        )
+        settings = _settings(selected_variables=["x", "same"])
+
+        results = compute_response_patterns(data, settings, ENUM, None)
+
+        rc = results.range_compression
+        assert rc.variables == ["x"]
+        assert rc.skipped_variables == {"same": "no variation across the project"}
+
+    def test_narrow_range_is_still_checked(self):
+        # Digit Preference skips ranges under 10; Range Compression does not
+        kids = [float(v % 6) for v in range(40)]
+        data = _frame({"A": _scaled(kids, 0.5), "B": kids})
+
+        results = compute_response_patterns(data, _settings(), ENUM, None)
+
+        assert _range(results, "A").score == pytest.approx(50)
+
+    def test_variable_below_the_minimum_is_skipped_for_that_enumerator(self):
+        data = pl.DataFrame(
+            {
+                ENUM: ["A"] * 40 + ["B"] * 40,
+                "x": _scaled(BASE, 0.5) + BASE,
+                "y": BASE[:10] + [None] * 30 + BASE,
+            }
+        )
+        settings = _settings(selected_variables=["x", "y"])
+
+        results = compute_response_patterns(data, settings, ENUM, None)
+
+        a = _range(results, "A")
+        assert a.skipped_variables == {"y": "fewer responses than the minimum"}
+        assert a.sample_band == "ok"
+
+    def test_enumerator_below_the_minimum_everywhere_is_na(self):
+        data = _frame({"A": BASE[:10], "B": BASE})
+
+        results = compute_response_patterns(data, _settings(), ENUM, None)
+
+        a = _range(results, "A")
+        assert a.score is None
+        assert a.badge == "N/A"
+        assert a.sample_band == "insufficient"
+        assert results.range_compression.enumerators[-1].enumerator == "A"
+
+    def test_sample_band_is_that_of_the_scoring_variable(self):
+        data = _frame({"A": _scaled(BASE[:20], 0.5), "B": BASE})
+
+        results = compute_response_patterns(data, _settings(), ENUM, None)
+
+        assert _range(results, "A").sample_band == "low"
+
+    def test_everyone_below_the_minimum(self):
+        data = _frame({"A": BASE[:10], "B": BASE[10:20]})
+
+        results = compute_response_patterns(data, _settings(), ENUM, None)
+
+        assert results.range_compression.condition == "all_below_minimum"
+
+    def test_missing_codes_are_excluded_before_scoring(self):
+        data = _frame({"A": BASE + [-999.0] * 10, "B": BASE})
+        codes = pl.DataFrame({"label": ["Don't know"], "codes": ["-999"]})
+
+        results = compute_response_patterns(data, _settings(), ENUM, codes)
+
+        (var,) = _range(results, "A").variables
+        assert var.n_responses == 40
+        assert var.score == pytest.approx(0)
+
+    def test_no_applicable_variables(self):
+        data = pl.DataFrame({ENUM: ["A"] * 20 + ["B"] * 20, "x": ["yes", "no"] * 20})
+
+        results = compute_response_patterns(data, _settings(), ENUM, None)
+
+        assert results.range_compression.condition == "no_applicable_variables"
+
+
+class TestRangeCompressionHistogram:
+    def test_buckets_span_the_teams_1st_to_99th_percentile(self):
+        team = [float(v) for v in range(101)]  # 1st percentile 1, 99th 99
+        data = _frame({"A": _scaled(team, 0.5), "B": team})
+
+        results = compute_response_patterns(data, _settings(), ENUM, None)
+
+        (var,) = _range(results, "A").variables
+        assert len(var.bucket_edges) == 11
+        assert var.bucket_edges[0] == pytest.approx(1)
+        assert var.bucket_edges[-1] == pytest.approx(99)
+        assert var.bucket_edges[1] - var.bucket_edges[0] == pytest.approx(9.8)
+
+    def test_both_series_share_the_buckets_and_sum_to_100(self):
+        team = [float(v) for v in range(101)]
+        data = _frame({"A": _scaled(team, 0.5), "B": team})
+
+        results = compute_response_patterns(data, _settings(), ENUM, None)
+
+        (var,) = _range(results, "A").variables
+        assert len(var.enum_bucket_pct) == len(var.team_bucket_pct) == 10
+        assert sum(var.enum_bucket_pct) == pytest.approx(100)
+        # Values beyond the percentiles count in the end buckets
+        assert sum(var.team_bucket_pct) == pytest.approx(100)
+        assert var.team_bucket_pct[0] == pytest.approx(11 / 101 * 100)
+        # A's values all sit in the middle half of the team's range
+        assert var.enum_bucket_pct[0] == 0
+        assert var.enum_bucket_pct[-1] == 0
+
+
+class TestRangeCompressionThreshold:
+    @pytest.mark.parametrize(
+        ("threshold", "badge"), [(50, "High"), (65, "Moderate"), (80, "Low")]
+    )
+    def test_badge_follows_its_own_threshold(self, threshold, badge):
+        data = _frame({"A": _scaled(BASE, 0.5), "B": BASE})
+        settings = _settings(range_compression_threshold=threshold)
+
+        results = compute_response_patterns(data, settings, ENUM, None)
+
+        assert _range(results, "A").badge == badge
+        assert results.range_compression.threshold == threshold
+
+    def test_saved_threshold_snaps_to_the_nearest_level(self):
+        settings = ResponsePatternSettings(range_compression_threshold=90)
+
+        assert settings.range_compression_threshold == 80

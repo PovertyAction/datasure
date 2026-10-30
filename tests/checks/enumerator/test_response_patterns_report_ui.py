@@ -316,3 +316,177 @@ class TestFlagThresholds:
 
         table = at.dataframe(key="rp_dp_enumerators").value
         assert table["Flag"].tolist()[0] == "High"
+
+
+# =============================================================================
+# Range Compression
+# =============================================================================
+
+SPREAD = [float(v) for v in range(30, 70)]
+
+
+def _narrowed(values: list[float], factor: float, shift: float = 0.0) -> list[float]:
+    mean = sum(values) / len(values)
+    return [mean + (v - mean) * factor + shift for v in values]
+
+
+def _range_frame(values_by_enum: dict[str, list[float]]) -> pl.DataFrame:
+    """Build the section's data with ``income`` and a matching ``age``."""
+    frame = _frame(values_by_enum).with_columns(pl.col("age").cast(pl.Float64))
+    return frame.with_columns((pl.col("age") * 100).alias("income"))
+
+
+@pytest.fixture
+def range_data():
+    # "anchor" answers within half the spread of the others
+    return _range_frame(
+        {"anchor": _narrowed(SPREAD, 0.4), "steady": SPREAD, "careful": SPREAD}
+    )
+
+
+def _range_tab(at: AppTest):
+    return next(t for t in at.tabs if t.label == "Range Compression")
+
+
+class TestRangeCompressionTab:
+    def test_lists_enumerators_by_score_with_flags(self, range_data, settings_file):
+        _save(settings_file, selected_variables=["age"])
+
+        at = _run(range_data, settings_file)
+
+        table = at.dataframe(key="rp_rc_enumerators").value
+        assert table["Enumerator"].tolist()[0] == "anchor"
+        assert table["Flag"].tolist()[0] == "High"
+        assert table["SD ratio"].tolist()[0] == pytest.approx(0.4, abs=0.01)
+        assert table["Signal"].tolist()[0] == "Compression"
+
+    def test_highest_score_shows_tiles_and_compression_verdict(
+        self, range_data, settings_file
+    ):
+        _save(settings_file, selected_variables=["age"])
+
+        at = _run(range_data, settings_file)
+
+        tab = _range_tab(at)
+        assert "anchor: spread and level" in _texts(tab.markdown)
+        assert "spread much less widely" in _texts(tab.warning)
+        labels = [m.label for m in tab.metric]
+        assert labels == ["Mean", "Standard deviation", "SD ratio", "Score set by"]
+        assert tab.metric[2].value.startswith("0.4")
+        assert tab.metric[3].value == "Compression on age"
+
+    def test_compressed_bars_are_amber_on_shared_buckets(
+        self, range_data, settings_file
+    ):
+        _save(settings_file, selected_variables=["age"])
+
+        at = _run(range_data, settings_file)
+
+        spec = json.loads(at.get("plotly_chart")[1].proto.spec)
+        enum_bars, team_bars = spec["data"]
+        assert team_bars["name"] == "Rest of team"
+        assert enum_bars["x"] == team_bars["x"]
+        assert len(enum_bars["x"]) == 10
+        assert set(enum_bars["marker"]["color"]) == {"#f5cb57"}
+
+    def test_both_verdicts_show_compression_first(self, settings_file):
+        data = _range_frame(
+            {
+                "drifter": _narrowed(SPREAD, 0.4, shift=30),
+                "steady": SPREAD,
+                "careful": SPREAD,
+            }
+        )
+        _save(settings_file, selected_variables=["age"])
+
+        at = _run(data, settings_file)
+
+        warnings = [w.value for w in _range_tab(at).warning]
+        assert "spread much less widely" in warnings[0]
+        assert "above the rest of the team's" in warnings[1]
+        # Compressed as well as shifted, so the bars are amber
+        spec = json.loads(at.get("plotly_chart")[1].proto.spec)
+        assert set(spec["data"][0]["marker"]["color"]) == {"#f5cb57"}
+
+    def test_shift_only_keeps_the_usual_bar_colour(self, settings_file):
+        data = _range_frame(
+            {
+                "high": _narrowed(SPREAD, 1, shift=30),
+                "steady": SPREAD,
+                "careful": SPREAD,
+            }
+        )
+        _save(settings_file, selected_variables=["age"])
+
+        at = _run(data, settings_file)
+
+        warnings = [w.value for w in _range_tab(at).warning]
+        assert len(warnings) == 1
+        assert "above the rest of the team's" in warnings[0]
+        spec = json.loads(at.get("plotly_chart")[1].proto.spec)
+        assert set(spec["data"][0]["marker"]["color"]) == {"#155240"}
+
+    def test_switching_the_variable_redraws_the_histogram(
+        self, range_data, settings_file
+    ):
+        _save(settings_file, selected_variables=["age", "income"])
+        at = _run(range_data, settings_file)
+        (select,) = _range_tab(at).selectbox
+        assert select.value == "age"
+
+        select.set_value("income").run()
+
+        assert not at.exception
+        spec = json.loads(at.get("plotly_chart")[1].proto.spec)
+        assert "income" in spec["layout"]["xaxis"]["title"]["text"]
+
+    def test_selecting_a_row_shows_that_enumerator(self, range_data, settings_file):
+        _save(settings_file, selected_variables=["age"])
+        at = _run(range_data, settings_file)
+
+        at.session_state["rp_rc_enumerators"] = {
+            "selection": {"rows": [2], "columns": [], "cells": []}
+        }
+        at.run()
+
+        assert not at.exception
+        assert "spread and centred like the rest of the team's" in _texts(
+            _range_tab(at).success
+        )
+
+    def test_team_without_variation_is_noted(self, settings_file):
+        # varied's rest of team is flat, which always answers 50
+        data = _range_frame({"varied": SPREAD, "flat": [50.0] * 40})
+        _save(settings_file, selected_variables=["age"])
+        at = _run(data, settings_file)
+
+        at.session_state["rp_rc_enumerators"] = {
+            "selection": {"rows": [1], "columns": [], "cells": []}
+        }
+        at.run()
+
+        assert not at.exception
+        assert "no variation in the rest of the team's responses" in _texts(
+            _range_tab(at).caption
+        )
+
+    def test_no_applicable_variables(self, range_data, settings_file):
+        _save(settings_file, selected_variables=["choice"])
+
+        at = _run(range_data, settings_file)
+
+        assert "Range Compression has nothing to check" in _texts(_range_tab(at).info)
+
+    def test_threshold_survives_a_new_session(self, range_data, settings_file):
+        _save(settings_file, selected_variables=["age"])
+        at = _run(range_data, settings_file)
+
+        at.segmented_control(key="rp_rc_threshold").set_value(65).run()
+        assert not at.exception
+        assert "0.35 times as widely" in _texts(at.caption)
+
+        new_session = _run(range_data, settings_file)
+
+        assert new_session.segmented_control(key="rp_rc_threshold").value == 65
+        table = new_session.dataframe(key="rp_rc_enumerators").value
+        assert table["Flag"].tolist()[0] == "Moderate"

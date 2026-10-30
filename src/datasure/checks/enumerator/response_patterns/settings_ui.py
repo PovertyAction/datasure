@@ -9,6 +9,7 @@ from pydantic import ValidationError
 from datasure.checks import missing
 from datasure.checks.enumerator.models import TAB_NAME
 from datasure.checks.enumerator.response_patterns.compute import (
+    SHIFT_POINTS_PER_SD,
     infer_variable_types,
 )
 from datasure.checks.enumerator.response_patterns.models import (
@@ -29,6 +30,7 @@ logger = logging.getLogger(__name__)
 # Session state flag save_check_settings checks before writing the settings
 SAVE_STATE: str = f"{TAB_NAME}_{SETTINGS_KEY}"
 DP_THRESHOLD_KEY = "rp_dp_threshold"
+RC_THRESHOLD_KEY = "rp_rc_threshold"
 _EDITOR_KEY = "rp_variable_editor"
 _EDITOR_BASE_KEY = "rp_variable_editor_base"
 
@@ -130,7 +132,8 @@ def _render_variable_editor(
                 options=VARIABLE_TYPES,
                 required=True,
                 help="Change the type if the inferred one is wrong. Digit "
-                "Preference uses integer and continuous variables.",
+                "Preference and Range Compression use integer and continuous "
+                "variables.",
             ),
         },
         on_change=mark_settings_changed,
@@ -152,6 +155,19 @@ def digit_preference_description(threshold: int) -> str:
     return (
         f"Flags an enumerator when their answers end in 0 or 5 at least "
         f"{ratio} times as often as the rest of the team's (score "
+        f"{threshold} or more)."
+    )
+
+
+def range_compression_description(threshold: int) -> str:
+    """Explain what flagging Range Compression at ``threshold`` means."""
+    ratio = f"{1 - threshold / 100:.2f}".rstrip("0").rstrip(".")
+    shift = f"{threshold / SHIFT_POINTS_PER_SD:.1f}"
+    return (
+        f"Flags an enumerator when, on any checked variable, their answers "
+        f"spread at most {ratio} times as widely as the rest of the team's "
+        f"(SD ratio {ratio} or less), or their average sits about {shift} or "
+        f"more of the team's standard deviations away from the team's (score "
         f"{threshold} or more)."
     )
 
@@ -245,6 +261,12 @@ def response_pattern_settings(
             saved.digit_preference_threshold,
         )
         st.caption(digit_preference_description(dp_threshold))
+        rc_threshold = _render_threshold_level(
+            "Range Compression sensitivity",
+            RC_THRESHOLD_KEY,
+            saved.range_compression_threshold,
+        )
+        st.caption(range_compression_description(rc_threshold))
 
     settings = saved.model_copy(
         update={
@@ -253,6 +275,7 @@ def response_pattern_settings(
             "min_sample": int(min_sample),
             "warn_sample": int(warn_sample),
             "digit_preference_threshold": dp_threshold,
+            "range_compression_threshold": rc_threshold,
         }
     )
     save_response_pattern_settings(settings_file, settings)
