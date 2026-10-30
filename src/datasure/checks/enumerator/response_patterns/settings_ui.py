@@ -84,15 +84,21 @@ def _render_variable_editor(
 ) -> tuple[list[str], dict[str, str]]:
     """Render the variable editor and return the selection and type overrides.
 
-    The editor starts from the saved settings once per session and page, and
-    keeps that starting frame, so saving an edit does not reset the editor.
-    When the candidate variables change it starts again from the saved
-    settings, dropping edits made to the old rows. Saved choices for
-    variables not in the current data are kept.
+    The editor starts from the saved settings each time it appears, such as
+    on returning to the page, and keeps that starting frame while it stays
+    on screen, so saving an edit does not reset it. Streamlit drops the
+    editor's edits when it leaves the screen, so a kept frame would show
+    stale choices on return. When the candidate variables change it starts
+    again from the saved settings, dropping edits made to the old rows.
+    Saved choices for variables not in the current data are kept.
     """
     bases = st.session_state.setdefault(_EDITOR_BASE_KEY, {})
     base = bases.get(settings_file)
-    if base is None or base["Variable"].to_list() != list(inferred):
+    if (
+        base is None
+        or _EDITOR_KEY not in st.session_state
+        or base["Variable"].to_list() != list(inferred)
+    ):
         base = _editor_frame(inferred, saved)
         bases[settings_file] = base
         st.session_state.pop(_EDITOR_KEY, None)

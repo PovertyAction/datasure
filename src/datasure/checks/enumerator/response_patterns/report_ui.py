@@ -48,14 +48,14 @@ _ENUM_COLOR = IPA_DARK_GREEN
 _TEAM_COLOR = IPA_DARK_GRAY
 _FLAG_COLOR = IPA_RED_ORANGE
 
-# Flag cell fills in the enumerator table, from the IPA palette
-_FLAG_FILLS: dict[str, str] = {
-    Badge.NA: "#f1f2f2",
+# Flag text colours in the enumerator table, from the IPA palette. IPA Gold is
+# too light for text on white, so Moderate uses a deeper gold. N/A keeps the
+# theme's text colour, which reads in light and dark mode.
+_FLAG_COLORS: dict[str, str] = {
     Badge.LOW: "#49ac57",
-    Badge.MODERATE: "#f5cb57",
+    Badge.MODERATE: "#d4a017",
     Badge.HIGH: IPA_RED_ORANGE,
 }
-_FLAG_TEXT = "#414042"
 
 INFO_ICON = ":material/info:"
 LOW_SAMPLE_WARNING = "Low sample size — treat results with caution."
@@ -98,10 +98,9 @@ def _render_skipped(skipped: dict[str, str]) -> None:
 
 
 def _flag_style(flag: str) -> str:
-    """Return the cell style for a Flag value."""
-    return (
-        f"background-color: {_FLAG_FILLS[flag]}; color: {_FLAG_TEXT}; font-weight: 600"
-    )
+    """Return the text style for a Flag value; the cell keeps its background."""
+    color = _FLAG_COLORS.get(flag)
+    return f"color: {color}; font-weight: 600" if color else ""
 
 
 # =============================================================================
@@ -230,7 +229,6 @@ def _render_digit_detail(e: DigitPreferenceEnumerator, min_sample: int) -> None:
         f"##### {e.enumerator}: terminal digits · score **{e.score:.0f}** "
         f"{_badge(e.badge)}"
     )
-    st.plotly_chart(_digit_chart(e, flagged), width="stretch")
     metric_row(
         [
             (f"Ending in 0 or 5: {e.enumerator}", f"{e.enum_pct:.1f}%"),
@@ -242,6 +240,7 @@ def _render_digit_detail(e: DigitPreferenceEnumerator, min_sample: int) -> None:
             ),
         ]
     )
+    st.plotly_chart(_digit_chart(e, flagged), width="stretch")
     if e.sample_band == SampleBand.LOW:
         st.warning(LOW_SAMPLE_WARNING, icon=":material/warning:")
     if flagged:
