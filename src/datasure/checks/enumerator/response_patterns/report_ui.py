@@ -202,6 +202,8 @@ def _digit_chart(e: DigitPreferenceEnumerator, flagged: bool) -> go.Figure:
         barmode="group",
         xaxis_title="Terminal digit",
         yaxis_title="Share of responses (%)",
+        # Always 0-100%, so charts compare at a glance across enumerators
+        yaxis={"range": [0, 100], "fixedrange": True, "ticksuffix": "%"},
         legend={"orientation": "h", "y": 1.12},
         margin={"t": 30, "b": 40, "l": 40, "r": 10},
         height=340,
