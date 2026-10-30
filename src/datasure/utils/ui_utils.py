@@ -87,7 +87,9 @@ def metric_row(metrics: Sequence[tuple]):
     Parameters
     ----------
     metrics : sequence of tuple
-        Each tuple is ``(label, value)`` or ``(label, value, help_text)``.
+        Each tuple is ``(label, value)``, ``(label, value, help_text)`` or
+        ``(label, value, help_text, note)``. A note, such as a comparison
+        value, shows under the value as grey text without an arrow.
     """
     import streamlit as st
 
@@ -96,7 +98,18 @@ def metric_row(metrics: Sequence[tuple]):
         label = metric[0]
         value = metric[1]
         help_text = metric[2] if len(metric) > 2 else None
-        col.metric(label, value, help=help_text)
+        note = metric[3] if len(metric) > 3 else None
+        if note is None:
+            col.metric(label, value, help=help_text)
+        else:
+            col.metric(
+                label,
+                value,
+                help=help_text,
+                delta=note,
+                delta_color="off",
+                delta_arrow="off",
+            )
 
 
 def confirm_dialog(

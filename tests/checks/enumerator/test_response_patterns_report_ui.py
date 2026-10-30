@@ -370,10 +370,19 @@ class TestRangeCompressionTab:
         tab = _range_tab(at)
         assert "anchor: spread and level" in _texts(tab.markdown)
         assert "spread much less widely" in _texts(tab.warning)
-        labels = [m.label for m in tab.metric]
-        assert labels == ["Mean", "Standard deviation", "SD ratio", "Score set by"]
-        assert tab.metric[2].value.startswith("0.4")
-        assert tab.metric[3].value == "Compression on age"
+        assert "Score set by compression on **age**" in _texts(tab.markdown)
+        mean, sd, ratio = tab.metric
+        assert [m.label for m in tab.metric] == [
+            "Mean",
+            "Standard deviation",
+            "SD ratio",
+        ]
+        # One number per tile; the rest of the team's sits underneath
+        assert mean.value == "49.50"
+        assert mean.delta == "Rest of team: 49.50"
+        assert sd.value == "4.68"
+        assert sd.delta == "Rest of team: 11.62"
+        assert ratio.value.startswith("0.4")
 
     def test_compressed_bars_are_amber_on_shared_buckets(
         self, range_data, settings_file
