@@ -80,7 +80,10 @@ def _editor_frame(
 
 
 def _render_variable_editor(
-    settings_file: str, inferred: dict[str, str], saved: ResponsePatternSettings
+    settings_file: str,
+    inferred: dict[str, str],
+    saved: ResponsePatternSettings,
+    columns: list[str],
 ) -> tuple[list[str], dict[str, str]]:
     """Render the variable editor and return the selection and type overrides.
 
@@ -90,7 +93,9 @@ def _render_variable_editor(
     editor's edits when it leaves the screen, so a kept frame would show
     stale choices on return. When the candidate variables change it starts
     again from the saved settings, dropping edits made to the old rows.
-    Saved choices for variables not in the current data are kept.
+    Saved choices for variables not in the current data are kept; those
+    for columns in the data but no longer candidates, such as a column since
+    set as the survey ID, are dropped.
     """
     bases = st.session_state.setdefault(_EDITOR_BASE_KEY, {})
     base = bases.get(settings_file)
@@ -131,9 +136,9 @@ def _render_variable_editor(
         on_change=mark_settings_changed,
     )
 
-    absent = [v for v in saved.selected_variables if v not in inferred]
+    absent = [v for v in saved.selected_variables if v not in columns]
     selected = edited.filter(pl.col("Select"))["Variable"].to_list() + absent
-    overrides = {v: t for v, t in saved.type_overrides.items() if v not in inferred} | {
+    overrides = {v: t for v, t in saved.type_overrides.items() if v not in columns} | {
         row["Variable"]: row["Type"]
         for row in edited.iter_rows(named=True)
         if row["Type"] != row["Inferred type"]
@@ -204,7 +209,9 @@ def response_pattern_settings(
             "Select the survey questions to check. Each check uses the "
             "selected variables of its type."
         )
-        selected, overrides = _render_variable_editor(settings_file, inferred, saved)
+        selected, overrides = _render_variable_editor(
+            settings_file, inferred, saved, data.columns
+        )
 
         st.markdown("**Minimum responses**")
         c1, c2, _ = st.columns(3)

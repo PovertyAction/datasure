@@ -131,14 +131,14 @@ def _digit_counts(data: pl.DataFrame, variables: list[str]) -> dict[str, list[in
     """Return each enumerator's count of responses ending in each digit 0-9.
 
     Terminal digits are pooled across ``variables`` and taken from the
-    integer part of each value: ``abs(floor(x)) % 10``.
+    integer part of each value: ``floor(abs(x)) % 10``.
     """
     long = (
         data.select(_ENUM, *(pl.col(v).cast(pl.Float64) for v in variables))
         .unpivot(index=_ENUM, on=variables, value_name=_VALUE)
         .drop_nulls(_VALUE)
         .filter(pl.col(_VALUE).is_finite())
-        .with_columns((pl.col(_VALUE).floor().abs() % 10).cast(pl.Int8).alias(_DIGIT))
+        .with_columns((pl.col(_VALUE).abs().floor() % 10).cast(pl.Int8).alias(_DIGIT))
         .group_by(_ENUM, _DIGIT)
         .len()
     )
