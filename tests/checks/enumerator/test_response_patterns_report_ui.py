@@ -148,6 +148,14 @@ class TestEnumeratorTable:
             at.warning
         )
 
+    def test_chart_y_axis_always_spans_0_to_100(self, team_data, settings_file):
+        _save(settings_file, selected_variables=["age"])
+
+        at = _run(team_data, settings_file)
+
+        spec = json.loads(at.get("plotly_chart")[0].proto.spec)
+        assert spec["layout"]["yaxis"]["range"] == [0, 100]
+
     def test_selecting_a_row_shows_that_enumerator(self, team_data, settings_file):
         _save(settings_file, selected_variables=["age"])
         at = _run(team_data, settings_file)
