@@ -120,28 +120,42 @@ class TestMessages:
 
         at = _run(data, settings_file)
 
-        assert at.radio(key="rp_dp_enumerator").value == "rounder"
+        assert "rounder: terminal digits" in _texts(at.markdown)
         assert "Low sample size — treat results with caution" in _texts(at.warning)
 
 
-class TestEnumeratorSelection:
-    def test_highest_score_is_selected_and_flagged(self, team_data, settings_file):
+class TestEnumeratorTable:
+    def test_lists_enumerators_by_score_with_interviews_and_rates(
+        self, team_data, settings_file
+    ):
         _save(settings_file, selected_variables=["age"])
 
         at = _run(team_data, settings_file)
 
-        radio = at.radio(key="rp_dp_enumerator")
-        assert radio.value == "rounder"
-        assert len(radio.options) == 3
+        table = at.dataframe(key="rp_dp_enumerators").value
+        assert table["Enumerator"].tolist() == ["rounder", "careful", "steady"]
+        assert table["Interviews"].tolist() == [40, 40, 40]
+        assert table["Ending in 0 or 5 (%)"].tolist()[0] == pytest.approx(60)
+        assert table["Rest of team (%)"].tolist()[0] == pytest.approx(20)
+        assert table["Flag"].tolist() == ["High", "Low", "Low"]
+
+    def test_highest_score_is_selected_by_default(self, team_data, settings_file):
+        _save(settings_file, selected_variables=["age"])
+
+        at = _run(team_data, settings_file)
+
         assert "rounder's responses end in 0 or 5 notably more often" in _texts(
             at.warning
         )
 
-    def test_clicking_an_enumerator_shows_their_detail(self, team_data, settings_file):
+    def test_selecting_a_row_shows_that_enumerator(self, team_data, settings_file):
         _save(settings_file, selected_variables=["age"])
         at = _run(team_data, settings_file)
 
-        at.radio(key="rp_dp_enumerator").set_value("steady").run()
+        at.session_state["rp_dp_enumerators"] = {
+            "selection": {"rows": [2], "columns": [], "cells": []}
+        }
+        at.run()
 
         assert not at.exception
         assert "steady's digit distribution is consistent" in _texts(at.success)
@@ -196,22 +210,47 @@ class TestSettingsPersistence:
 
         at.number_input(key="rp_min_sample").set_value(10).run()
         at.number_input(key="rp_warn_sample").set_value(20).run()
-        at.slider(key="rp_dp_threshold").set_value(70).run()
+        at.segmented_control(key="rp_dp_threshold").set_value(65).run()
         assert not at.exception
 
         new_session = _run(team_data, settings_file)
 
         assert new_session.number_input(key="rp_min_sample").value == 10
         assert new_session.number_input(key="rp_warn_sample").value == 20
-        assert new_session.slider(key="rp_dp_threshold").value == 70
+        assert new_session.segmented_control(key="rp_dp_threshold").value == 65
         with open(settings_file) as f:
             saved = json.load(f)["enumerators"]["response_patterns"]
         assert saved["selected_variables"] == ["age"]
 
-    def test_slider_description_follows_the_value(self, team_data, settings_file):
-        _save(settings_file, selected_variables=["age"])
+
+class TestFlagThresholds:
+    def test_five_fixed_levels_default_to_medium(self, team_data, settings_file):
         at = _run(team_data, settings_file)
 
-        at.slider(key="rp_dp_threshold").set_value(80).run()
+        control = at.segmented_control(key="rp_dp_threshold")
+        assert control.options == [
+            "Very high",
+            "High",
+            "Medium",
+            "Low",
+            "Very low",
+        ]
+        assert control.value == 50
+
+    def test_description_follows_the_level(self, team_data, settings_file):
+        at = _run(team_data, settings_file)
+
+        at.segmented_control(key="rp_dp_threshold").set_value(80).run()
 
         assert "1.8 times" in _texts(at.caption)
+
+    def test_level_changes_the_flags(self, team_data, settings_file):
+        # rounder's 25% against careful's 20% scores 25
+        data = _frame({"rounder": _values(40, 10), "careful": _values(40, 8)})
+        _save(settings_file, selected_variables=["age"])
+        at = _run(data, settings_file)  # rounder scores 25: Low at Medium
+
+        at.segmented_control(key="rp_dp_threshold").set_value(20).run()
+
+        table = at.dataframe(key="rp_dp_enumerators").value
+        assert table["Flag"].tolist()[0] == "High"

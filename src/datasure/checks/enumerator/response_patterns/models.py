@@ -3,7 +3,7 @@
 from enum import StrEnum
 from typing import Literal
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 # Key under the enumerator report's settings that holds this section's settings
 SETTINGS_KEY: str = "response_patterns"
@@ -14,6 +14,23 @@ NUMERIC_TYPES: tuple[str, ...] = ("integer", "continuous")
 
 # Moderate badges start this many points below the flag threshold
 MODERATE_MARGIN: int = 15
+
+# Fixed flag-threshold levels, most sensitive first: score -> label. Levels
+# are MODERATE_MARGIN apart, so a Moderate badge means the enumerator would be
+# flagged one level more sensitive.
+THRESHOLD_LEVELS: dict[int, str] = {
+    20: "Very high",
+    35: "High",
+    50: "Medium",
+    65: "Low",
+    80: "Very low",
+}
+DEFAULT_THRESHOLD: int = 50
+
+
+def nearest_threshold_level(threshold: int) -> int:
+    """Return the fixed threshold level closest to ``threshold``."""
+    return min(THRESHOLD_LEVELS, key=lambda level: (abs(level - threshold), level))
 
 
 class ResponsePatternSettings(BaseModel):
@@ -30,14 +47,21 @@ class ResponsePatternSettings(BaseModel):
     warn_sample : int
         Results with fewer responses than this carry a low-sample warning.
     digit_preference_threshold : int
-        Digit Preference score at or above which an enumerator is flagged.
+        Digit Preference score at or above which an enumerator is flagged,
+        one of ``THRESHOLD_LEVELS``.
     """
 
     selected_variables: list[str] = Field(default_factory=list)
     type_overrides: dict[str, VariableType] = Field(default_factory=dict)
     min_sample: int = Field(15, ge=1)
     warn_sample: int = Field(30, ge=1)
-    digit_preference_threshold: int = Field(50, ge=0, le=100)
+    digit_preference_threshold: int = Field(DEFAULT_THRESHOLD, ge=0, le=100)
+
+    @field_validator("digit_preference_threshold")
+    @classmethod
+    def snap_to_level(cls, v: int) -> int:
+        """Move a threshold saved off the fixed levels to the nearest level."""
+        return nearest_threshold_level(v)
 
 
 class SampleBand(StrEnum):

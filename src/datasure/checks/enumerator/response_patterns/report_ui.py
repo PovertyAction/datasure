@@ -4,6 +4,7 @@ Renders the results model from ``compute_response_patterns``; no scoring
 happens here.
 """
 
+import pandas as pd
 import plotly.graph_objects as go
 import polars as pl
 import streamlit as st
@@ -15,7 +16,7 @@ from datasure.checks.enumerator.response_patterns.compute import (
     compute_response_patterns,
 )
 from datasure.checks.enumerator.response_patterns.models import (
-    MODERATE_MARGIN,
+    THRESHOLD_LEVELS,
     Badge,
     CheckCondition,
     DigitPreferenceEnumerator,
@@ -25,14 +26,11 @@ from datasure.checks.enumerator.response_patterns.models import (
     SampleBand,
 )
 from datasure.checks.enumerator.response_patterns.settings_ui import (
-    mark_settings_changed,
     response_pattern_settings,
-    save_response_pattern_settings,
 )
-from datasure.utils.ui_utils import metric_row, section_header
+from datasure.utils.ui_utils import metric_row, section_header, styled_dataframe
 
-DP_THRESHOLD_KEY = "rp_dp_threshold"
-DP_ENUMERATOR_KEY = "rp_dp_enumerator"
+DP_TABLE_KEY = "rp_dp_enumerators"
 
 BADGE_COLORS: dict[Badge, str] = {
     Badge.NA: "gray",
@@ -40,15 +38,31 @@ BADGE_COLORS: dict[Badge, str] = {
     Badge.MODERATE: "orange",
     Badge.HIGH: "red",
 }
-_ENUM_COLOR = "#1f4e79"
-_TEAM_COLOR = "#b8bec9"
-_FLAG_COLOR = "#d62728"
+
+# IPA brand colors: the emphasis palette (Dark Green against Dark Gray) for
+# enumerator against team, Red-Orange for flagged rounding
+IPA_DARK_GREEN = "#155240"
+IPA_DARK_GRAY = "#c9c9c8"
+IPA_RED_ORANGE = "#f26529"
+_ENUM_COLOR = IPA_DARK_GREEN
+_TEAM_COLOR = IPA_DARK_GRAY
+_FLAG_COLOR = IPA_RED_ORANGE
+
+# Flag cell fills in the enumerator table, from the IPA palette
+_FLAG_FILLS: dict[str, str] = {
+    Badge.NA: "#f1f2f2",
+    Badge.LOW: "#49ac57",
+    Badge.MODERATE: "#f5cb57",
+    Badge.HIGH: IPA_RED_ORANGE,
+}
+_FLAG_TEXT = "#414042"
 
 INFO_ICON = ":material/info:"
 LOW_SAMPLE_WARNING = "Low sample size — treat results with caution."
 
-# Enumerators shown before the list scrolls
-_LIST_ROWS = 10
+# Enumerators shown before the table scrolls
+_TABLE_ROWS = 10
+_ROW_HEIGHT = 35
 
 
 # =============================================================================
@@ -56,10 +70,9 @@ _LIST_ROWS = 10
 # =============================================================================
 
 
-def _badge(badge: Badge, score: float | None) -> str:
-    """Return the Markdown badge for a score."""
-    label = badge.value if score is None else f"{badge.value} {score:.0f}"
-    return f":{BADGE_COLORS[badge]}-badge[{label}]"
+def _badge(badge: Badge) -> str:
+    """Return the Markdown badge for a score's band."""
+    return f":{BADGE_COLORS[badge]}-badge[{badge.value}]"
 
 
 def _render_page_condition(condition: PageCondition) -> None:
@@ -84,30 +97,11 @@ def _render_skipped(skipped: dict[str, str]) -> None:
         st.caption(f":material/info: Skipped **{variable}**: {reason}.")
 
 
-def _render_enumerator_list(
-    enumerators: list[DigitPreferenceEnumerator], key: str
-) -> str:
-    """Render the enumerator list and return the selected enumerator.
-
-    The list is sorted highest score first, so the default selection is
-    the enumerator most in need of attention.
-    """
-    labels = {
-        e.enumerator: (
-            f"**{e.enumerator}** · {e.interviews:,} interviews "
-            f"{_badge(e.badge, e.score)}"
-        )
-        for e in enumerators
-    }
-    height = 420 if len(enumerators) > _LIST_ROWS else "content"
-    with st.container(height=height, border=True):
-        return st.radio(
-            "Enumerator",
-            options=list(labels),
-            format_func=labels.get,
-            key=key,
-            label_visibility="collapsed",
-        )
+def _flag_style(flag: str) -> str:
+    """Return the cell style for a Flag value."""
+    return (
+        f"background-color: {_FLAG_FILLS[flag]}; color: {_FLAG_TEXT}; font-weight: 600"
+    )
 
 
 # =============================================================================
@@ -115,14 +109,65 @@ def _render_enumerator_list(
 # =============================================================================
 
 
-def _threshold_description(threshold: int) -> str:
-    """Explain what flagging at ``threshold`` means, in plain terms."""
-    ratio = f"{1 + threshold / 100:.2f}".rstrip("0").rstrip(".")
-    return (
-        f"Flags an enumerator when their answers end in 0 or 5 at least "
-        f"{ratio} times as often as the rest of the team's ({threshold}% more "
-        f"often). A score of 100 means twice as often."
+def _render_digit_table(
+    enumerators: list[DigitPreferenceEnumerator], key: str
+) -> DigitPreferenceEnumerator:
+    """Render the enumerator table and return the selected enumerator.
+
+    Rows are sorted highest score first and the first row is selected by
+    default, so the detail shows the enumerator most in need of attention.
+    Clearing the selection falls back to that enumerator.
+    """
+    table = pd.DataFrame(
+        {
+            "Enumerator": [e.enumerator for e in enumerators],
+            "Interviews": [e.interviews for e in enumerators],
+            "Responses": [e.n_responses for e in enumerators],
+            "Ending in 0 or 5 (%)": [e.enum_pct for e in enumerators],
+            "Rest of team (%)": [e.team_pct for e in enumerators],
+            "Score": [e.score for e in enumerators],
+            "Flag": [e.badge.value for e in enumerators],
+        }
     )
+    styler = table.style.map(_flag_style, subset=["Flag"]).format(
+        {
+            "Interviews": "{:,}",
+            "Responses": "{:,}",
+            "Ending in 0 or 5 (%)": "{:.1f}",
+            "Rest of team (%)": "{:.1f}",
+            "Score": "{:.0f}",
+        },
+        na_rep="—",
+    )
+    visible_rows = min(len(enumerators), _TABLE_ROWS)
+    event = styled_dataframe(
+        styler,
+        key=key,
+        on_select="rerun",
+        selection_mode="single-row",
+        selection_default={"selection": {"rows": [0]}},
+        hide_index=True,
+        width="stretch",
+        height=_ROW_HEIGHT * (visible_rows + 1) + 3,
+        column_config={
+            "Enumerator": st.column_config.TextColumn(pinned=True),
+            "Responses": st.column_config.Column(
+                help="Non-missing responses pooled across the checked variables"
+            ),
+            "Ending in 0 or 5 (%)": st.column_config.Column(
+                help="Share of the enumerator's responses ending in 0 or 5"
+            ),
+            "Rest of team (%)": st.column_config.Column(
+                help="The same share for every other enumerator"
+            ),
+            "Score": st.column_config.Column(
+                help="0-100. 100 means answers end in 0 or 5 at least twice "
+                "as often as the rest of the team's."
+            ),
+        },
+    )
+    rows = event.selection.rows
+    return enumerators[rows[0] if rows else 0]
 
 
 def _digit_chart(e: DigitPreferenceEnumerator, flagged: bool) -> go.Figure:
@@ -134,6 +179,7 @@ def _digit_chart(e: DigitPreferenceEnumerator, flagged: bool) -> go.Figure:
         else _ENUM_COLOR
         for d in range(10)
     ]
+    hover = "Digit %{x}: %{y:.1f}%<extra></extra>"
     fig = go.Figure(
         [
             go.Bar(
@@ -141,14 +187,14 @@ def _digit_chart(e: DigitPreferenceEnumerator, flagged: bool) -> go.Figure:
                 y=e.enum_digit_pct,
                 name=e.enumerator,
                 marker_color=enum_colors,
-                hovertemplate="Digit %{x}: %{y:.1f}%<extra></extra>",
+                hovertemplate=hover,
             ),
             go.Bar(
                 x=digits,
                 y=e.team_digit_pct,
                 name="Rest of team",
                 marker_color=_TEAM_COLOR,
-                hovertemplate="Digit %{x}: %{y:.1f}%<extra></extra>",
+                hovertemplate=hover,
             ),
         ]
     )
@@ -182,7 +228,7 @@ def _render_digit_detail(e: DigitPreferenceEnumerator, min_sample: int) -> None:
     flagged = e.badge == Badge.HIGH
     st.markdown(
         f"##### {e.enumerator}: terminal digits · score **{e.score:.0f}** "
-        f"{_badge(e.badge, None)}"
+        f"{_badge(e.badge)}"
     )
     st.plotly_chart(_digit_chart(e, flagged), width="stretch")
     metric_row(
@@ -212,21 +258,6 @@ def _render_digit_detail(e: DigitPreferenceEnumerator, min_sample: int) -> None:
         )
 
 
-def _render_digit_threshold(default: int) -> None:
-    """Render the Digit Preference flag-threshold slider and its description."""
-    threshold = st.slider(
-        "Flag threshold",
-        min_value=10,
-        max_value=90,
-        value=default,
-        key=DP_THRESHOLD_KEY,
-        help="Enumerators scoring at or above this are flagged High; within "
-        f"{MODERATE_MARGIN} points below it, Moderate.",
-        on_change=mark_settings_changed,
-    )
-    st.caption(_threshold_description(threshold))
-
-
 def _render_digit_preference(result: DigitPreferenceResult, min_sample: int) -> None:
     """Render the Digit Preference sub-tab."""
     st.markdown(
@@ -234,7 +265,10 @@ def _render_digit_preference(result: DigitPreferenceResult, min_sample: int) -> 
         "the rest of the team's? Terminal digits are pooled across the "
         "selected integer and continuous variables."
     )
-    _render_digit_threshold(result.threshold)
+    st.caption(
+        f"Sensitivity: **{THRESHOLD_LEVELS[result.threshold]}** (flagged at a "
+        f"score of {result.threshold} or more). Change it in the settings above."
+    )
 
     if result.condition == CheckCondition.NO_APPLICABLE_VARIABLES:
         st.info(
@@ -261,12 +295,9 @@ def _render_digit_preference(result: DigitPreferenceResult, min_sample: int) -> 
         )
         return
 
-    left, right = st.columns([1, 2], gap="medium")
-    with left:
-        selected = _render_enumerator_list(result.enumerators, DP_ENUMERATOR_KEY)
-    with right:
-        by_name = {e.enumerator: e for e in result.enumerators}
-        _render_digit_detail(by_name[selected], min_sample)
+    st.caption("Select an enumerator to see their terminal digits.")
+    selected = _render_digit_table(result.enumerators, DP_TABLE_KEY)
+    _render_digit_detail(selected, min_sample)
 
 
 # =============================================================================
@@ -294,8 +325,8 @@ def render_response_patterns(
 ) -> None:
     """Render the Response Patterns section of the enumerator report.
 
-    A fragment: changing its settings, thresholds or selected enumerator
-    reruns only this section.
+    A fragment: changing its settings or selected enumerator reruns only
+    this section.
 
     Parameters
     ----------
@@ -327,13 +358,6 @@ def render_response_patterns(
     settings = response_pattern_settings(
         settings_file, data, _excluded_columns(enumerator_settings), missing_codes
     )
-    # The slider renders inside its sub-tab after scoring, so read its value
-    # from this run's session state
-    settings.digit_preference_threshold = st.session_state.get(
-        DP_THRESHOLD_KEY, settings.digit_preference_threshold
-    )
-    save_response_pattern_settings(settings_file, settings)
-
     results: ResponsePatternResults = compute_response_patterns(
         data, settings, enumerator_col, missing_codes
     )

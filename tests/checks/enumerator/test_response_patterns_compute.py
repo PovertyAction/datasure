@@ -162,7 +162,7 @@ class TestSampleBands:
 class TestBadgesAndOrder:
     @pytest.mark.parametrize(
         ("threshold", "badge"),
-        [(50, "High"), (51, "Moderate"), (65, "Moderate"), (66, "Low")],
+        [(35, "High"), (50, "High"), (65, "Moderate"), (80, "Low")],
     )
     def test_badge_boundaries(self, threshold, badge):
         data = _frame({"A": _values(40, 12), "B": _values(40, 8)})  # score 50
@@ -282,6 +282,14 @@ class TestConditions:
         results = compute_response_patterns(data, _settings(), ENUM, None)
 
         assert results.digit_preference.condition == "all_below_minimum"
+
+
+class TestThresholdLevels:
+    @pytest.mark.parametrize(("saved", "level"), [(70, 65), (10, 20), (90, 80)])
+    def test_saved_threshold_snaps_to_the_nearest_level(self, saved, level):
+        settings = ResponsePatternSettings(digit_preference_threshold=saved)
+
+        assert settings.digit_preference_threshold == level
 
 
 class TestInferVariableTypes:
