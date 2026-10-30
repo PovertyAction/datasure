@@ -301,8 +301,12 @@ def _render_digit_detail(e: DigitPreferenceEnumerator, min_sample: int) -> None:
     )
     metric_row(
         [
-            (f"Ending in 0 or 5: {e.enumerator}", f"{e.enum_pct:.1f}%"),
-            ("Ending in 0 or 5: rest of team", f"{e.team_pct:.1f}%"),
+            (
+                "Ending in 0 or 5",
+                f"{e.enum_pct:.1f}%",
+                f"Share of {e.enumerator}'s responses ending in 0 or 5",
+                f"Rest of team: {e.team_pct:.1f}%",
+            ),
             (
                 "Responses",
                 f"{e.n_responses:,}",
