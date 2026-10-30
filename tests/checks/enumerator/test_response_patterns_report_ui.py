@@ -30,7 +30,7 @@ def _frame(values_by_enum: dict[str, list]) -> pl.DataFrame:
     )
 
 
-def _section_app(data, settings_file):
+def _section_app(data, settings_file, missing_codes=None):
     from datasure.checks.enumerator.models import EnumeratorSettings
     from datasure.checks.enumerator.response_patterns.report_ui import (
         render_response_patterns,
@@ -40,7 +40,7 @@ def _section_app(data, settings_file):
         data,
         settings_file,
         EnumeratorSettings(survey_key="key", survey_id="key", enumerator="enum"),
-        None,
+        missing_codes,
     )
 
 
@@ -157,6 +157,23 @@ class TestVariableEditor:
         assert editor["Variable"].tolist() == ["age", "choice"]
         assert editor["Inferred type"].tolist() == ["integer", "categorical"]
         assert not editor["Select"].any()
+
+    def test_infers_types_after_masking_missing_codes(self, team_data, settings_file):
+        # -99.5 is a missing code, so the remaining values are all whole
+        data = team_data.with_columns(
+            pl.when(pl.col("age") == 11)
+            .then(-99.5)
+            .otherwise(pl.col("age").cast(pl.Float64))
+            .alias("age")
+        )
+        codes = pl.DataFrame({"label": ["Refused"], "codes": ["-99.5"]})
+
+        at = AppTest.from_function(
+            _section_app, args=(data, settings_file, codes)
+        ).run()
+
+        editor = at.dataframe(key="rp_variable_editor").value
+        assert editor["Inferred type"].tolist()[0] == "integer"
 
     def test_shows_saved_selection_and_type_overrides(self, team_data, settings_file):
         _save(

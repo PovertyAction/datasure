@@ -15,6 +15,7 @@ from datasure.checks.enumerator.response_patterns.compute import (
     compute_response_patterns,
 )
 from datasure.checks.enumerator.response_patterns.models import (
+    MODERATE_MARGIN,
     Badge,
     CheckCondition,
     DigitPreferenceEnumerator,
@@ -220,7 +221,7 @@ def _render_digit_threshold(default: int) -> None:
         value=default,
         key=DP_THRESHOLD_KEY,
         help="Enumerators scoring at or above this are flagged High; within "
-        "15 points below it, Moderate.",
+        f"{MODERATE_MARGIN} points below it, Moderate.",
         on_change=mark_settings_changed,
     )
     st.caption(_threshold_description(threshold))
@@ -324,7 +325,7 @@ def render_response_patterns(
         return
 
     settings = response_pattern_settings(
-        settings_file, data, _excluded_columns(enumerator_settings)
+        settings_file, data, _excluded_columns(enumerator_settings), missing_codes
     )
     # The slider renders inside its sub-tab after scoring, so read its value
     # from this run's session state
