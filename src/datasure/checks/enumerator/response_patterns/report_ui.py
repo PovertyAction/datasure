@@ -70,6 +70,10 @@ _PILL_STYLES: dict[str, tuple[str, str]] = {
 }
 
 INFO_ICON = ":material/info:"
+_CAPPED_NOTE = (
+    "Each side's values are capped at its own 5th and 95th percentiles "
+    "first, so one extreme answer can't dominate."
+)
 LOW_SAMPLE_WARNING = "Low sample size — treat results with caution."
 
 # Enumerators shown before the table scrolls
@@ -516,13 +520,13 @@ def _render_range_detail(e: RangeCompressionEnumerator, min_sample: int) -> None
             (
                 "Mean",
                 _num(v.enum_mean),
-                f"{e.enumerator}'s mean on {v.variable}",
+                f"{e.enumerator}'s mean on {v.variable}. {_CAPPED_NOTE}",
                 f"Rest of team: {_num(v.team_mean)}",
             ),
             (
                 "Standard deviation",
                 _num(v.enum_sd),
-                f"{e.enumerator}'s standard deviation on {v.variable}",
+                f"{e.enumerator}'s standard deviation on {v.variable}. {_CAPPED_NOTE}",
                 f"Rest of team: {_num(v.team_sd)}",
             ),
             (

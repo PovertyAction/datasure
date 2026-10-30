@@ -326,6 +326,26 @@ class TestInferVariableTypes:
             "choice": "categorical",
         }
 
+    def test_gps_looking_columns_are_left_out(self):
+        gps = [
+            "household_latitude",
+            "household_longitude",
+            "hh_gps-Latitude",
+            "hh_gps-Altitude",
+            "hh_gps-Accuracy",
+            "home-Accuracy",
+            "geopoint_home",
+            "lat",
+            "plot_lng",
+            "GPS_lon",
+        ]
+        kept = ["age", "how_long", "relation", "plate_count", "accuracy_score"]
+        data = pl.DataFrame({col: [1.5, 2.5] for col in gps + kept})
+
+        types = infer_variable_types(data)
+
+        assert list(types) == kept
+
 
 # =============================================================================
 # Range Compression
@@ -344,6 +364,24 @@ def _scaled(values: list[float], factor: float, shift: float = 0.0) -> list[floa
 def _sd(values: list[float]) -> float:
     mean = sum(values) / len(values)
     return (sum((v - mean) ** 2 for v in values) / (len(values) - 1)) ** 0.5
+
+
+def _capped(values: list[float]) -> list[float]:
+    """Cap values at their 5th and 95th percentiles (linear interpolation)."""
+    ordered = sorted(values)
+
+    def percentile(q: float) -> float:
+        pos = q * (len(ordered) - 1)
+        below = int(pos)
+        above = min(below + 1, len(ordered) - 1)
+        return ordered[below] + (ordered[above] - ordered[below]) * (pos - below)
+
+    low, high = percentile(0.05), percentile(0.95)
+    return [min(max(v, low), high) for v in values]
+
+
+# The team SD scoring uses for BASE: after capping its extreme values
+BASE_SD = _sd(_capped(BASE))
 
 
 def _range(results, name: str):
@@ -378,7 +416,7 @@ class TestRangeCompressionScore:
         ("team_sds", "score"), [(0, 0), (50 / 33, 50), (100 / 33, 100), (5, 100)]
     )
     def test_shift_score_rises_33_points_per_team_sd(self, team_sds, score):
-        data = _frame({"A": _scaled(BASE, 1.0, shift=team_sds * _sd(BASE)), "B": BASE})
+        data = _frame({"A": _scaled(BASE, 1.0, shift=team_sds * BASE_SD), "B": BASE})
 
         results = compute_response_patterns(data, _settings(), ENUM, None)
 
@@ -387,10 +425,10 @@ class TestRangeCompressionScore:
         (var,) = a.variables
         assert var.shift_score == pytest.approx(score)
         assert var.compression_score == pytest.approx(0)
-        assert var.enum_mean - var.team_mean == pytest.approx(team_sds * _sd(BASE))
+        assert var.enum_mean - var.team_mean == pytest.approx(team_sds * BASE_SD)
 
     def test_shift_below_the_team_scores_the_same_as_above(self):
-        data = _frame({"A": _scaled(BASE, 1.0, shift=-50 / 33 * _sd(BASE)), "B": BASE})
+        data = _frame({"A": _scaled(BASE, 1.0, shift=-50 / 33 * BASE_SD), "B": BASE})
 
         results = compute_response_patterns(data, _settings(), ENUM, None)
 
@@ -399,7 +437,7 @@ class TestRangeCompressionScore:
 
     def test_both_signals_fire_and_the_higher_sets_the_score(self):
         # Half the spread (compression 50) and 2 team SDs up (shift 66)
-        data = _frame({"A": _scaled(BASE, 0.5, shift=2 * _sd(BASE)), "B": BASE})
+        data = _frame({"A": _scaled(BASE, 0.5, shift=2 * BASE_SD), "B": BASE})
 
         results = compute_response_patterns(data, _settings(), ENUM, None)
 
@@ -411,7 +449,7 @@ class TestRangeCompressionScore:
         assert a.shift_variables == ["x"]
 
     def test_only_signals_reaching_the_threshold_are_listed(self):
-        data = _frame({"A": _scaled(BASE, 0.4, shift=1 * _sd(BASE)), "B": BASE})
+        data = _frame({"A": _scaled(BASE, 0.4, shift=1 * BASE_SD), "B": BASE})
 
         results = compute_response_patterns(data, _settings(), ENUM, None)
 
@@ -421,17 +459,16 @@ class TestRangeCompressionScore:
         assert a.shift_variables == []
 
     def test_baseline_leaves_out_the_enumerator_being_scored(self):
-        # A's rest of team is B and C, who answer identically, so its SD is
-        # B's. A project-wide SD would include A's own narrow answers.
-        data = _frame({"A": _scaled(BASE, 0.5), "B": BASE, "C": BASE})
+        # A answers 100 higher than B and C. A's rest of team is B and C
+        # (mean 49.5); a project-wide mean would be 82.8. B's rest of team is
+        # A and C, two equal blocks centred on 99.5.
+        data = _frame({"A": _scaled(BASE, 1.0, shift=100), "B": BASE, "C": BASE})
 
         results = compute_response_patterns(data, _settings(), ENUM, None)
 
         (var,) = _range(results, "A").variables
-        assert var.team_sd == pytest.approx(_sd(BASE + BASE))
         assert var.team_mean == pytest.approx(49.5)
-        b_var = _range(results, "B").variables[0]
-        assert b_var.team_sd == pytest.approx(_sd(_scaled(BASE, 0.5) + BASE))
+        assert _range(results, "B").variables[0].team_mean == pytest.approx(99.5)
 
     def test_enumerator_score_is_the_highest_variable_score(self):
         data = pl.DataFrame(
@@ -449,6 +486,43 @@ class TestRangeCompressionScore:
         assert a.score == pytest.approx(70)
         assert [v.variable for v in a.variables] == ["y", "x"]
         assert a.variables[1].score == pytest.approx(20)
+
+
+class TestRangeCompressionTrimming:
+    def test_one_extreme_value_does_not_flag_the_rest_of_the_team(self):
+        # C recorded one 4,400 among answers of 30-69. Untrimmed, it sits in
+        # A's and B's rest of team, so both would score 100 for compression,
+        # and C would score 100 for shift.
+        data = _frame({"A": BASE, "B": BASE, "C": BASE[:-1] + [4400.0]})
+
+        results = compute_response_patterns(data, _settings(), ENUM, None)
+
+        for name in ("A", "B", "C"):
+            assert _range(results, name).score < 15, name
+
+    def test_extreme_values_are_capped_at_the_5th_and_95th_percentiles(self):
+        # 0-99 capped at its 4.95 and 94.05 percentiles: the mean stays 49.5
+        team = [float(v) for v in range(100)]
+        data = _frame({"A": team, "B": team[:-1] + [10_000.0]})
+
+        results = compute_response_patterns(data, _settings(), ENUM, None)
+
+        (var,) = _range(results, "A").variables
+        assert var.enum_mean == pytest.approx(49.5)
+        assert var.team_mean < 51
+
+    def test_enumerator_entirely_above_the_team_is_flagged_for_shift(self):
+        # Every one of A's answers is above the team's 95th percentile, with
+        # the same spread. Each side is capped at its own percentiles, so A's
+        # spread is kept and A is not mistaken for compression.
+        data = _frame({"A": _scaled(BASE, 1.0, shift=100), "B": BASE})
+
+        results = compute_response_patterns(data, _settings(), ENUM, None)
+
+        a = _range(results, "A")
+        assert a.signal == "shift"
+        assert a.variables[0].sd_ratio == pytest.approx(1)
+        assert a.compression_variables == []
 
 
 class TestRangeCompressionSkips:
