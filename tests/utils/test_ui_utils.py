@@ -103,6 +103,22 @@ class TestMetricRow:
         cols[0].metric.assert_called_once_with("Rows", 100, help=None)
         cols[1].metric.assert_called_once_with("Missing", 3, help="Missing cells")
 
+    def test_note_renders_as_a_neutral_delta(self, mock_st):
+        """A fourth item shows under the value as grey text without an arrow."""
+        cols = [MagicMock()]
+        mock_st.columns.return_value = cols
+
+        metric_row([("Mean", "4.70", None, "Rest of team: 11.69")])
+
+        cols[0].metric.assert_called_once_with(
+            "Mean",
+            "4.70",
+            help=None,
+            delta="Rest of team: 11.69",
+            delta_color="off",
+            delta_arrow="off",
+        )
+
 
 class TestConfirmDialog:
     """Test the confirm_dialog function."""

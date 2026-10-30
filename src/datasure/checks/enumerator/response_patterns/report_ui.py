@@ -493,9 +493,15 @@ def _render_range_detail(e: RangeCompressionEnumerator, min_sample: int) -> None
         _render_skipped(e.skipped_variables)
         return
 
+    top = e.variables[0]
     st.markdown(
         f"##### {e.enumerator}: spread and level · score **{e.score:.0f}** "
         f"{_badge(e.badge)}"
+    )
+    st.markdown(
+        f"Score set by {top.signal.value} on **{top.variable}** (compression "
+        f"{top.compression_score:.0f}, shift {top.shift_score:.0f}; the "
+        "higher sets the score)."
     )
     _render_range_verdicts(e)
     variable = st.selectbox(
@@ -505,29 +511,24 @@ def _render_range_detail(e: RangeCompressionEnumerator, min_sample: int) -> None
         help="Variables are listed highest score first.",
     )
     v = next(v for v in e.variables if v.variable == variable)
-    top = e.variables[0]
     metric_row(
         [
             (
                 "Mean",
-                f"{_num(v.enum_mean)} vs {_num(v.team_mean)}",
-                f"{e.enumerator} against the rest of the team",
+                _num(v.enum_mean),
+                f"{e.enumerator}'s mean on {v.variable}",
+                f"Rest of team: {_num(v.team_mean)}",
             ),
             (
                 "Standard deviation",
-                f"{_num(v.enum_sd)} vs {_num(v.team_sd)}",
-                f"{e.enumerator} against the rest of the team",
+                _num(v.enum_sd),
+                f"{e.enumerator}'s standard deviation on {v.variable}",
+                f"Rest of team: {_num(v.team_sd)}",
             ),
             (
                 "SD ratio",
                 f"{v.sd_ratio:.2f}",
                 "Under 1 means a narrower spread than the rest of the team's",
-            ),
-            (
-                "Score set by",
-                f"{top.signal.value.capitalize()} on {top.variable}",
-                f"Compression {top.compression_score:.0f}, shift "
-                f"{top.shift_score:.0f}; the higher sets the score",
             ),
         ]
     )
