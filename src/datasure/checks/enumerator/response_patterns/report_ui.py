@@ -48,13 +48,14 @@ _ENUM_COLOR = IPA_DARK_GREEN
 _TEAM_COLOR = IPA_DARK_GRAY
 _FLAG_COLOR = IPA_RED_ORANGE
 
-# Flag text colours in the enumerator table, from the IPA palette. IPA Gold is
-# too light for text on white, so Moderate uses a deeper gold. N/A keeps the
-# theme's text colour, which reads in light and dark mode.
-_FLAG_COLORS: dict[str, str] = {
-    Badge.LOW: "#49ac57",
-    Badge.MODERATE: "#d4a017",
-    Badge.HIGH: IPA_RED_ORANGE,
+# Flag cells in the enumerator table look like the st.badge pills on the
+# Summary page's check health table: Streamlit's light-theme badge text
+# colour on a 10% tint of the badge colour, keyed by BADGE_COLORS.
+_PILL_STYLES: dict[str, tuple[str, str]] = {
+    "gray": ("rgba(49, 51, 63, 0.6)", "rgba(49, 51, 63, 0.1)"),
+    "green": ("#158237", "rgba(33, 195, 84, 0.1)"),
+    "orange": ("#e2660c", "rgba(255, 135, 0, 0.1)"),
+    "red": ("#bd4043", "rgba(255, 43, 43, 0.1)"),
 }
 
 INFO_ICON = ":material/info:"
@@ -98,9 +99,9 @@ def _render_skipped(skipped: dict[str, str]) -> None:
 
 
 def _flag_style(flag: str) -> str:
-    """Return the text style for a Flag value; the cell keeps its background."""
-    color = _FLAG_COLORS.get(flag)
-    return f"color: {color}; font-weight: 600" if color else ""
+    """Return the badge-like style for a Flag value."""
+    text, fill = _PILL_STYLES[BADGE_COLORS[Badge(flag)]]
+    return f"color: {text}; background-color: {fill}; font-weight: 600"
 
 
 # =============================================================================
@@ -240,7 +241,6 @@ def _render_digit_detail(e: DigitPreferenceEnumerator, min_sample: int) -> None:
             ),
         ]
     )
-    st.plotly_chart(_digit_chart(e, flagged), width="stretch")
     if e.sample_band == SampleBand.LOW:
         st.warning(LOW_SAMPLE_WARNING, icon=":material/warning:")
     if flagged:
@@ -255,6 +255,7 @@ def _render_digit_detail(e: DigitPreferenceEnumerator, min_sample: int) -> None:
             "of the team.",
             icon=":material/check_circle:",
         )
+    st.plotly_chart(_digit_chart(e, flagged), width="stretch")
 
 
 def _render_digit_preference(result: DigitPreferenceResult, min_sample: int) -> None:
