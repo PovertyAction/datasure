@@ -25,6 +25,7 @@ from datasure.checks.missing import (
     compute_missing_summary,
     get_null_list,
     mask_missing_codes,
+    mask_text_missing_codes,
     missing_columns,
     missing_compare,
     missing_correlation,
@@ -512,6 +513,35 @@ def test_mask_missing_codes_leaves_text_columns_alone(land_area_missing_codes):
     result = mask_missing_codes(data, ["name"], land_area_missing_codes)
 
     assert result["name"].to_list() == ["-99", "Ama"]
+
+
+def test_mask_text_missing_codes_nulls_every_code_in_text_columns(
+    land_area_missing_codes,
+):
+    """Text and number codes alike match the text exactly; numbers are left."""
+    data = pl.DataFrame(
+        {
+            "answer": ["-99", ".d", "-88", "-99.0", "Ama"],
+            "choice": pl.Series(
+                ["yes", ".d", "no", "-88", "yes"], dtype=pl.Categorical
+            ),
+            "level": pl.Series(
+                ["low", "high", ".d", "low", "high"],
+                dtype=pl.Enum(["low", "high", ".d"]),
+            ),
+            "count": [-99, 1, 2, 3, 4],
+        }
+    )
+
+    result = mask_text_missing_codes(
+        data, ["answer", "choice", "level", "count"], land_area_missing_codes
+    )
+
+    assert result["answer"].to_list() == [None, None, None, "-99.0", "Ama"]
+    assert result["choice"].to_list() == ["yes", None, "no", None, "yes"]
+    assert result["level"].to_list() == ["low", "high", None, "low", "high"]
+    assert result["count"].to_list() == [-99, 1, 2, 3, 4]
+    assert result.schema == data.schema
 
 
 def test_mask_missing_codes_without_codes(land_area_data):

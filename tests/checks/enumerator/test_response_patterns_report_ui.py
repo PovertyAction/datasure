@@ -524,3 +524,153 @@ class TestRangeCompressionTab:
         assert new_session.segmented_control(key="rp_rc_threshold").value == 65
         table = new_session.dataframe(key="rp_rc_enumerators").value
         assert table["Flag"].tolist()[0] == "Moderate"
+
+
+# =============================================================================
+# Categorical Response Patterns
+# =============================================================================
+
+
+def _answers(counts: dict[str, int]) -> list[str]:
+    return [option for option, n in counts.items() for _ in range(n)]
+
+
+def _categorical_frame(
+    choice: dict[str, list[str]], region: dict[str, list[str]] | None = None
+) -> pl.DataFrame:
+    """Build the section's data with the given ``choice`` (and ``region``)."""
+    frame = _frame({name: _values(len(v), 8) for name, v in choice.items()})
+    columns = [pl.Series("choice", [a for v in choice.values() for a in v])]
+    if region:
+        columns.append(pl.Series("region", [a for v in region.values() for a in v]))
+    return frame.with_columns(columns)
+
+
+@pytest.fixture
+def categorical_data():
+    # "defaulter" answers yes 90% of the time, the others half the time
+    even = _answers({"yes": 20, "no": 20})
+    return _categorical_frame(
+        {
+            "defaulter": _answers({"yes": 36, "no": 4}),
+            "steady": even,
+            "careful": even,
+        }
+    )
+
+
+def _categorical_tab(at: AppTest):
+    return next(t for t in at.tabs if t.label == "Categorical Response Patterns")
+
+
+class TestCategoricalTab:
+    def test_lists_enumerators_by_score_with_flags(
+        self, categorical_data, settings_file
+    ):
+        _save(settings_file, selected_variables=["choice"])
+
+        at = _run(categorical_data, settings_file)
+
+        table = at.dataframe(key="rp_cat_enumerators").value
+        assert table["Enumerator"].tolist()[0] == "defaulter"
+        assert table["Top question"].tolist()[0] == "choice"
+        assert table["Largest gap (pp)"].tolist()[0] == pytest.approx(40)
+        assert table["Score"].tolist()[0] == pytest.approx(80)
+        assert table["Flag"].tolist()[0] == "High"
+
+    def test_flagged_question_shows_anomaly_verdict_and_red_options(
+        self, categorical_data, settings_file
+    ):
+        _save(settings_file, selected_variables=["choice"])
+
+        at = _run(categorical_data, settings_file)
+
+        tab = _categorical_tab(at)
+        assert "defaulter: answer options" in _texts(tab.markdown)
+        assert "**choice** :red-badge[ANOMALY]" in _texts(tab.markdown)
+        assert "chose **yes** in 90.0% of answers" in _texts(tab.warning)
+        spec = json.loads(_categorical_tab(at).get("plotly_chart")[0].proto.spec)
+        enum_bars, team_bars = spec["data"]
+        assert enum_bars["orientation"] == team_bars["orientation"] == "h"
+        assert team_bars["name"] == "Rest of team"
+        assert enum_bars["y"] == ["no", "yes"]
+        # Both gaps (-40 and +40) reach half the threshold, 25 points
+        assert enum_bars["marker"]["color"] == ["#f26529", "#f26529"]
+
+    def test_verdict_names_an_avoided_option_that_set_the_score(self, settings_file):
+        team = _answers({"a": 24, "b": 8, "c": 8})
+        data = _categorical_frame(
+            {"avoider": _answers({"b": 20, "c": 20}), "steady": team, "careful": team}
+        )
+        _save(settings_file, selected_variables=["choice"])
+
+        at = _run(data, settings_file)
+
+        verdict = _texts(_categorical_tab(at).warning)
+        assert "chose **a** in only 0.0% of answers, against 60.0%" in verdict
+        assert "**b** instead (50.0% against 20.0%)" in verdict
+
+    def test_questions_are_sorted_worst_first(self, settings_file):
+        even = _answers({"yes": 20, "no": 20})
+        data = _categorical_frame(
+            {"defaulter": _answers({"yes": 36, "no": 4}), "steady": even},
+            region={
+                "defaulter": _answers({"north": 24, "south": 16}),
+                "steady": _answers({"north": 20, "south": 20}),
+            },
+        )
+        _save(settings_file, selected_variables=["region", "choice"])
+
+        at = _run(data, settings_file)
+
+        titles = [m.value for m in _categorical_tab(at).markdown if "**" in m.value[:3]]
+        assert titles[0].startswith("**choice** :red-badge[ANOMALY]")
+        assert titles[1].startswith("**region**")
+        assert "ANOMALY" not in titles[1]
+        assert "consistent with the rest of the team" in _texts(
+            _categorical_tab(at).success
+        )
+        # region's gaps of 10 points stay below 25, so its bars keep their colour
+        spec = json.loads(_categorical_tab(at).get("plotly_chart")[1].proto.spec)
+        assert set(spec["data"][0]["marker"]["color"]) == {"#155240"}
+
+    def test_selecting_a_row_shows_that_enumerator(
+        self, categorical_data, settings_file
+    ):
+        _save(settings_file, selected_variables=["choice"])
+        at = _run(categorical_data, settings_file)
+
+        at.session_state["rp_cat_enumerators"] = {
+            "selection": {"rows": [2], "columns": [], "cells": []}
+        }
+        at.run()
+
+        assert not at.exception
+        tab = _categorical_tab(at)
+        name = at.dataframe(key="rp_cat_enumerators").value["Enumerator"].tolist()[2]
+        assert f"{name}: answer options" in _texts(tab.markdown)
+        assert "ANOMALY" not in _texts(tab.markdown)
+
+    def test_no_applicable_variables(self, categorical_data, settings_file):
+        _save(settings_file, selected_variables=["age"])
+
+        at = _run(categorical_data, settings_file)
+
+        assert "None of the selected variables are categorical" in _texts(
+            _categorical_tab(at).info
+        )
+
+    def test_threshold_survives_a_new_session(self, categorical_data, settings_file):
+        _save(settings_file, selected_variables=["choice"])
+        at = _run(categorical_data, settings_file)
+
+        at.segmented_control(key="rp_cat_threshold").set_value(20).run()
+        assert not at.exception
+        assert "at least 10 percentage points" in _texts(at.caption)
+
+        new_session = _run(categorical_data, settings_file)
+
+        assert new_session.segmented_control(key="rp_cat_threshold").value == 20
+        with open(settings_file) as f:
+            saved = json.load(f)["enumerators"]["response_patterns"]
+        assert saved["categorical_threshold"] == 20

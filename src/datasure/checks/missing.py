@@ -350,6 +350,47 @@ def mask_missing_codes(
     )
 
 
+def mask_text_missing_codes(
+    df: pl.DataFrame, cols: list[str], missing_codes_df: pl.DataFrame
+) -> pl.DataFrame:
+    """Set the project's missing codes to null in text columns.
+
+    Checks that read answers as text call this so a code such as `.d` or
+    `-99` is not counted as an answer. Every code matches its exact text, as
+    on the Missing Data tab.
+
+    Parameters
+    ----------
+    df : pl.DataFrame
+        The dataset.
+    cols : list[str]
+        Columns to mask. Columns that are not text are left unchanged.
+    missing_codes_df : pl.DataFrame
+        The missing codes configuration.
+
+    Returns
+    -------
+    pl.DataFrame
+        `df` with the missing codes in the text columns of `cols` set to null.
+    """
+    codes = _get_all_missing_codes(missing_codes_df)
+    text_cols = [
+        c
+        for c in cols
+        if df.schema[c] in (pl.String, pl.Categorical)
+        or isinstance(df.schema[c], pl.Enum)
+    ]
+    if not codes or not text_cols:
+        return df
+    return df.with_columns(
+        pl.when(pl.col(c).cast(pl.String).is_in(codes))
+        .then(None)
+        .otherwise(pl.col(c))
+        .alias(c)
+        for c in text_cols
+    )
+
+
 def _get_missing_code_pairs(missing_codes_df: pl.DataFrame) -> dict[str, list[str]]:
     """Get missing code label to codes mapping.
 
