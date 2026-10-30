@@ -52,6 +52,9 @@ class ResponsePatternSettings(BaseModel):
     range_compression_threshold : int
         Range Compression score at or above which an enumerator is flagged,
         one of ``THRESHOLD_LEVELS``.
+    categorical_threshold : int
+        Categorical Response Patterns score at or above which an enumerator
+        is flagged, one of ``THRESHOLD_LEVELS``.
     """
 
     selected_variables: list[str] = Field(default_factory=list)
@@ -60,8 +63,13 @@ class ResponsePatternSettings(BaseModel):
     warn_sample: int = Field(30, ge=1)
     digit_preference_threshold: int = Field(DEFAULT_THRESHOLD, ge=0, le=100)
     range_compression_threshold: int = Field(DEFAULT_THRESHOLD, ge=0, le=100)
+    categorical_threshold: int = Field(DEFAULT_THRESHOLD, ge=0, le=100)
 
-    @field_validator("digit_preference_threshold", "range_compression_threshold")
+    @field_validator(
+        "digit_preference_threshold",
+        "range_compression_threshold",
+        "categorical_threshold",
+    )
     @classmethod
     def snap_to_level(cls, v: int) -> int:
         """Move a threshold saved off the fixed levels to the nearest level."""
@@ -94,6 +102,7 @@ class SkipReason(StrEnum):
     RANGE_UNDER_10 = "observed range under 10"
     BELOW_MINIMUM = "fewer responses than the minimum"
     TEAM_NO_VARIATION = "no variation in the rest of the team's responses"
+    TEAM_NO_RESPONSES = "no responses from the rest of the team"
 
 
 class PageCondition(StrEnum):
@@ -208,6 +217,67 @@ class RangeCompressionResult(BaseModel):
     enumerators: list[RangeCompressionEnumerator] = Field(default_factory=list)
 
 
+class CategoricalOption(BaseModel):
+    """One answer option's share for the enumerator and the rest of the team.
+
+    Shares are percentages; an option one side never chose is 0% there.
+    ``gap`` is the enumerator's share minus the team's, in percentage
+    points. ``flagged`` options have a gap of at least half the flag
+    threshold either way.
+    """
+
+    option: str
+    enum_pct: float
+    team_pct: float
+    gap: float
+    flagged: bool
+
+
+class CategoricalQuestion(BaseModel):
+    """One enumerator's Categorical Response Patterns result on one question.
+
+    ``options`` are in the order of their values. ``largest_gap`` is the
+    largest absolute gap on any option, in percentage points.
+    ``dominant_option`` is the option the enumerator chose most often
+    relative to the team, if any.
+    """
+
+    variable: str
+    n_responses: int
+    sample_band: SampleBand
+    score: float
+    largest_gap: float
+    flagged: bool
+    dominant_option: str | None = None
+    options: list[CategoricalOption]
+
+
+class CategoricalEnumerator(BaseModel):
+    """One enumerator's Categorical Response Patterns result.
+
+    The score and sample band are those of ``questions[0]``, the
+    highest-scoring question.
+    """
+
+    enumerator: str
+    interviews: int
+    sample_band: SampleBand
+    score: float | None
+    badge: Badge
+    questions: list[CategoricalQuestion] = Field(default_factory=list)
+    skipped_variables: dict[str, SkipReason] = Field(default_factory=dict)
+
+
+class CategoricalResult(BaseModel):
+    """Categorical Response Patterns results, highest score first."""
+
+    threshold: int
+    condition: CheckCondition | None = None
+    variables: list[str] = Field(default_factory=list)
+    skipped_variables: dict[str, SkipReason] = Field(default_factory=dict)
+    enumerators: list[CategoricalEnumerator] = Field(default_factory=list)
+
+
 class ResponsePatternResults(BaseModel):
     """Everything the Response Patterns section shows."""
 
@@ -216,3 +286,4 @@ class ResponsePatternResults(BaseModel):
     warn_sample: int
     digit_preference: DigitPreferenceResult | None = None
     range_compression: RangeCompressionResult | None = None
+    categorical: CategoricalResult | None = None

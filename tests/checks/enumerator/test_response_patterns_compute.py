@@ -675,3 +675,288 @@ class TestRangeCompressionThreshold:
         settings = ResponsePatternSettings(range_compression_threshold=90)
 
         assert settings.range_compression_threshold == 80
+
+
+# =============================================================================
+# Categorical Response Patterns
+# =============================================================================
+
+
+def _choices(counts: dict[str, int]) -> list[str]:
+    """Return each option repeated its count times."""
+    return [option for option, n in counts.items() for _ in range(n)]
+
+
+def _categorical(results, name: str):
+    return next(e for e in results.categorical.enumerators if e.enumerator == name)
+
+
+class TestCategoricalScore:
+    @pytest.mark.parametrize(
+        ("enum_yes", "gap", "score"),
+        [(20, 0, 0), (30, 25, 50), (40, 50, 100), (36, 40, 80)],
+    )
+    def test_score_is_twice_the_largest_gap(self, enum_yes, gap, score):
+        # The rest of the team answers yes half the time; A's yes share of
+        # 50%, 75% and 100% is a gap of 0, 25 and 50 points
+        data = _frame(
+            {
+                "A": _choices({"yes": enum_yes, "no": 40 - enum_yes}),
+                "B": _choices({"yes": 20, "no": 20}),
+            }
+        )
+
+        results = compute_response_patterns(data, _settings(), ENUM, None)
+
+        a = _categorical(results, "A")
+        assert a.score == pytest.approx(score)
+        (question,) = a.questions
+        assert question.score == pytest.approx(score)
+        assert question.largest_gap == pytest.approx(gap)
+
+    def test_gap_beyond_50_points_is_capped_at_100(self):
+        data = _frame({"A": _choices({"yes": 40}), "B": _choices({"yes": 8, "no": 32})})
+
+        results = compute_response_patterns(data, _settings(), ENUM, None)
+
+        assert _categorical(results, "A").score == pytest.approx(100)
+
+    def test_baseline_leaves_out_the_enumerator_being_scored(self):
+        # A always says yes; B and C split evenly. A's rest of team says yes
+        # 50% of the time (gap 50, score 100). B's rest of team is A and C,
+        # 75% yes (gap 25, score 50). A project-wide 66.7% would give 67 and
+        # 33.
+        data = _frame(
+            {
+                "A": _choices({"yes": 40}),
+                "B": _choices({"yes": 20, "no": 20}),
+                "C": _choices({"yes": 20, "no": 20}),
+            }
+        )
+
+        results = compute_response_patterns(data, _settings(), ENUM, None)
+
+        assert _categorical(results, "A").score == pytest.approx(100)
+        assert _categorical(results, "B").score == pytest.approx(50)
+        yes = _categorical(results, "B").questions[0].options[1]
+        assert (yes.option, yes.team_pct) == ("yes", pytest.approx(75))
+
+    def test_enumerator_score_is_the_highest_question_score(self):
+        data = pl.DataFrame(
+            {
+                ENUM: ["A"] * 40 + ["B"] * 40,
+                "x": _choices({"yes": 24, "no": 16}) + _choices({"yes": 20, "no": 20}),
+                "y": _choices({"yes": 32, "no": 8}) + _choices({"yes": 20, "no": 20}),
+            }
+        )
+        settings = _settings(selected_variables=["x", "y"])
+
+        results = compute_response_patterns(data, settings, ENUM, None)
+
+        a = _categorical(results, "A")
+        assert a.score == pytest.approx(60)
+        assert [q.variable for q in a.questions] == ["y", "x"]
+        assert [q.score for q in a.questions] == [pytest.approx(60), pytest.approx(20)]
+
+
+class TestCategoricalOptions:
+    def test_options_only_one_side_chose_count_as_0_on_the_other(self):
+        # A never says "maybe"; only A says "dk"
+        data = _frame(
+            {
+                "A": _choices({"yes": 20, "dk": 20}),
+                "B": _choices({"yes": 20, "maybe": 20}),
+            }
+        )
+
+        results = compute_response_patterns(data, _settings(), ENUM, None)
+
+        (question,) = _categorical(results, "A").questions
+        shares = {o.option: (o.enum_pct, o.team_pct) for o in question.options}
+        assert shares == {
+            "dk": (pytest.approx(50), 0),
+            "maybe": (0, pytest.approx(50)),
+            "yes": (pytest.approx(50), pytest.approx(50)),
+        }
+        assert question.score == pytest.approx(100)
+
+    def test_options_at_half_the_threshold_are_flagged_either_way(self):
+        # Gaps: yes +25, no -15, dk -10. At threshold 50 the cut-off is 25.
+        data = _frame(
+            {
+                "A": _choices({"yes": 30, "no": 6, "dk": 4}),
+                "B": _choices({"yes": 20, "no": 12, "dk": 8}),
+            }
+        )
+
+        results = compute_response_patterns(data, _settings(), ENUM, None)
+
+        (question,) = _categorical(results, "A").questions
+        assert {o.option: o.flagged for o in question.options} == {
+            "dk": False,
+            "no": False,
+            "yes": True,
+        }
+        assert question.flagged
+        assert question.dominant_option == "yes"
+        assert {o.option: o.gap for o in question.options} == {
+            "dk": pytest.approx(-10),
+            "no": pytest.approx(-15),
+            "yes": pytest.approx(25),
+        }
+
+    def test_under_used_option_is_flagged_below_the_threshold_too(self):
+        # Gaps: no -15 and yes +15. At threshold 20 the cut-off is 10.
+        data = _frame(
+            {
+                "A": _choices({"yes": 26, "no": 14}),
+                "B": _choices({"yes": 20, "no": 20}),
+            }
+        )
+        settings = _settings(categorical_threshold=20)
+
+        results = compute_response_patterns(data, settings, ENUM, None)
+
+        (question,) = _categorical(results, "A").questions
+        assert all(o.flagged for o in question.options)
+
+    def test_consistent_question_is_not_flagged_and_has_no_dominant_option(self):
+        data = _frame(
+            {
+                "A": _choices({"yes": 20, "no": 20}),
+                "B": _choices({"yes": 20, "no": 20}),
+            }
+        )
+
+        results = compute_response_patterns(data, _settings(), ENUM, None)
+
+        (question,) = _categorical(results, "A").questions
+        assert not question.flagged
+        assert question.dominant_option is None
+        assert not any(o.flagged for o in question.options)
+
+    def test_numeric_codes_are_options_in_value_order(self):
+        data = _frame({"A": [1, 2, 10] * 14, "B": [2, 10, 1] * 14})
+        settings = _settings(type_overrides={"x": "categorical"})
+
+        results = compute_response_patterns(data, settings, ENUM, None)
+
+        (question,) = _categorical(results, "A").questions
+        assert [o.option for o in question.options] == ["1", "2", "10"]
+        assert results.digit_preference.condition == "no_applicable_variables"
+
+
+class TestCategoricalSkipsAndConditions:
+    def test_no_applicable_variables_when_none_are_categorical(self):
+        data = _frame({"A": _values(40, 8), "B": _values(40, 8)})
+
+        results = compute_response_patterns(data, _settings(), ENUM, None)
+
+        assert results.categorical.condition == "no_applicable_variables"
+
+    def test_one_answer_across_the_project_is_skipped(self):
+        data = pl.DataFrame(
+            {
+                ENUM: ["A"] * 40 + ["B"] * 40,
+                "x": _choices({"yes": 20, "no": 20}) * 2,
+                "same": ["yes"] * 80,
+            }
+        )
+        settings = _settings(selected_variables=["x", "same"])
+
+        results = compute_response_patterns(data, settings, ENUM, None)
+
+        cat = results.categorical
+        assert cat.variables == ["x"]
+        assert cat.skipped_variables == {"same": "no variation across the project"}
+
+    def test_question_below_the_minimum_is_skipped_for_that_enumerator(self):
+        data = pl.DataFrame(
+            {
+                ENUM: ["A"] * 40 + ["B"] * 40,
+                "x": _choices({"yes": 30, "no": 10}) + _choices({"yes": 20, "no": 20}),
+                "y": ["yes"] * 10 + [None] * 30 + _choices({"yes": 20, "no": 20}),
+            }
+        )
+        settings = _settings(selected_variables=["x", "y"])
+
+        results = compute_response_patterns(data, settings, ENUM, None)
+
+        a = _categorical(results, "A")
+        assert a.skipped_variables == {"y": "fewer responses than the minimum"}
+        assert [q.variable for q in a.questions] == ["x"]
+
+    def test_rest_of_team_without_answers_skips_the_question(self):
+        data = pl.DataFrame(
+            {
+                ENUM: ["A"] * 40 + ["B"] * 40,
+                "x": _choices({"yes": 20, "no": 20}) + [None] * 40,
+            }
+        )
+
+        results = compute_response_patterns(data, _settings(), ENUM, None)
+
+        a = _categorical(results, "A")
+        assert a.score is None
+        assert a.skipped_variables == {"x": "no responses from the rest of the team"}
+
+    def test_enumerator_below_the_minimum_everywhere_is_na_and_last(self):
+        data = _frame(
+            {
+                "A": _choices({"yes": 10}),
+                "B": _choices({"yes": 20, "no": 20}),
+                "C": _choices({"yes": 20, "no": 20}),
+            }
+        )
+
+        results = compute_response_patterns(data, _settings(), ENUM, None)
+
+        a = _categorical(results, "A")
+        assert (a.score, a.badge, a.sample_band) == (None, "N/A", "insufficient")
+        assert results.categorical.enumerators[-1].enumerator == "A"
+
+    def test_everyone_below_the_minimum(self):
+        data = _frame({"A": _choices({"yes": 5, "no": 5}), "B": ["no"] * 10})
+
+        results = compute_response_patterns(data, _settings(), ENUM, None)
+
+        assert results.categorical.condition == "all_below_minimum"
+
+    def test_missing_codes_are_excluded_before_scoring(self):
+        data = _frame(
+            {
+                "A": _choices({"yes": 20, "no": 20, "-99": 30}),
+                "B": _choices({"yes": 20, "no": 20}),
+            }
+        )
+        codes = pl.DataFrame({"label": ["Refused"], "codes": ["-99"]})
+
+        results = compute_response_patterns(data, _settings(), ENUM, codes)
+
+        (question,) = _categorical(results, "A").questions
+        assert question.n_responses == 40
+        assert question.score == pytest.approx(0)
+
+
+class TestCategoricalThreshold:
+    @pytest.mark.parametrize(
+        ("threshold", "badge"), [(50, "High"), (65, "Moderate"), (80, "Low")]
+    )
+    def test_badge_follows_its_own_threshold(self, threshold, badge):
+        data = _frame(
+            {
+                "A": _choices({"yes": 30, "no": 10}),
+                "B": _choices({"yes": 20, "no": 20}),
+            }
+        )  # gap 25, score 50
+        settings = _settings(categorical_threshold=threshold)
+
+        results = compute_response_patterns(data, settings, ENUM, None)
+
+        assert _categorical(results, "A").badge == badge
+        assert results.categorical.threshold == threshold
+
+    def test_saved_threshold_snaps_to_the_nearest_level(self):
+        settings = ResponsePatternSettings(categorical_threshold=10)
+
+        assert settings.categorical_threshold == 20

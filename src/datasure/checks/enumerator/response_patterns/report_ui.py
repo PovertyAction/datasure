@@ -20,6 +20,9 @@ from datasure.checks.enumerator.response_patterns.compute import (
 from datasure.checks.enumerator.response_patterns.models import (
     THRESHOLD_LEVELS,
     Badge,
+    CategoricalEnumerator,
+    CategoricalQuestion,
+    CategoricalResult,
     CheckCondition,
     DigitPreferenceEnumerator,
     DigitPreferenceResult,
@@ -37,8 +40,11 @@ from datasure.utils.ui_utils import metric_row, section_header, styled_dataframe
 
 DP_TABLE_KEY = "rp_dp_enumerators"
 RC_TABLE_KEY = "rp_rc_enumerators"
+CAT_TABLE_KEY = "rp_cat_enumerators"
 # Prefix of each enumerator's Range Compression variable selector
 RC_VARIABLE_KEY = "rp_rc_variable"
+# Prefix of each question's Categorical Response Patterns chart
+CAT_CHART_KEY = "rp_cat_chart"
 
 BADGE_COLORS: dict[Badge, str] = {
     Badge.NA: "gray",
@@ -75,6 +81,12 @@ _CAPPED_NOTE = (
     "first, so one extreme answer can't dominate."
 )
 LOW_SAMPLE_WARNING = "Low sample size — treat results with caution."
+
+# How condition messages describe the variables each kind of check uses
+_KIND_TYPES: dict[str, str] = {
+    "numeric": "numeric (integer or continuous)",
+    "categorical": "categorical",
+}
 
 # Enumerators shown before the table scrolls
 _TABLE_ROWS = 10
@@ -155,23 +167,27 @@ def _render_enumerator_table(
 
 
 def _render_check_conditions(
-    result: DigitPreferenceResult | RangeCompressionResult,
+    result: DigitPreferenceResult | RangeCompressionResult | CategoricalResult,
     check: str,
     min_sample: int,
+    kind: str = "numeric",
 ) -> bool:
-    """Show why a check can't list enumerators; return True if it can't."""
+    """Show why a check can't list enumerators; return True if it can't.
+
+    ``kind`` names the variables the check uses: numeric or categorical.
+    """
     if result.condition == CheckCondition.NO_APPLICABLE_VARIABLES:
         st.info(
-            "None of the selected variables are numeric (integer or "
-            f"continuous), so {check} has nothing to check. Select numeric "
-            "variables or change their type in the settings above.",
+            f"None of the selected variables are {_KIND_TYPES[kind]}, so "
+            f"{check} has nothing to check. Select {kind} variables or change "
+            "their type in the settings above.",
             icon=INFO_ICON,
         )
         return True
     _render_skipped(result.skipped_variables)
     if result.condition == CheckCondition.NO_ELIGIBLE_VARIABLES:
         st.info(
-            f"None of the selected numeric variables can be checked for "
+            f"None of the selected {kind} variables can be checked for "
             f"{check}. See the notes above.",
             icon=INFO_ICON,
         )
@@ -567,6 +583,176 @@ def _render_range_compression(result: RangeCompressionResult, min_sample: int) -
 
 
 # =============================================================================
+# Categorical Response Patterns
+# =============================================================================
+
+
+def _render_categorical_table(
+    enumerators: list[CategoricalEnumerator], key: str
+) -> CategoricalEnumerator:
+    """Render the enumerator table and return the selected enumerator."""
+    top = [e.questions[0] if e.questions else None for e in enumerators]
+    table = pd.DataFrame(
+        {
+            "Enumerator": [e.enumerator for e in enumerators],
+            "Interviews": [e.interviews for e in enumerators],
+            "Top question": [q.variable if q else None for q in top],
+            "Most over-chosen option": [q.dominant_option if q else None for q in top],
+            "Largest gap (pp)": [q.largest_gap if q else None for q in top],
+            "Score": [e.score for e in enumerators],
+            "Flag": [e.badge.value for e in enumerators],
+        }
+    )
+    row = _render_enumerator_table(
+        table,
+        {"Interviews": "{:,}", "Largest gap (pp)": "{:.1f}", "Score": "{:.0f}"},
+        {
+            "Top question": "The question with the enumerator's highest score",
+            "Most over-chosen option": "On the top question, the option the "
+            "enumerator chose most often compared with the rest of the team",
+            "Largest gap (pp)": "On the top question, the largest difference "
+            "in percentage points between the enumerator's and the rest of "
+            "the team's share of any option",
+            "Score": "0-100, twice the largest gap on any checked question. "
+            "50 means a gap of 25 percentage points.",
+        },
+        key,
+    )
+    return enumerators[row]
+
+
+def _option_chart(q: CategoricalQuestion, enumerator: str) -> go.Figure:
+    """Return each option's share, enumerator against the team.
+
+    The enumerator's bars are red-orange on options whose gap reaches half
+    the flag threshold.
+    """
+    options = [o.option for o in q.options]
+    hover = "%{y}: %{x:.1f}%<extra></extra>"
+    fig = go.Figure(
+        [
+            go.Bar(
+                y=options,
+                x=[o.enum_pct for o in q.options],
+                orientation="h",
+                name=enumerator,
+                marker_color=[
+                    _FLAG_COLOR if o.flagged else _ENUM_COLOR for o in q.options
+                ],
+                hovertemplate=hover,
+            ),
+            go.Bar(
+                y=options,
+                x=[o.team_pct for o in q.options],
+                orientation="h",
+                name="Rest of team",
+                marker_color=_TEAM_COLOR,
+                hovertemplate=hover,
+            ),
+        ]
+    )
+    fig.update_layout(
+        barmode="group",
+        xaxis={
+            "title": "Share of responses (%)",
+            "range": [0, 100],
+            "fixedrange": True,
+            "ticksuffix": "%",
+        },
+        # Category axis, so numeric codes aren't plotted as numbers; options
+        # read top to bottom in value order
+        yaxis={"type": "category", "autorange": "reversed"},
+        legend={"orientation": "h", "y": 1.12},
+        margin={"t": 30, "b": 40, "l": 40, "r": 10},
+        height=120 + 40 * len(options),
+    )
+    return fig
+
+
+def _render_question_verdict(q: CategoricalQuestion, enumerator: str) -> None:
+    """Show whether one option dominates the enumerator's answers."""
+    dominant = next((o for o in q.options if o.option == q.dominant_option), None)
+    if q.flagged and dominant:
+        st.warning(
+            f"{enumerator} chose **{dominant.option}** in "
+            f"{dominant.enum_pct:.1f}% of answers, against "
+            f"{dominant.team_pct:.1f}% for the rest of the team. One option "
+            "dominates; check how they are asking this question.",
+            icon=":material/flag:",
+        )
+    else:
+        st.success(
+            f"{enumerator}'s answers to **{q.variable}** are consistent with "
+            "the rest of the team's.",
+            icon=":material/check_circle:",
+        )
+
+
+def _render_question(q: CategoricalQuestion, enumerator: str) -> None:
+    """Render one question's title, verdict and option chart."""
+    with st.container(border=True):
+        anomaly = " :red-badge[ANOMALY]" if q.flagged else ""
+        st.markdown(f"**{q.variable}**{anomaly} · score **{q.score:.0f}**")
+        st.caption(
+            f"{q.n_responses:,} responses · largest gap {q.largest_gap:.1f} "
+            "percentage points"
+        )
+        if q.sample_band == SampleBand.LOW:
+            st.warning(LOW_SAMPLE_WARNING, icon=":material/warning:")
+        _render_question_verdict(q, enumerator)
+        st.plotly_chart(
+            _option_chart(q, enumerator),
+            width="stretch",
+            key=f"{CAT_CHART_KEY}_{q.variable}",
+        )
+
+
+def _render_categorical_detail(e: CategoricalEnumerator, min_sample: int) -> None:
+    """Render one enumerator's Categorical Response Patterns detail panel."""
+    if e.sample_band == SampleBand.INSUFFICIENT:
+        st.info(
+            f"Not enough responses to run this check for {e.enumerator}: "
+            f"every checked question has fewer than the {min_sample:,} needed.",
+            icon=INFO_ICON,
+        )
+        return
+    if e.score is None:
+        st.info(
+            f"None of the checked questions could be scored for {e.enumerator}.",
+            icon=INFO_ICON,
+        )
+        _render_skipped(e.skipped_variables)
+        return
+
+    st.markdown(
+        f"##### {e.enumerator}: answer options · score **{e.score:.0f}** "
+        f"{_badge(e.badge)}"
+    )
+    st.caption("Questions are listed highest score first.")
+    for q in e.questions:
+        _render_question(q, e.enumerator)
+    _render_skipped(e.skipped_variables)
+
+
+def _render_categorical(result: CategoricalResult, min_sample: int) -> None:
+    """Render the Categorical Response Patterns sub-tab."""
+    st.markdown(
+        "Does one answer option dominate an enumerator's answers compared "
+        "with the rest of the team's? Each selected categorical variable is "
+        "scored separately; the enumerator's score is the highest."
+    )
+    _render_sensitivity(result.threshold)
+    if _render_check_conditions(
+        result, "Categorical Response Patterns", min_sample, kind="categorical"
+    ):
+        return
+
+    st.caption("Select an enumerator to see their answer options.")
+    selected = _render_categorical_table(result.enumerators, CAT_TABLE_KEY)
+    _render_categorical_detail(selected, min_sample)
+
+
+# =============================================================================
 # Section
 # =============================================================================
 
@@ -609,7 +795,7 @@ def render_response_patterns(
     section_header("Response Patterns", icon=":material/troubleshoot:")
     st.caption(
         "Compare each enumerator's answers with the rest of the team to spot "
-        "patterns such as rounding."
+        "patterns such as rounding, anchoring or one answer option dominating."
     )
 
     enumerator_col = enumerator_settings.enumerator
@@ -631,8 +817,12 @@ def render_response_patterns(
         _render_page_condition(results.condition)
         return
 
-    digit_tab, range_tab = st.tabs(["Digit Preference", "Range Compression"])
+    digit_tab, range_tab, categorical_tab = st.tabs(
+        ["Digit Preference", "Range Compression", "Categorical Response Patterns"]
+    )
     with digit_tab:
         _render_digit_preference(results.digit_preference, results.min_sample)
     with range_tab:
         _render_range_compression(results.range_compression, results.min_sample)
+    with categorical_tab:
+        _render_categorical(results.categorical, results.min_sample)
