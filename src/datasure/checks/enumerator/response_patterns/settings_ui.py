@@ -1,9 +1,12 @@
 """Settings UI for the enumerator report's Response Patterns section."""
 
+import logging
+
 import polars as pl
 import streamlit as st
 from pydantic import ValidationError
 
+from datasure.checks import missing
 from datasure.checks.enumerator.models import TAB_NAME
 from datasure.checks.enumerator.response_patterns.compute import (
     infer_variable_types,
@@ -18,6 +21,8 @@ from datasure.utils.settings_utils import (
     save_check_settings,
     trigger_save,
 )
+
+logger = logging.getLogger(__name__)
 
 # Session state flag save_check_settings checks before writing the settings
 SAVE_STATE: str = f"{TAB_NAME}_{SETTINGS_KEY}"
@@ -35,6 +40,11 @@ def load_response_pattern_settings(settings_file: str) -> ResponsePatternSetting
     try:
         return ResponsePatternSettings(**saved)
     except ValidationError:
+        logger.warning(
+            "Saved response pattern settings in %s are not valid; using the defaults",
+            settings_file,
+            exc_info=True,
+        )
         return ResponsePatternSettings()
 
 
@@ -67,18 +77,22 @@ def _editor_frame(
 
 
 def _render_variable_editor(
-    inferred: dict[str, str], saved: ResponsePatternSettings
+    settings_file: str, inferred: dict[str, str], saved: ResponsePatternSettings
 ) -> tuple[list[str], dict[str, str]]:
     """Render the variable editor and return the selection and type overrides.
 
-    The editor starts from the saved settings once per session and keeps that
-    starting frame, so saving an edit does not reset the editor. Saved
-    choices for variables not in the current data are kept.
+    The editor starts from the saved settings once per session and page, and
+    keeps that starting frame, so saving an edit does not reset the editor.
+    When the candidate variables change it starts again from the saved
+    settings, dropping edits made to the old rows. Saved choices for
+    variables not in the current data are kept.
     """
-    base = st.session_state.get(_EDITOR_BASE_KEY)
+    bases = st.session_state.setdefault(_EDITOR_BASE_KEY, {})
+    base = bases.get(settings_file)
     if base is None or base["Variable"].to_list() != list(inferred):
         base = _editor_frame(inferred, saved)
-        st.session_state[_EDITOR_BASE_KEY] = base
+        bases[settings_file] = base
+        st.session_state.pop(_EDITOR_KEY, None)
 
     edited = st.data_editor(
         base,
@@ -119,7 +133,10 @@ def _render_variable_editor(
 
 
 def response_pattern_settings(
-    settings_file: str, data: pl.DataFrame, exclude_cols: list[str]
+    settings_file: str,
+    data: pl.DataFrame,
+    exclude_cols: list[str],
+    missing_codes: pl.DataFrame | None,
 ) -> ResponsePatternSettings:
     """Render the shared settings expander and return the current settings.
 
@@ -134,6 +151,9 @@ def response_pattern_settings(
         The survey data, used to list candidate variables and their types.
     exclude_cols : list[str]
         Columns that are never candidates, such as the ID and enumerator.
+    missing_codes : pl.DataFrame | None
+        The project's missing codes, masked before inferring types, as the
+        checks do before scoring.
 
     Returns
     -------
@@ -141,6 +161,8 @@ def response_pattern_settings(
         The saved settings with this run's edits applied.
     """
     saved = load_response_pattern_settings(settings_file)
+    if missing_codes is not None:
+        data = missing.mask_missing_codes(data, data.columns, missing_codes)
     inferred = infer_variable_types(data, exclude=exclude_cols)
 
     with st.expander("Response pattern settings", icon=":material/tune:"):
@@ -148,7 +170,7 @@ def response_pattern_settings(
             "Select the survey questions to check. Each check uses the "
             "selected variables of its type."
         )
-        selected, overrides = _render_variable_editor(inferred, saved)
+        selected, overrides = _render_variable_editor(settings_file, inferred, saved)
 
         st.markdown("**Minimum responses**")
         c1, c2, _ = st.columns(3)
