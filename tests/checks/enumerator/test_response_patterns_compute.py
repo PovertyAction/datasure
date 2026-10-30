@@ -86,8 +86,8 @@ class TestDigitPreferenceScore:
         assert _digit(results, "B").team_pct == pytest.approx(50)
 
     def test_terminal_digit_uses_the_integer_part(self):
-        # 10.9 ends in 0, 14.5 ends in 4, -25.2 floors to -26 and ends in 6
-        data = _frame({"A": [10.9, 14.5, -25.2] * 10, "B": _values(30, 6)})
+        # 10.9 ends in 0, 14.5 ends in 4, -26.8 truncates to -26 and ends in 6
+        data = _frame({"A": [10.9, 14.5, -26.8] * 10, "B": _values(30, 6)})
 
         results = compute_response_patterns(data, _settings(), ENUM, None)
 
@@ -96,6 +96,17 @@ class TestDigitPreferenceScore:
         assert a.enum_digit_pct[4] == pytest.approx(100 / 3)
         assert a.enum_digit_pct[6] == pytest.approx(100 / 3)
         assert len(a.team_digit_pct) == 10
+
+    def test_negative_values_take_the_digit_toward_zero(self):
+        # -10.5 ends in 0 and -25.5 in 5, as 10.5 and 25.5 do
+        data = _frame({"A": [-10.5, -25.5, 13.0] * 10, "B": _values(30, 6)})
+
+        results = compute_response_patterns(data, _settings(), ENUM, None)
+
+        a = _digit(results, "A")
+        assert a.enum_digit_pct[0] == pytest.approx(100 / 3)
+        assert a.enum_digit_pct[5] == pytest.approx(100 / 3)
+        assert a.enum_digit_pct[3] == pytest.approx(100 / 3)
 
     def test_responses_are_pooled_across_variables(self):
         data = pl.DataFrame(

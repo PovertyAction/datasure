@@ -250,6 +250,22 @@ class TestSettingsPersistence:
         assert editor["Select"].tolist() == [True, False]
         assert "rp_dp_enumerators" in [d.key for d in at.dataframe]
 
+    def test_selection_of_a_column_now_excluded_is_dropped(
+        self, team_data, settings_file
+    ):
+        # "key" became the survey key after it was selected; "gone" is not in
+        # this data, so its selection is kept for when it returns
+        _save(settings_file, selected_variables=["age", "key", "gone"])
+        at = _run(team_data, settings_file)
+
+        at.number_input(key="rp_min_sample").set_value(10).run()
+        assert not at.exception
+
+        with open(settings_file) as f:
+            saved = json.load(f)["enumerators"]["response_patterns"]
+        assert saved["selected_variables"] == ["age", "gone"]
+        assert "Skipped" not in _texts(at.caption)
+
     def test_thresholds_survive_a_new_session(self, team_data, settings_file):
         _save(settings_file, selected_variables=["age"])
         at = _run(team_data, settings_file)
