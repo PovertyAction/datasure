@@ -538,12 +538,15 @@ def _categorical_question(
     score = min(100.0, largest_gap * CATEGORICAL_POINTS_PER_PP)
     highlight = settings.categorical_threshold / CATEGORICAL_POINTS_PER_PP
     top = max(range(len(options)), key=lambda i: gaps[i])
+    # An over-chosen option wins a tie, as it names what the enumerator chose
+    scoring = max(range(len(options)), key=lambda i: (abs(gaps[i]), gaps[i]))
     return CategoricalQuestion(
         variable=variable,
         n_responses=n,
         sample_band=band,
         score=score,
         largest_gap=largest_gap,
+        scoring_option=options[scoring],
         flagged=score >= settings.categorical_threshold,
         dominant_option=options[top] if gaps[top] > 0 else None,
         options=[

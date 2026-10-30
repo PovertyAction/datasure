@@ -597,6 +597,19 @@ class TestCategoricalTab:
         # Both gaps (-40 and +40) reach half the threshold, 25 points
         assert enum_bars["marker"]["color"] == ["#f26529", "#f26529"]
 
+    def test_verdict_names_an_avoided_option_that_set_the_score(self, settings_file):
+        team = _answers({"a": 24, "b": 8, "c": 8})
+        data = _categorical_frame(
+            {"avoider": _answers({"b": 20, "c": 20}), "steady": team, "careful": team}
+        )
+        _save(settings_file, selected_variables=["choice"])
+
+        at = _run(data, settings_file)
+
+        verdict = _texts(_categorical_tab(at).warning)
+        assert "chose **a** in only 0.0% of answers, against 60.0%" in verdict
+        assert "**b** instead (50.0% against 20.0%)" in verdict
+
     def test_questions_are_sorted_worst_first(self, settings_file):
         even = _answers({"yes": 20, "no": 20})
         data = _categorical_frame(

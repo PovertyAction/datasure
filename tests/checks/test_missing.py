@@ -525,16 +525,21 @@ def test_mask_text_missing_codes_nulls_every_code_in_text_columns(
             "choice": pl.Series(
                 ["yes", ".d", "no", "-88", "yes"], dtype=pl.Categorical
             ),
+            "level": pl.Series(
+                ["low", "high", ".d", "low", "high"],
+                dtype=pl.Enum(["low", "high", ".d"]),
+            ),
             "count": [-99, 1, 2, 3, 4],
         }
     )
 
     result = mask_text_missing_codes(
-        data, ["answer", "choice", "count"], land_area_missing_codes
+        data, ["answer", "choice", "level", "count"], land_area_missing_codes
     )
 
     assert result["answer"].to_list() == [None, None, None, "-99.0", "Ama"]
     assert result["choice"].to_list() == ["yes", None, "no", None, "yes"]
+    assert result["level"].to_list() == ["low", "high", None, "low", "high"]
     assert result["count"].to_list() == [-99, 1, 2, 3, 4]
     assert result.schema == data.schema
 
