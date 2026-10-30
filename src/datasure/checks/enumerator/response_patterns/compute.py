@@ -5,6 +5,8 @@ enumerators except the one being scored. The UI only renders the results
 model returned by ``compute_response_patterns``.
 """
 
+import re
+
 import polars as pl
 
 from datasure.checks import missing
@@ -16,12 +18,25 @@ from datasure.checks.enumerator.response_patterns.models import (
     DigitPreferenceEnumerator,
     DigitPreferenceResult,
     PageCondition,
+    RangeCompressionEnumerator,
+    RangeCompressionResult,
+    RangeSignal,
+    RangeVariable,
     ResponsePatternResults,
     ResponsePatternSettings,
     SampleBand,
     SkipReason,
     VariableType,
 )
+
+_GPS_NAME_PARTS: tuple[str, ...] = (
+    "latitude",
+    "longitude",
+    "altitude",
+    "gps",
+    "geopoint",
+)
+_GPS_NAME_WORDS: frozenset[str] = frozenset({"lat", "lon", "lng"})
 
 _ENUM = "__rp_enumerator"
 _VALUE = "__rp_value"
@@ -30,6 +45,31 @@ _DIGIT = "__rp_digit"
 # Terminal digits a rounding enumerator favors
 ROUND_DIGITS: tuple[int, ...] = (0, 5)
 MIN_DIGIT_RANGE: int = 10
+
+# Range Compression: each team SD between the means adds 33 points, so a
+# shift of about 1.5 SD scores 50 and about 3 SD scores 100
+SHIFT_POINTS_PER_SD: int = 33
+# Each side's values are capped at its own 5th and 95th percentiles before
+# scoring, so one extreme answer can't inflate everyone else's baseline SD
+TRIM_QUANTILES: tuple[float, float] = (0.05, 0.95)
+_SCORE_DECIMALS: int = 6
+HISTOGRAM_BUCKETS: int = 10
+# The histogram spans the rest of the team's 1st to 99th percentile
+HISTOGRAM_QUANTILES: tuple[float, float] = (0.01, 0.99)
+
+
+def is_gps_column(name: str) -> bool:
+    """Return whether a column name looks like part of a GPS reading.
+
+    Matches names containing latitude, longitude, altitude, gps or geopoint,
+    names with a word lat, lon or lng, and SurveyCTO's ``field-Accuracy``
+    geopoint part. Coordinates vary with where an enumerator works, not
+    how they ask questions, so they don't suit these checks.
+    """
+    lower = name.lower()
+    if any(part in lower for part in _GPS_NAME_PARTS) or lower.endswith("-accuracy"):
+        return True
+    return not _GPS_NAME_WORDS.isdisjoint(re.split(r"[^a-z0-9]+", lower))
 
 
 def infer_variable_types(
@@ -40,7 +80,7 @@ def infer_variable_types(
     Numeric columns are ``integer`` when every non-null value is a whole
     number and ``continuous`` otherwise. Text and categorical columns, which
     the app classifies as categorical, are ``categorical``. Other columns,
-    such as dates, are left out.
+    such as dates, and GPS-looking columns are left out.
 
     Parameters
     ----------
@@ -57,7 +97,7 @@ def infer_variable_types(
     exclude = set(exclude or [])
     types: dict[str, VariableType] = {}
     for col, dtype in data.schema.items():
-        if col in exclude:
+        if col in exclude or is_gps_column(col):
             continue
         if dtype.is_integer():
             types[col] = "integer"
@@ -90,7 +130,7 @@ def badge_band(score: float | None, threshold: int) -> Badge:
     return Badge.LOW
 
 
-def _sort_key(result: DigitPreferenceEnumerator) -> tuple:
+def _sort_key(result: DigitPreferenceEnumerator | RangeCompressionEnumerator) -> tuple:
     """Order highest score first, unscored enumerators last, then by name."""
     return (result.score is None, -(result.score or 0), result.enumerator)
 
@@ -221,6 +261,215 @@ def _compute_digit_preference(
     )
 
 
+def _compression_score(sd_ratio: float) -> float:
+    """Return how far the enumerator's spread falls below the team's, 0-100.
+
+    50 means an SD ratio of 0.5; a spread at least as wide as the team's
+    scores 0.
+    """
+    return max(0.0, (1 - sd_ratio) * 100)
+
+
+def _shift_score(enum_mean: float, team_mean: float, team_sd: float) -> float:
+    """Return how far the enumerator's mean sits from the team's, 0-100."""
+    return min(100.0, abs(enum_mean - team_mean) / team_sd * SHIFT_POINTS_PER_SD)
+
+
+def _bucket_shares(values: pl.Series, low: float, width: float) -> list[float]:
+    """Return the percentage of ``values`` in each histogram bucket.
+
+    Values beyond either end count in the end bucket, so shares sum to 100.
+    """
+    buckets = ((values - low) / width).floor().clip(0, HISTOGRAM_BUCKETS - 1)
+    counts = [0] * HISTOGRAM_BUCKETS
+    for bucket in buckets.cast(pl.Int64):
+        counts[bucket] += 1
+    return _pct(counts)
+
+
+def _histogram(
+    enum_values: pl.Series, team_values: pl.Series
+) -> tuple[list[float], list[float], list[float]]:
+    """Return shared bucket edges and each series' share per bucket.
+
+    The equal-width buckets span the rest of the team's 1st to 99th
+    percentile, or its full range when those are equal.
+    """
+    low, high = (team_values.quantile(q, "linear") for q in HISTOGRAM_QUANTILES)
+    if high <= low:
+        low, high = team_values.min(), team_values.max()
+    width = (high - low) / HISTOGRAM_BUCKETS
+    edges = [low + i * width for i in range(HISTOGRAM_BUCKETS + 1)]
+    return (
+        edges,
+        _bucket_shares(enum_values, low, width),
+        _bucket_shares(team_values, low, width),
+    )
+
+
+def _trimmed(values: pl.Series) -> pl.Series:
+    """Return ``values`` capped at their own 5th and 95th percentiles.
+
+    Capping each side at its own percentiles, rather than the team's, keeps
+    the spread of an enumerator whose answers all sit beyond the team's.
+    """
+    low, high = (values.quantile(q, "linear") for q in TRIM_QUANTILES)
+    return values.clip(low, high)
+
+
+def _range_variable(
+    variable: str,
+    enum_values: pl.Series,
+    team_values: pl.Series,
+    settings: ResponsePatternSettings,
+) -> RangeVariable | SkipReason:
+    """Score one enumerator on one variable, or return why it can't be."""
+    n = enum_values.len()
+    band = sample_band(n, settings.min_sample, settings.warn_sample)
+    # An SD needs at least two responses, whatever the minimum
+    if band == SampleBand.INSUFFICIENT or n < 2:
+        return SkipReason.BELOW_MINIMUM
+    team_trimmed = _trimmed(team_values) if team_values.len() > 1 else None
+    team_sd = team_trimmed.std() if team_trimmed is not None else None
+    if not team_sd:
+        return SkipReason.TEAM_NO_VARIATION
+
+    enum_trimmed = _trimmed(enum_values)
+    enum_mean, team_mean = enum_trimmed.mean(), team_trimmed.mean()
+    enum_sd = enum_trimmed.std()
+    sd_ratio = enum_sd / team_sd
+    # Rounded so float noise can't drop a score at a threshold just below it
+    compression = round(_compression_score(sd_ratio), _SCORE_DECIMALS)
+    shift = round(_shift_score(enum_mean, team_mean, team_sd), _SCORE_DECIMALS)
+    edges, enum_pct, team_pct = _histogram(enum_values, team_values)
+    return RangeVariable(
+        variable=variable,
+        n_responses=n,
+        sample_band=band,
+        score=max(compression, shift),
+        # Compression wins a tie, as its verdict comes first
+        signal=RangeSignal.COMPRESSION if compression >= shift else RangeSignal.SHIFT,
+        compression_score=compression,
+        shift_score=shift,
+        enum_mean=enum_mean,
+        team_mean=team_mean,
+        enum_sd=enum_sd,
+        team_sd=team_sd,
+        sd_ratio=sd_ratio,
+        bucket_edges=edges,
+        enum_bucket_pct=enum_pct,
+        team_bucket_pct=team_pct,
+    )
+
+
+def _best_band(bands: list[SampleBand]) -> SampleBand:
+    """Return the band of the largest sample among ``bands``."""
+    for band in (SampleBand.OK, SampleBand.LOW):
+        if band in bands:
+            return band
+    return SampleBand.INSUFFICIENT
+
+
+def _range_enumerator(
+    enum: str,
+    n_interviews: int,
+    values: dict[str, pl.DataFrame],
+    settings: ResponsePatternSettings,
+) -> RangeCompressionEnumerator:
+    """Score one enumerator on every eligible variable.
+
+    The enumerator's score is their highest variable score, so one problem
+    question is never averaged away.
+    """
+    threshold = settings.range_compression_threshold
+    scored: list[RangeVariable] = []
+    skipped: dict[str, SkipReason] = {}
+    bands: list[SampleBand] = []
+    for var, frame in values.items():
+        is_enum = pl.col(_ENUM) == enum
+        enum_values = frame.filter(is_enum)[_VALUE]
+        bands.append(
+            sample_band(enum_values.len(), settings.min_sample, settings.warn_sample)
+        )
+        result = _range_variable(
+            var, enum_values, frame.filter(~is_enum)[_VALUE], settings
+        )
+        if isinstance(result, SkipReason):
+            skipped[var] = result
+        else:
+            scored.append(result)
+
+    scored.sort(key=lambda v: -v.score)
+    top = scored[0] if scored else None
+    score = top.score if top else None
+    return RangeCompressionEnumerator(
+        enumerator=enum,
+        interviews=n_interviews,
+        sample_band=top.sample_band if top else _best_band(bands),
+        score=score,
+        badge=badge_band(score, threshold),
+        signal=top.signal if top else None,
+        variables=scored,
+        compression_variables=[
+            v.variable for v in scored if v.compression_score >= threshold
+        ],
+        shift_variables=[v.variable for v in scored if v.shift_score >= threshold],
+        skipped_variables=skipped,
+    )
+
+
+def _compute_range_compression(
+    data: pl.DataFrame,
+    variables: list[str],
+    interviews: dict[str, int],
+    settings: ResponsePatternSettings,
+) -> RangeCompressionResult:
+    """Score each enumerator's spread and level against the rest of the team."""
+    threshold = settings.range_compression_threshold
+    if not variables:
+        return RangeCompressionResult(
+            threshold=threshold, condition=CheckCondition.NO_APPLICABLE_VARIABLES
+        )
+
+    skipped: dict[str, SkipReason] = {}
+    values: dict[str, pl.DataFrame] = {}
+    for var in variables:
+        if not data.schema[var].is_numeric():
+            skipped[var] = SkipReason.NOT_NUMERIC
+            continue
+        frame = (
+            data.select(_ENUM, pl.col(var).cast(pl.Float64).alias(_VALUE))
+            .drop_nulls(_VALUE)
+            .filter(pl.col(_VALUE).is_finite())
+        )
+        reason = _numeric_skip(frame[_VALUE])
+        if reason is None:
+            values[var] = frame
+        else:
+            skipped[var] = reason
+    if not values:
+        return RangeCompressionResult(
+            threshold=threshold,
+            condition=CheckCondition.NO_ELIGIBLE_VARIABLES,
+            skipped_variables=skipped,
+        )
+
+    enumerators = [
+        _range_enumerator(enum, n_interviews, values, settings)
+        for enum, n_interviews in interviews.items()
+    ]
+    all_insufficient = all(
+        e.sample_band == SampleBand.INSUFFICIENT for e in enumerators
+    )
+    return RangeCompressionResult(
+        threshold=threshold,
+        condition=CheckCondition.ALL_BELOW_MINIMUM if all_insufficient else None,
+        variables=list(values),
+        skipped_variables=skipped,
+        enumerators=sorted(enumerators, key=_sort_key),
+    )
+
+
 def compute_response_patterns(
     data: pl.DataFrame,
     settings: ResponsePatternSettings,
@@ -272,10 +521,11 @@ def compute_response_patterns(
 
     inferred = infer_variable_types(data, exclude=[_ENUM])
     types = {v: settings.type_overrides.get(v, inferred.get(v)) for v in variables}
+    numeric = [v for v in variables if types[v] in NUMERIC_TYPES]
     base.digit_preference = _compute_digit_preference(
-        data,
-        [v for v in variables if types[v] in NUMERIC_TYPES],
-        interviews,
-        settings,
+        data, numeric, interviews, settings
+    )
+    base.range_compression = _compute_range_compression(
+        data, numeric, interviews, settings
     )
     return base

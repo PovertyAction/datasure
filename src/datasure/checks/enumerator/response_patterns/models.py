@@ -49,6 +49,9 @@ class ResponsePatternSettings(BaseModel):
     digit_preference_threshold : int
         Digit Preference score at or above which an enumerator is flagged,
         one of ``THRESHOLD_LEVELS``.
+    range_compression_threshold : int
+        Range Compression score at or above which an enumerator is flagged,
+        one of ``THRESHOLD_LEVELS``.
     """
 
     selected_variables: list[str] = Field(default_factory=list)
@@ -56,8 +59,9 @@ class ResponsePatternSettings(BaseModel):
     min_sample: int = Field(15, ge=1)
     warn_sample: int = Field(30, ge=1)
     digit_preference_threshold: int = Field(DEFAULT_THRESHOLD, ge=0, le=100)
+    range_compression_threshold: int = Field(DEFAULT_THRESHOLD, ge=0, le=100)
 
-    @field_validator("digit_preference_threshold")
+    @field_validator("digit_preference_threshold", "range_compression_threshold")
     @classmethod
     def snap_to_level(cls, v: int) -> int:
         """Move a threshold saved off the fixed levels to the nearest level."""
@@ -89,6 +93,7 @@ class SkipReason(StrEnum):
     NO_VARIATION = "no variation across the project"
     RANGE_UNDER_10 = "observed range under 10"
     BELOW_MINIMUM = "fewer responses than the minimum"
+    TEAM_NO_VARIATION = "no variation in the rest of the team's responses"
 
 
 class PageCondition(StrEnum):
@@ -136,6 +141,73 @@ class DigitPreferenceResult(BaseModel):
     enumerators: list[DigitPreferenceEnumerator] = Field(default_factory=list)
 
 
+class RangeSignal(StrEnum):
+    """Which Range Compression signal set a score."""
+
+    COMPRESSION = "compression"
+    SHIFT = "shift"
+
+
+class RangeVariable(BaseModel):
+    """One enumerator's Range Compression result on one variable.
+
+    ``team`` always means the rest of the team. Means and SDs are taken
+    after capping each side's values at its own 5th and 95th percentiles,
+    so one extreme answer can't dominate them. The histogram uses the
+    uncapped values and shares
+    ``bucket_edges`` between the two series; values beyond the team's 1st
+    and 99th percentiles count in the end buckets. Bucket shares are
+    percentages.
+    """
+
+    variable: str
+    n_responses: int
+    sample_band: SampleBand
+    score: float
+    signal: RangeSignal
+    compression_score: float
+    shift_score: float
+    enum_mean: float
+    team_mean: float
+    enum_sd: float
+    team_sd: float
+    sd_ratio: float
+    bucket_edges: list[float]
+    enum_bucket_pct: list[float]
+    team_bucket_pct: list[float]
+
+
+class RangeCompressionEnumerator(BaseModel):
+    """One enumerator's Range Compression result.
+
+    The score, signal and sample band are those of ``variables[0]``, the
+    highest-scoring variable. ``compression_variables`` and
+    ``shift_variables`` name the variables whose score for that signal
+    reaches the flag threshold.
+    """
+
+    enumerator: str
+    interviews: int
+    sample_band: SampleBand
+    score: float | None
+    badge: Badge
+    signal: RangeSignal | None = None
+    variables: list[RangeVariable] = Field(default_factory=list)
+    compression_variables: list[str] = Field(default_factory=list)
+    shift_variables: list[str] = Field(default_factory=list)
+    skipped_variables: dict[str, SkipReason] = Field(default_factory=dict)
+
+
+class RangeCompressionResult(BaseModel):
+    """Range Compression results, enumerators sorted highest score first."""
+
+    threshold: int
+    condition: CheckCondition | None = None
+    variables: list[str] = Field(default_factory=list)
+    skipped_variables: dict[str, SkipReason] = Field(default_factory=dict)
+    enumerators: list[RangeCompressionEnumerator] = Field(default_factory=list)
+
+
 class ResponsePatternResults(BaseModel):
     """Everything the Response Patterns section shows."""
 
@@ -143,3 +215,4 @@ class ResponsePatternResults(BaseModel):
     min_sample: int
     warn_sample: int
     digit_preference: DigitPreferenceResult | None = None
+    range_compression: RangeCompressionResult | None = None

@@ -155,8 +155,10 @@ Every Streamlit view must render its chrome through the shared helpers in
   a loose `st.markdown`.
 - `section_header(text, icon=None)` for section subheadings — no trailing
   colons; use a `:material/...:` icon shortcode, never emoji.
-- `metric_row([(label, value[, help]), ...])` for metric rows so they align
-  across pages; do not hand-build `st.columns` + `st.metric`.
+- `metric_row([(label, value[, help[, note]]), ...])` for metric rows so they
+  align across pages; do not hand-build `st.columns` + `st.metric`. Keep each
+  value to one number; put a comparison value in `note`, which shows under it
+  as grey text.
 - `confirm_dialog(title, body, on_confirm=...)` for every destructive action
   (delete/remove/restart) — do not invent per-view confirm flows with
   session-state flags, expanders, or inline warnings.
