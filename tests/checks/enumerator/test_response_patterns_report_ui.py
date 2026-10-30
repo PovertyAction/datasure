@@ -180,6 +180,17 @@ class TestVariableEditor:
         assert editor["Inferred type"].tolist() == ["integer", "categorical"]
         assert not editor["Select"].any()
 
+    def test_gps_columns_are_not_listed(self, team_data, settings_file):
+        data = team_data.with_columns(
+            pl.lit(26.15).alias("household_latitude"),
+            pl.lit(85.9).alias("household_longitude"),
+        )
+
+        at = _run(data, settings_file)
+
+        editor = at.dataframe(key="rp_variable_editor").value
+        assert editor["Variable"].tolist() == ["age", "choice"]
+
     def test_infers_types_after_masking_missing_codes(self, team_data, settings_file):
         # -99.5 is a missing code, so the remaining values are all whole
         data = team_data.with_columns(
@@ -380,8 +391,8 @@ class TestRangeCompressionTab:
         # One number per tile; the rest of the team's sits underneath
         assert mean.value == "49.50"
         assert mean.delta == "Rest of team: 49.50"
-        assert sd.value == "4.68"
-        assert sd.delta == "Rest of team: 11.62"
+        team_sd = float(sd.delta.removeprefix("Rest of team: "))
+        assert float(sd.value) / team_sd == pytest.approx(0.4, abs=0.01)
         assert ratio.value.startswith("0.4")
 
     def test_compressed_bars_are_amber_on_shared_buckets(

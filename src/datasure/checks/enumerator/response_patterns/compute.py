@@ -5,6 +5,8 @@ enumerators except the one being scored. The UI only renders the results
 model returned by ``compute_response_patterns``.
 """
 
+import re
+
 import polars as pl
 
 from datasure.checks import missing
@@ -27,6 +29,15 @@ from datasure.checks.enumerator.response_patterns.models import (
     VariableType,
 )
 
+_GPS_NAME_PARTS: tuple[str, ...] = (
+    "latitude",
+    "longitude",
+    "altitude",
+    "gps",
+    "geopoint",
+)
+_GPS_NAME_WORDS: frozenset[str] = frozenset({"lat", "lon", "lng"})
+
 _ENUM = "__rp_enumerator"
 _VALUE = "__rp_value"
 _DIGIT = "__rp_digit"
@@ -38,9 +49,27 @@ MIN_DIGIT_RANGE: int = 10
 # Range Compression: each team SD between the means adds 33 points, so a
 # shift of about 1.5 SD scores 50 and about 3 SD scores 100
 SHIFT_POINTS_PER_SD: int = 33
+# Each side's values are capped at its own 5th and 95th percentiles before
+# scoring, so one extreme answer can't inflate everyone else's baseline SD
+TRIM_QUANTILES: tuple[float, float] = (0.05, 0.95)
+_SCORE_DECIMALS: int = 6
 HISTOGRAM_BUCKETS: int = 10
 # The histogram spans the rest of the team's 1st to 99th percentile
 HISTOGRAM_QUANTILES: tuple[float, float] = (0.01, 0.99)
+
+
+def is_gps_column(name: str) -> bool:
+    """Return whether a column name looks like part of a GPS reading.
+
+    Matches names containing latitude, longitude, altitude, gps or geopoint,
+    names with a word lat, lon or lng, and SurveyCTO's ``field-Accuracy``
+    geopoint part. Coordinates vary with where an enumerator works, not
+    how they ask questions, so they don't suit these checks.
+    """
+    lower = name.lower()
+    if any(part in lower for part in _GPS_NAME_PARTS) or lower.endswith("-accuracy"):
+        return True
+    return not _GPS_NAME_WORDS.isdisjoint(re.split(r"[^a-z0-9]+", lower))
 
 
 def infer_variable_types(
@@ -51,7 +80,7 @@ def infer_variable_types(
     Numeric columns are ``integer`` when every non-null value is a whole
     number and ``continuous`` otherwise. Text and categorical columns, which
     the app classifies as categorical, are ``categorical``. Other columns,
-    such as dates, are left out.
+    such as dates, and GPS-looking columns are left out.
 
     Parameters
     ----------
@@ -68,7 +97,7 @@ def infer_variable_types(
     exclude = set(exclude or [])
     types: dict[str, VariableType] = {}
     for col, dtype in data.schema.items():
-        if col in exclude:
+        if col in exclude or is_gps_column(col):
             continue
         if dtype.is_integer():
             types[col] = "integer"
@@ -278,6 +307,16 @@ def _histogram(
     )
 
 
+def _trimmed(values: pl.Series) -> pl.Series:
+    """Return ``values`` capped at their own 5th and 95th percentiles.
+
+    Capping each side at its own percentiles, rather than the team's, keeps
+    the spread of an enumerator whose answers all sit beyond the team's.
+    """
+    low, high = (values.quantile(q, "linear") for q in TRIM_QUANTILES)
+    return values.clip(low, high)
+
+
 def _range_variable(
     variable: str,
     enum_values: pl.Series,
@@ -290,15 +329,18 @@ def _range_variable(
     # An SD needs at least two responses, whatever the minimum
     if band == SampleBand.INSUFFICIENT or n < 2:
         return SkipReason.BELOW_MINIMUM
-    team_sd = team_values.std() if team_values.len() > 1 else None
+    team_trimmed = _trimmed(team_values) if team_values.len() > 1 else None
+    team_sd = team_trimmed.std() if team_trimmed is not None else None
     if not team_sd:
         return SkipReason.TEAM_NO_VARIATION
 
-    enum_mean, team_mean = enum_values.mean(), team_values.mean()
-    enum_sd = enum_values.std()
+    enum_trimmed = _trimmed(enum_values)
+    enum_mean, team_mean = enum_trimmed.mean(), team_trimmed.mean()
+    enum_sd = enum_trimmed.std()
     sd_ratio = enum_sd / team_sd
-    compression = _compression_score(sd_ratio)
-    shift = _shift_score(enum_mean, team_mean, team_sd)
+    # Rounded so float noise can't drop a score at a threshold just below it
+    compression = round(_compression_score(sd_ratio), _SCORE_DECIMALS)
+    shift = round(_shift_score(enum_mean, team_mean, team_sd), _SCORE_DECIMALS)
     edges, enum_pct, team_pct = _histogram(enum_values, team_values)
     return RangeVariable(
         variable=variable,

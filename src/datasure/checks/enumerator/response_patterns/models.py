@@ -151,7 +151,10 @@ class RangeSignal(StrEnum):
 class RangeVariable(BaseModel):
     """One enumerator's Range Compression result on one variable.
 
-    ``team`` always means the rest of the team. The histogram shares
+    ``team`` always means the rest of the team. Means and SDs are taken
+    after capping each side's values at its own 5th and 95th percentiles,
+    so one extreme answer can't dominate them. The histogram uses the
+    uncapped values and shares
     ``bucket_edges`` between the two series; values beyond the team's 1st
     and 99th percentiles count in the end buckets. Bucket shares are
     percentages.
