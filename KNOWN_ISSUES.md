@@ -16,6 +16,15 @@ To check which version you have, run `datasure --version`. Versions with `a`, `b
 
 ## Open issues
 
+### KI-032: DataSure closes without an error while you review duplicates
+
+- **Status:** 🟡 Planned for 1.2.0
+- **Affected versions:** 1.2.0 pre-releases (seen on 1.2.0rc1) on Windows, when installed over an earlier DataSure install
+- **Symptom:** While you work on the **Duplicates** tab, the app stops and the terminal returns to the prompt with no error, even with `datasure --logging debug`. The browser tab stops responding.
+- **Check:** Run `& "$env:APPDATA\uv\tools\datasure\Scripts\python.exe" -c "import polars; print(polars.__version__)"` in PowerShell. You are affected if it prints a version below 2.0.0.
+- **Workaround:** Update to 1.2.0 when it is released. To fix 1.2.0rc1 now, reinstall it: `uv tool install "datasure==1.2.0rc1" --reinstall --find-links https://test.pypi.org/simple/datasure/`. `uv tool upgrade datasure` does not fix it.
+- **Issue:** [#426](https://github.com/PovertyAction/datasure/issues/426)
+
 ### KI-031: New installs fail to import data with `Resource In Use Error` or `no attribute 'pl'`
 
 - **Status:** 🟡 Planned for 1.2.0 (fixed in 1.2.0a7)

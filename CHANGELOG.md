@@ -7,6 +7,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [1.2.0] - 2026-11-03
+
 ### Added
 
 - **Correction log**: New `source` column records which page made each entry;
@@ -460,9 +462,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   KEYs). The Enumerator Backchecker Error Statistics table now takes them from
   `compute_staff_coverage` and renders before comparison columns are
   configured — #318
-- **Dependencies**: `polars>=1.30.0,<3` (was `>=1.30.0`), lock moved from
-  1.43.2 to 2.0.0. Every replacement below exists in polars 1.30.0, so the
-  floor is unchanged; polars 3 is excluded until tested
+- **Dependencies**: `polars>=2.0.0,<3` (was `>=1.30.0`), lock moved from
+  1.43.2 to 2.0.0. The floor is the tested major, so an existing install can
+  no longer keep polars 1.x (see Fixed); polars 3 is excluded until
+  tested — #426
 - **Dependencies**: Relaxed the exact `streamlit==1.61.0` pin to
   `streamlit>=1.65.0,<2` (lock: Streamlit 1.66.0, Starlette 1.8.0). Only
   Streamlit major releases now need a deliberate bump (`pyproject.toml`) — #330
@@ -649,6 +652,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Silent exit on polars 1.x**: On Windows, the app exited with no
+  traceback while the Duplicates tab was in use. Windows Error Reporting
+  logged an access violation (`0xc0000005`) in `_polars_runtime.pyd`
+  (polars-runtime-32 1.43.2)
+  - Root cause: `polars>=1.30.0,<3` let an install made over an existing
+    tool environment keep polars 1.43.2, which the test suite never runs.
+    `uv tool upgrade` did not replace it when Test PyPI was added with
+    `--index`, because uv's first-index strategy then fails to resolve
+    `pandas` and `polars`, which also exist on Test PyPI, and leaves the
+    environment unchanged
+  - Solution: the polars floor is now 2.0.0 (see Changed), so the resolver
+    must replace polars 1.x — #426
 - **Resolved metric**: The Resolved metric on the ID duplicate cards was
   always 0. It now counts the duplicate IDs, among the included records, that
   corrections from any page have resolved (`id_duplicates.count_resolved_ids`)

@@ -20,7 +20,7 @@ This document tracks user-facing changes and improvements to help data managers,
 
 ## Version 1.2.0 — Review and Correct Where You Find the Problem
 
-Released: October 2026
+Released: November 2026
 
 This release lets you deal with a problem on the check page that found it. You can correct or accept flagged outliers, constraint violations and GPS points, resolve duplicate IDs on side-by-side cards, and attribute back check mismatches to whoever caused them. Every decision goes into one correction log that records who made it and where. Summary now shows each check's outstanding and resolved issues and how they changed since yesterday. Back checks gain coverage targets and adjusted error rates. Check pages are quicker to move around and remember your filters.
 
@@ -128,6 +128,7 @@ Your projects open in 1.2.0 without any steps, but a few results can change:
 ### Bug Fixes
 
 - **Fixed**: New installs crashed on the Prep page and several check pages with `module 'polars' has no attribute 'NUMERIC_DTYPES'`
+- **Fixed**: On Windows, DataSure could close without any error message while you reviewed duplicates. Upgrading to 1.2.0 installs the updated data library that fixes it
 - **Fixed**: New installs could not import data, failing with `Resource In Use Error` or `'DuckDBPyConnection' object has no attribute 'pl'`
 - **Fixed**: The app loaded in the browser and then disconnected, with `Expected ASGI message 'http.response.start'` in the terminal
 - **Fixed**: SurveyCTO imports left out submissions completed before 1 January 2024. The next refresh after you upgrade downloads them
@@ -305,5 +306,5 @@ DataSure 1.0.0 is the first stable public release. Prior versions were internal 
 
 *This document is maintained alongside the project and updated with each release. For technical details, see [CHANGELOG.md](CHANGELOG.md).*
 
-**Last Updated**: October 2026
+**Last Updated**: November 2026
 **Document Version**: 1.2.0
