@@ -29,13 +29,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
-- **Progress page**: Rebuilt as a header shown on every tab
-  (`display_progress_header`) above Overview (`display_overview`, with the
-  Cumulative / Per period chart from `progress_figure`), Follow-up (the
-  unchanged attempted interviews) and Settings (`progress_report_settings`,
-  moved out of the settings expander). The open tab (`progress_tab`) and
-  chart view (`progress_chart_view`) are saved view state with the time
-  period — #408
+- **Progress page**: Rebuilt as the settings expander
+  (`progress_report_settings`, with "Reset filters" beside it, as on
+  Summary), then a header shown on every tab (`display_progress_header`)
+  above Overview (`display_overview`, with the Cumulative / Per period chart
+  from `progress_figure`) and Follow-up (the unchanged attempted
+  interviews). The chart's series ends at the period of the last
+  submission, not today's. The open tab (`progress_tab`) and chart view
+  (`progress_chart_view`) are saved view state with the time period — #408
 - **Progress headline and delta**: `progress_headline` now reports
   Completed out of the target. The delta re-runs it on the rows dated on or
   before the period start, so it counts IDs first completed in the period;

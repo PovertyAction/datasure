@@ -1073,8 +1073,11 @@ A chart of completions against the target, with a **Daily**, **Weekly** or
   Green bars meet the target, red bars fall short
 
 Each ID counts once, in the period of its first submission that meets the
-completion condition. The current period is drawn as unfinished: a dotted
-line or a faded bar. With a field end date set, "Need N/day to finish by
+completion condition. The chart runs from the first completion to the
+period of the last submission, so periods after data collection stopped are
+not shown; periods in between with no completions show 0. When the last
+period is the current one it is drawn as unfinished: a dotted line or a
+faded bar. With a field end date set, "Need N/day to finish by
 [date]" shows below the chart until the target is reached. The days left
 count today.
 
@@ -1092,7 +1095,8 @@ The attempted interviews for each survey ID:
 
 #### Settings
 
-Every Progress setting. Each is saved for the page as you change it:
+The **settings** expander at the top of the page, as on Summary, holds every
+Progress setting. Each is saved for the page as you change it:
 
 - **Survey Key**, **Survey ID** and **Survey Date** columns
 - **Total Expected Interviews**: the target number of completed IDs. It

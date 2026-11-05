@@ -2,8 +2,9 @@
 
 All counting lives in `compute_progress`, a pure function that returns a
 `ProgressResult`; the page and the summary headline only draw from it. The
-page has a header shown on every tab, then Overview (the completions chart),
-Follow-up (attempted interviews) and Settings tabs.
+page has a settings expander at the top, then a header shown on every tab
+above the Overview (the completions chart) and Follow-up (attempted
+interviews) tabs.
 """
 
 import math
@@ -33,7 +34,7 @@ TAB_NAME = "progress"
 Period = Literal["Day", "Week", "Month"]
 # Only a fixed target for now; the tracking file and master list come later
 ProgressMode = Literal["fixed"]
-TABS_BY_MODE: dict[str, list[str]] = {"fixed": ["Overview", "Follow-up", "Settings"]}
+TABS_BY_MODE: dict[str, list[str]] = {"fixed": ["Overview", "Follow-up"]}
 # Keys older versions saved the targets under, mapped to the
 # ProgressSettings fields they belong to
 LEGACY_TARGET_KEYS = {
@@ -253,8 +254,15 @@ def _first_completions(rows: pl.DataFrame) -> pl.DataFrame:
     )
 
 
-def _series(firsts: pl.DataFrame, as_of: date, period: Period) -> list[SeriesPoint]:
-    """Count first completions per period, from the first one to today's period."""
+def _series(
+    rows: pl.DataFrame, firsts: pl.DataFrame, as_of: date, period: Period
+) -> list[SeriesPoint]:
+    """Count first completions per period, from the first one to the last submission.
+
+    Periods with no completions between them count 0; periods after the
+    last submission, such as the ones since data collection stopped, are
+    left out.
+    """
     if firsts.is_empty():
         return []
     every = PERIOD_EVERY[period]
@@ -264,8 +272,8 @@ def _series(firsts: pl.DataFrame, as_of: date, period: Period) -> list[SeriesPoi
         .agg(pl.len().alias("completed"))
     )
     current = period_start(as_of, period)
-    first, last = counts["start"].min(), counts["start"].max()
-    starts = pl.date_range(first, max(last, current), every, eager=True)
+    last = period_start(rows["date"].max(), period)
+    starts = pl.date_range(counts["start"].min(), last, every, eager=True)
     filled = (
         pl.DataFrame({"start": starts})
         .join(counts, on="start", how="left")
@@ -389,7 +397,7 @@ def compute_progress(
     target = settings.survey_target or None
     remaining = max(target - completed, 0) if target else None
     percentage = completed / target * 100 if target else None
-    series = _series(firsts, as_of, period)
+    series = _series(rows, firsts, as_of, period)
     return ProgressResult(
         mode="fixed",
         tabs=TABS_BY_MODE["fixed"],
@@ -600,11 +608,11 @@ def progress_report_settings(
     categorical_columns: list[str],
     datetime_columns: list[str],
 ) -> ProgressSettings:
-    """Render the Settings tab and return the progress settings.
+    """Render the settings expander at the top of the page; return the settings.
 
-    The tab holds the survey columns, the targets, the field end date and the
-    completion condition. Each setting is saved to the settings file when
-    the user changes it, and loads back on the next visit.
+    The expander holds the survey columns, the targets, the field end date
+    and the completion condition. Each setting is saved to the settings file
+    when the user changes it, and loads back on the next visit.
 
     Parameters
     ----------
@@ -624,6 +632,22 @@ def progress_report_settings(
     ProgressSettings
         User-configured settings from the UI.
     """
+    with st.expander("settings", icon=":material/settings:"):
+        st.markdown("## Configure settings for progress report")
+        st.divider()
+        return _settings_sections(
+            data, settings_file, config, categorical_columns, datetime_columns
+        )
+
+
+def _settings_sections(
+    data: pl.DataFrame,
+    settings_file: str,
+    config: ProgressSettings,
+    categorical_columns: list[str],
+    datetime_columns: list[str],
+) -> ProgressSettings:
+    """Render the settings sections; see `progress_report_settings`."""
     default_settings = load_default_settings(settings_file, config)
 
     with st.container(border=True):
@@ -793,7 +817,7 @@ def display_progress_header(result: ProgressResult, settings: ProgressSettings) 
     if counts.percentage is None:
         st.info(
             "Target number of interviews is not set. Set it in the "
-            ":material/settings: Settings tab."
+            ":material/settings: settings section above."
         )
     else:
         st.progress(
@@ -1025,7 +1049,7 @@ def display_overview(
         st.info(
             "The chart needs a date column and at least one dated completion. "
             "To choose the date column, go to the :material/settings: "
-            "Settings tab."
+            "settings section above."
         )
     else:
         st.plotly_chart(
@@ -1266,7 +1290,7 @@ def display_attempted_interviews(
     if not (all([survey_id, date])):
         st.info(
             "Attempted interviews report requires survey ID and date columns to be selected. "
-            "To add these columns, go to the :material/settings: Settings tab."
+            "To add these columns, go to the :material/settings: settings section above."
         )
         return
 
@@ -1449,11 +1473,11 @@ def progress_report(
     config: dict,
     survey_columns: ColumnByType,
 ) -> None:
-    """Display the Progress page: a header above Overview, Follow-up and Settings.
+    """Display the Progress page: settings, then a header above Overview and Follow-up.
 
-    The header shows on every tab. The settings are drawn first, in their
-    tab, then `compute_progress` counts the progress once and every other
-    part of the page draws from its result.
+    The settings expander sits at the top, as on Summary, with "Reset
+    filters" beside it. `compute_progress` then counts the progress once and
+    the header (shown on every tab) and the tabs draw from its result.
 
     Parameters
     ----------
@@ -1466,19 +1490,9 @@ def progress_report(
     survey_columns : ColumnByType
         Column names categorized by data type.
     """
+    st.title("Progress Tracking")
     saved_view = check_view(setting_file)
-    with reset_filters_beside(saved_view, vertical_alignment="center"):
-        st.title("Progress Tracking")
-
-    header = st.container()
-    # Only the fixed target for now, so the tabs are always the same
-    tab_names = TABS_BY_MODE["fixed"]
-    overview, follow_up, settings_tab = st.tabs(
-        tab_names,
-        **saved_view.bind("progress_tab", options=tab_names, default=tab_names[0]),
-    )
-
-    with settings_tab:
+    with reset_filters_beside(saved_view):
         settings = progress_report_settings(
             data,
             setting_file,
@@ -1486,6 +1500,15 @@ def progress_report(
             survey_columns.categorical_columns,
             survey_columns.datetime_columns,
         )
+
+    header = st.container()
+    # Only the fixed target for now, so the tabs are always the same
+    tab_names = TABS_BY_MODE["fixed"]
+    overview, follow_up = st.tabs(
+        tab_names,
+        **saved_view.bind("progress_tab", options=tab_names, default=tab_names[0]),
+    )
+
     with overview:
         chart_view, period = render_chart_controls(setting_file)
 

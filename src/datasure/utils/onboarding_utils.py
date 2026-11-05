@@ -731,17 +731,18 @@ class OutputOnboardingInfo:
             "content": """
         ### Survey Progress Report
         This check shows how far data collection has come against its target.
-        The header at the top stays on every tab: the percentage complete, Submissions,
-        Unique and Remaining, the current period against its target, and a projected finish date.
-        Below it are three tabs: **Overview**, **Follow-up** and **Settings**.
-        **Next**: Open the :material/settings: **Settings** tab to configure the Progress check.
+        The :material/settings: **settings** section sits at the top. Below it, a header stays on
+        every tab: the percentage complete, Submissions, Unique, Completed and Remaining, the
+        current period against its target, and a projected finish date.
+        Below the header are two tabs: **Overview** and **Follow-up**.
+        **Next**: Open the :material/settings: **settings** section to configure the Progress check.
         """,
         },
         "progress_report_settings": {
             "title": "Progress Settings",
             "content": f"""
         ##### Setup for Progress
-        This tab holds every Progress setting. Some are pre-filled from your check configuration.
+        This section holds every Progress setting. Some are pre-filled from your check configuration.
         - Survey ID: The main identifier for your survey respondents (e.g., {DemoColumn.HHID}).
           Unique and Completed count distinct IDs.
         - Survey Date: The column indicating when the survey was submitted (e.g., {DemoColumn.SUBMISSIONDATE}).
@@ -785,7 +786,7 @@ class OutputOnboardingInfo:
         ##### Instructions for Demo:
         - Switch to **Per period** with **Daily** selected: green bars met the target of 3,
           red bars fell short.
-        - Set a **Field End Date** in the Settings tab to see the completions needed per day.
+        - Set a **Field End Date** in the settings section to see the completions needed per day.
 
         **Next**: Open the **Follow-up** tab.
         """,

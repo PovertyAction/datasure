@@ -338,8 +338,7 @@ On a check page this is the page settings file
   their session state. It does not touch the check's own settings. Each
   check draws it beside its settings expander by wrapping the settings call
   in `reset_filters_beside(check_view(setting_file))`; Missing Values and
-  Descriptive Stats, which have no settings section, and Progress, whose
-  settings are a tab, wrap their title.
+  Descriptive Stats, which have no settings section, wrap their title.
   Corrections (scope: the check page) draws the action above the selected
   page, and Prepare Data (scope: the dataset) beside the "Preview Prepared
   Data" header.

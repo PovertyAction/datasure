@@ -380,7 +380,7 @@ def test_load_default_settings_basic(patched_progress):
 
 
 def test_progress_report_settings_renders(patched_progress):
-    """The Settings tab renders and returns ProgressSettings."""
+    """The settings expander renders and returns ProgressSettings."""
     data = pl.DataFrame({"survey_id": ["h1"], "consent": ["yes"]})
     patched_progress.selectbox.return_value = "survey_id"
     with patch(
@@ -391,6 +391,7 @@ def test_progress_report_settings_renders(patched_progress):
             data, "settings.json", ProgressSettings(survey_id=None), ["survey_id"], []
         )
     assert isinstance(result, ProgressSettings)
+    patched_progress.expander.assert_called_once()
     patched_progress.date_input.assert_called()
 
 
@@ -430,14 +431,14 @@ def test_display_overview_without_dates_explains_the_chart(patched_progress):
     patched_progress.plotly_chart.assert_not_called()
 
 
-def test_progress_report_renders_the_header_and_tabs(patched_progress, tmp_path):
-    """The page draws Overview, Follow-up and Settings tabs below the header."""
+def test_progress_report_renders_settings_header_and_tabs(patched_progress, tmp_path):
+    """The page draws the settings, then Overview and Follow-up tabs."""
     survey_cols = ColumnByType(categorical_columns=["hhid"], datetime_columns=["when"])
     with (
         patch(
             "datasure.checks.progress.progress_report_settings",
             return_value=_settings(survey_target=10),
-        ),
+        ) as settings,
         patch("datasure.checks.progress.display_progress_header") as header,
         patch("datasure.checks.progress.display_overview") as overview,
         patch("datasure.checks.progress.display_attempted_interviews") as follow_up,
@@ -447,7 +448,8 @@ def test_progress_report_renders_the_header_and_tabs(patched_progress, tmp_path)
         )
 
     names = patched_progress.tabs.call_args.args[0]
-    assert names == ["Overview", "Follow-up", "Settings"]
+    assert names == ["Overview", "Follow-up"]
+    settings.assert_called_once()
     assert patched_progress.tabs.call_args.kwargs["key"] == "progress_tab"
     header.assert_called_once()
     overview.assert_called_once()
@@ -750,16 +752,48 @@ class TestComputeProgressSeries:
             (datetime.date(2026, 10, 14), 1, 2, True),
         ]
 
-    def test_days_without_completions_are_filled_up_to_today(self):
+    def test_ends_at_the_last_submission_not_today(self):
+        # Submissions stopped on the 12th; today, the 14th, is not drawn.
         data = _survey([("h1", "2026-10-11", "yes", "complete")])
+        data = pl.concat([data, _survey([("h2", "2026-10-12", "no", "refused")])])
+
+        result = compute_progress(data, _settings(**CONDITION), AS_OF)
+
+        assert _points(result.series) == [
+            (datetime.date(2026, 10, 11), 1, 1, False),
+            (datetime.date(2026, 10, 12), 0, 1, False),
+        ]
+
+    def test_ends_at_the_month_of_the_last_submission(self):
+        # The last submission is in September, so October is not drawn.
+        data = _survey(
+            [
+                ("h1", "2026-08-20", "yes", "complete"),
+                ("h2", "2026-09-03", "yes", "complete"),
+            ]
+        )
+
+        result = compute_progress(data, _settings(), AS_OF, period="Month")
+
+        assert _points(result.series) == [
+            (datetime.date(2026, 8, 1), 1, 1, False),
+            (datetime.date(2026, 9, 1), 1, 2, False),
+        ]
+
+    def test_days_without_completions_between_submissions_count_zero(self):
+        data = _survey(
+            [
+                ("h1", "2026-10-11", "yes", "complete"),
+                ("h2", "2026-10-13", "yes", "complete"),
+            ]
+        )
 
         result = compute_progress(data, _settings(), AS_OF)
 
         assert _points(result.series) == [
             (datetime.date(2026, 10, 11), 1, 1, False),
             (datetime.date(2026, 10, 12), 0, 1, False),
-            (datetime.date(2026, 10, 13), 0, 1, False),
-            (datetime.date(2026, 10, 14), 0, 1, True),
+            (datetime.date(2026, 10, 13), 1, 2, False),
         ]
 
     def test_weeks_start_on_monday(self):
@@ -991,9 +1025,9 @@ class TestTargetPath:
 
 
 class TestPageShape:
-    def test_a_fixed_target_shows_overview_follow_up_and_settings(self):
+    def test_a_fixed_target_shows_overview_and_follow_up(self):
         result = compute_progress(SURVEY, _settings(survey_target=10), AS_OF)
 
         assert result.mode == "fixed"
-        assert result.tabs == ["Overview", "Follow-up", "Settings"]
+        assert result.tabs == ["Overview", "Follow-up"]
         assert result.todos == []
