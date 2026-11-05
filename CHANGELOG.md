@@ -17,8 +17,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   counted once, in the period of its first qualifying submission, with the
   current period marked `partial`), the cumulative `target_path`, the
   `CurrentPeriod` count against the per-period target, the `Pace`
-  (projected finish from the mean completions per day over the last 7
-  days, hidden with fewer than 3 days of data or a zero pace; need-per-day
+  (projected finish, counted from today, at the mean completions per day
+  over the 7 days up to the last submission, hidden with fewer than 3 days
+  of data or a zero pace; need-per-day
   to the field end date), the mode, the visible tabs and the to-do items
   (none yet). `tracking` is unused until tracking-file and master-list
   modes land — #408

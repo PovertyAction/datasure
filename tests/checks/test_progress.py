@@ -892,10 +892,26 @@ class TestPace:
 
         assert pace.projected_finish is None
 
-    def test_no_projection_without_completions_in_the_last_7_days(self):
+    def test_the_window_ends_at_the_last_submission_not_today(self):
+        # Submissions stopped on 3 Oct: the pace is 1 a day over 1-3 Oct, and
+        # the 27 remaining are projected from today.
         data = _daily({"2026-10-01": 1, "2026-10-02": 1, "2026-10-03": 1})
 
         pace = compute_progress(data, _settings(survey_target=30), AS_OF).pace
+
+        assert pace.per_day == 1.0
+        assert pace.projected_finish == datetime.date(2026, 11, 10)
+
+    def test_no_projection_without_completions_in_the_last_7_days(self):
+        # Completions stop on 3 Oct, but submissions go on to today.
+        completions = _daily({"2026-10-01": 1, "2026-10-02": 1, "2026-10-03": 1})
+        refusals = _survey(
+            [(f"r{day}", f"2026-10-{day}", "no", "refused") for day in (12, 13, 14)]
+        )
+        data = pl.concat([completions, refusals])
+        settings = _settings(survey_target=30, **CONDITION)
+
+        pace = compute_progress(data, settings, AS_OF).pace
 
         assert pace.per_day == 0
         assert pace.projected_finish is None

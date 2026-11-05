@@ -163,8 +163,8 @@ class Pace(BaseModel):
     per_day: float | None = Field(
         None,
         ge=0,
-        description="Mean completions per day over the last 7 days; None "
-        "with fewer than 3 days of data",
+        description="Mean completions per day over the 7 days up to the last "
+        "submission; None with fewer than 3 days of data",
     )
     projected_finish: date | None = Field(
         None, description="When the target is reached at that pace"
@@ -308,9 +308,11 @@ def _pace(
 ) -> Pace:
     """Work out the pace, the projected finish and the completions needed per day.
 
-    The pace is the mean completions per day over the last 7 days up to
-    today, or over the days since the first submission when fieldwork is
-    shorter. It is left out with fewer than 3 days of submissions.
+    The pace is the mean completions per day over the 7 days up to the last
+    submission, or over the days since the first submission when fieldwork
+    is shorter, so a pause in the data does not drop it to 0. It is left out
+    with fewer than 3 days of submissions. The projected finish counts on
+    from today.
     """
     days_left = need_per_day = None
     if settings.field_end_date:
@@ -322,9 +324,10 @@ def _pace(
     days = dated.filter(dated <= as_of)
     if days.n_unique() < MIN_PACE_DAYS:
         return Pace(days_left=days_left, need_per_day=need_per_day)
-    window_start = max(as_of - timedelta(days=PACE_WINDOW_DAYS - 1), days.min())
-    in_window = firsts.filter(pl.col("date").is_between(window_start, as_of)).height
-    per_day = in_window / ((as_of - window_start).days + 1)
+    last = days.max()
+    window_start = max(last - timedelta(days=PACE_WINDOW_DAYS - 1), days.min())
+    in_window = firsts.filter(pl.col("date").is_between(window_start, last)).height
+    per_day = in_window / ((last - window_start).days + 1)
 
     projected_finish = None
     if remaining and per_day:
@@ -829,7 +832,7 @@ def display_progress_header(result: ProgressResult, settings: ProgressSettings) 
                 "Projected finish",
                 f"{result.pace.projected_finish:%d %b %Y}",
                 f"At {result.pace.per_day:.1f} completions a day, the mean "
-                "over the last 7 days",
+                "over the 7 days up to the last submission",
             )
         )
     metric_row(metrics)

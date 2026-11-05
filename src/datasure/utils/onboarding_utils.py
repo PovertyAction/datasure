@@ -770,7 +770,7 @@ class OutputOnboardingInfo:
         - Submissions (every submission), Unique (distinct IDs) and Remaining.
         - Completions today, this week or this month against the per-period target,
           following the period chosen on Overview.
-        - A projected finish date, from the mean completions per day over the last 7 days.
+        - A projected finish date, from the mean completions per day over the 7 days up to the last submission.
         """,
         },
         "display_overview": {

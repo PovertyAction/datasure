@@ -1055,11 +1055,11 @@ The header stays at the top of every tab. It shows:
 - **Today**, **This week** or **This month**: IDs first completed in the
   current period against the per-period target, following the period chosen
   on Overview. Shown only when a per-period target is set
-- **Projected finish**: when the target is reached at the mean completions
-  per day over the 7 days up to today (or since the first submission, when
-  fieldwork started less than 7 days ago). Hidden with fewer than 3 days of
-  submissions, or when nothing was completed in those 7 days, for example
-  because submissions stopped arriving
+- **Projected finish**: when the target is reached, counting from today, at
+  the mean completions per day over the 7 days up to the last submission (or
+  since the first submission, when fieldwork lasted less than 7 days). A
+  pause in submissions doesn't lower the pace. Hidden with fewer than 3 days
+  of submissions, or when nothing was completed in those 7 days
 
 #### Overview
 
