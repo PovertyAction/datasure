@@ -921,7 +921,7 @@ wheels = [
 
 [[package]]
 name = "datasure"
-version = "1.2.0a7"
+version = "1.2.0"
 source = { editable = "." }
 dependencies = [
     { name = "duckdb" },
@@ -967,7 +967,7 @@ requires-dist = [
     { name = "openpyxl", specifier = ">=3.1.5" },
     { name = "pandas", specifier = ">=2.2.2,<3.0" },
     { name = "plotly", specifier = ">=6.2.0" },
-    { name = "polars", specifier = ">=1.30.0,<3" },
+    { name = "polars", specifier = ">=2.0.0,<3" },
     { name = "polars-readstat", specifier = ">=0.5.1" },
     { name = "pyarrow", specifier = ">=23.0.1" },
     { name = "pydantic", specifier = ">=2.11.7" },

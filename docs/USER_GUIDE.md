@@ -1,6 +1,6 @@
 # DataSure User Guide
 
-Version 1.0 - Comprehensive Guide to Survey Data Quality Management
+Version 1.2 - Comprehensive Guide to Survey Data Quality Management
 
 ---
 
@@ -15,6 +15,7 @@ Version 1.0 - Comprehensive Guide to Survey Data Quality Management
    - [Step 4: Configure Checks](#step-4-configure-checks)
    - [Step 5: Review Reports](#step-5-review-reports)
    - [Step 6: Correct Data](#step-6-correct-data)
+   - [Step 7: Replication Package](#step-7-replication-package)
 4. [Quality Check Reports](#quality-check-reports)
 5. [Demo Mode](#demo-mode)
 6. [Best Practices](#best-practices)
@@ -77,8 +78,8 @@ The application will open in your default web browser at `http://localhost:8501`
    - Click "Start Demo" on the welcome screen
    - Follow the guided 7-step tutorial
 3. **Or Create New Project**:
-   - Click "Create New Project"
-   - Enter project name
+   - Click **+ New Project**
+   - Enter a project name and click **Create Project**
    - Begin importing your data
 
 ---
@@ -102,7 +103,8 @@ You're working with household survey data from rural communities in India, inclu
 
 **Key Actions**:
 
-- **Create New Project**: Enter a descriptive project name
+- **+ New Project**: Enter a descriptive project name, or start from a
+  configuration file (see [Copying a Project's Setup](#copying-a-projects-setup))
 - **Select Existing Project**: Choose from previously created projects
 - **Start Demo**: Launch the interactive tutorial with sample data
 
@@ -169,33 +171,58 @@ Import sources are added via the **"Add Import Configuration"** popover. Click i
 
 ##### Option A: SurveyCTO Integration
 
-1. Click "Add Import Configuration"
+First save your SurveyCTO sign-in, once per server:
+
+1. Under **Manage Credentials**, click **Add Credentials**
+2. Enter:
+   - **Server name**: The name of your SurveyCTO server, for example
+     `myserver` for `myserver.surveycto.com`
+   - **Email address**: Your SurveyCTO account email
+   - **Password**: Your SurveyCTO password (stored securely in your OS
+     keyring, never written to disk)
+3. Click **Connect & Save Credentials**
+
+**Remove Credentials** deletes a saved sign-in, including the password in
+your OS keyring.
+
+Then add each form:
+
+1. Under **Import Data From Sources**, click **Add Import Configuration**
 2. Select **"SurveyCTO"** from the Import Type dropdown
-3. Enter server credentials:
-   - **Server Name**: Your SurveyCTO server URL
-   - **Username**: Your SurveyCTO username
-   - **Password**: Your SurveyCTO password (stored securely in your OS keyring — never written to disk)
-4. Select form(s) to import
+3. Choose the saved sign-in under **Select Server Credentials**
+4. Choose the form under **Select Form ID**
 5. Configure import settings:
-   - Include/exclude attachments
-   - Private key (if encrypted)
-6. Click "Import Data"
+   - **Alias**: A short name for the dataset
+   - **Download attachments** (optional)
+   - **File path for Private Key** (encrypted forms only)
+   - **File path to save data** (optional)
+6. Click **Add Form**
+7. Click **Load Data** to download the data
 
-> **Note**: DataSure performs incremental refresh — only submissions newer than your last import are downloaded, so daily refreshes are fast regardless of total dataset size.
+> **Note**: Each refresh downloads every submission again, so refreshing a
+> large or encrypted form takes about as long as the first import. Your data
+> is complete either way. See [KNOWN_ISSUES.md](../KNOWN_ISSUES.md)
+> (KI-015).
 
-##### Option B: Local File Upload
+##### Option B: Local File
 
-1. Click "Add Import Configuration"
+DataSure reads the file from where it is on your computer, so you enter its
+path rather than uploading it. **Load Data** reads the file again, so a file
+you update in place is picked up on the next load.
+
+1. Click **Add Import Configuration**
 2. Select **"local storage"** from the Import Type dropdown
-3. Upload file(s):
-   - Drag and drop or browse
-   - Supported formats: .csv, .xlsx, .json, .dta (Stata), .parquet. Save
+3. Enter:
+   - **Alias**: A short name for the dataset (up to 20 characters)
+   - **File Path**: The file's full path, for example `C:/data/survey.dta`.
+     Supported formats: .csv, .xlsx, .json, .dta (Stata), .parquet. Save
      legacy Excel (.xls) files as .xlsx first
-4. Configure settings:
-   - Assign dataset alias (name)
-   - Select sheet (for Excel files)
-   - Preview data structure
-5. Click "Load Data"
+   - **Sheet Name** (Excel files only)
+4. Click **Add File**
+5. Click **Load Data**
+
+Use **Edit Import Configuration** to change a source, and **Remove Import
+Configuration** to delete it with its imported, prepared and corrected data.
 
 #### Preview Imported Data
 
@@ -2017,6 +2044,6 @@ confirmation box:
 
 ---
 
-**Document Version**: 1.0
-**Last Updated**: July 2026
-**DataSure Version**: 1.0.0
+**Document Version**: 1.2
+**Last Updated**: October 2026
+**DataSure Version**: 1.2.0
