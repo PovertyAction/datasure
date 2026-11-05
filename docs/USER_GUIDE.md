@@ -1056,8 +1056,10 @@ The header stays at the top of every tab. It shows:
   current period against the per-period target, following the period chosen
   on Overview. Shown only when a per-period target is set
 - **Projected finish**: when the target is reached at the mean completions
-  per day over the last 7 days. Hidden with fewer than 3 days of submissions
-  or when nothing was completed in the last 7 days
+  per day over the 7 days up to today (or since the first submission, when
+  fieldwork started less than 7 days ago). Hidden with fewer than 3 days of
+  submissions, or when nothing was completed in those 7 days, for example
+  because submissions stopped arriving
 
 #### Overview
 
