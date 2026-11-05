@@ -21,7 +21,7 @@ To check which version you have, run `datasure --version`. Versions with `a`, `b
 - **Status:** 🟡 Planned for 1.3.0
 - **Affected versions:** 1.2.0 and earlier
 - **Symptom:** On the **Progress** tab, the **Total Expected Interviews** and **Target Submissions Per Period** you enter go back to the page's survey target, or to blank, when you reload the page or restart DataSure.
-- **Workaround:** Set **Target Survey Responses** in the page configuration to the target you want. There is no workaround for the per-period target. After you update, targets you entered earlier on the **Progress** tab load again and take the place of the page configuration's target, so check them once.
+- **Workaround:** Set **Target Survey Responses** in the page configuration to the target you want. There is no workaround for the per-period target. After you update, a per-period target you entered earlier loads again. A total target you entered earlier loads only if the page configuration has no **Target Survey Responses**.
 - **Issue:** [#407](https://github.com/PovertyAction/datasure/issues/407)
 
 ### KI-032: DataSure closes without an error while you review duplicates

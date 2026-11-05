@@ -185,10 +185,13 @@ def load_default_settings(
     # Load saved settings
     saved_settings = load_check_settings(settings_file, TAB_NAME)
 
-    # Targets used to be saved under other keys; keep those values loading
+    # Targets used to be saved under other keys, where they never took
+    # effect. Load them only when the page config has no target of its own,
+    # which may have been set after them.
     for old_key, key in LEGACY_TARGET_KEYS.items():
-        if old_key in saved_settings:
-            saved_settings.setdefault(key, saved_settings.pop(old_key))
+        old_value = saved_settings.pop(old_key, None)
+        if old_value is not None and getattr(config, key) is None:
+            saved_settings.setdefault(key, old_value)
 
     default_settings: dict = dict(config)
     default_settings.update(saved_settings)

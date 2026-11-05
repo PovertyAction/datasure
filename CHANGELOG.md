@@ -17,7 +17,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     them
   - Solution: the targets are now saved under the `ProgressSettings` field
     names, and `load_default_settings` maps the old keys
-    (`LEGACY_TARGET_KEYS`) so targets already saved still load — #407
+    (`LEGACY_TARGET_KEYS`) so targets already saved still load. An old
+    target loads only when the page config has no value for that field,
+    because the config may have been set after it — #407
 
 ## [1.2.0] - 2026-11-03
 

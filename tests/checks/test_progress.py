@@ -1018,10 +1018,24 @@ class TestSavedTargetsLoadBack:
         settings_file.write_text(
             json.dumps({"progress": {"target": 250, "target_per_period": 12}})
         )
+        config = self.CONFIG.model_copy(update={"survey_target": None})
+
+        loaded = load_default_settings(str(settings_file), config)
+
+        assert loaded.survey_target == 250
+        assert loaded.target_submissions_per_period == 12
+
+    def test_page_config_target_beats_a_target_saved_under_the_old_key(self, tmp_path):
+        # The old key never took effect, so the page config's target may be
+        # the newer one: users were told to set it there instead
+        settings_file = tmp_path / "page_settings.json"
+        settings_file.write_text(
+            json.dumps({"progress": {"target": 250, "target_per_period": 12}})
+        )
 
         loaded = load_default_settings(str(settings_file), self.CONFIG)
 
-        assert loaded.survey_target == 250
+        assert loaded.survey_target == 100
         assert loaded.target_submissions_per_period == 12
 
     def test_page_config_target_is_used_when_no_target_is_saved(self, tmp_path):
