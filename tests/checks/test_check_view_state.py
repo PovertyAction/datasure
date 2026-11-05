@@ -138,7 +138,9 @@ class TestProgress:
     def test_an_old_time_period_still_loads_and_moves_to_view_state(
         self, settings_file
     ):
-        _write(settings_file, {"progress": {"time_period": "Week", "target": 300}})
+        _write(
+            settings_file, {"progress": {"time_period": "Week", "survey_target": 300}}
+        )
         st = _st()
 
         _run(
@@ -154,7 +156,7 @@ class TestProgress:
             "time_period_progress_overtime": "Week"
         }
         # The target is configuration: it stays with the check settings.
-        assert _read(settings_file)["progress"] == {"target": 300}
+        assert _read(settings_file)["progress"] == {"survey_target": 300}
 
     def test_a_new_time_period_is_view_state(self, settings_file):
         st = _st()

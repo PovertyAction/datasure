@@ -7,6 +7,18 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Progress targets**: Targets entered on the Progress page did not load
+  back, so the page config's survey target always won on reload
+  - Root cause: `progress_report_settings` saved the targets under `target`
+    and `target_per_period`, but `ProgressSettings` reads `survey_target`
+    and `target_submissions_per_period`, so `load_default_settings` ignored
+    them
+  - Solution: the targets are now saved under the `ProgressSettings` field
+    names, and `load_default_settings` maps the old keys
+    (`LEGACY_TARGET_KEYS`) so targets already saved still load — #407
+
 ## [1.2.0] - 2026-11-03
 
 ### Added

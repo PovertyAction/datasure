@@ -30,6 +30,12 @@ from datasure.utils.ui_utils import ensure_styler_limit
 from datasure.utils.view_state import reset_filters_beside, view_factory
 
 TAB_NAME = "progress"
+# Keys older versions saved the targets under, mapped to the
+# ProgressSettings fields they belong to
+LEGACY_TARGET_KEYS = {
+    "target": "survey_target",
+    "target_per_period": "target_submissions_per_period",
+}
 
 # Saved view state scope: the check's catalogue slug. The time period and the
 # extra attempted-interview columns are personal view state; older versions
@@ -178,6 +184,11 @@ def load_default_settings(
     """
     # Load saved settings
     saved_settings = load_check_settings(settings_file, TAB_NAME)
+
+    # Targets used to be saved under other keys; keep those values loading
+    for old_key, key in LEGACY_TARGET_KEYS.items():
+        if old_key in saved_settings:
+            saved_settings.setdefault(key, saved_settings.pop(old_key))
 
     default_settings: dict = dict(config)
     default_settings.update(saved_settings)
@@ -331,9 +342,9 @@ def progress_report_settings(
                     help="Total number of interviews expected",
                     key="total_goal_progress",
                     on_change=trigger_save,
-                    kwargs={"state_name": TAB_NAME + "_target"},
+                    kwargs={"state_name": TAB_NAME + "_survey_target"},
                 )
-                save_check_settings(settings_file, TAB_NAME, {"target": target})
+                save_check_settings(settings_file, TAB_NAME, {"survey_target": target})
 
             # Target per period selection
             with tc2:
@@ -344,10 +355,12 @@ def progress_report_settings(
                     help="Target number of submissions per time period (Day/Week/Month)",
                     key="target_per_period_progress",
                     on_change=trigger_save,
-                    kwargs={"state_name": TAB_NAME + "_target_per_period"},
+                    kwargs={"state_name": TAB_NAME + "_target_submissions_per_period"},
                 )
                 save_check_settings(
-                    settings_file, TAB_NAME, {"target_per_period": target_per_period}
+                    settings_file,
+                    TAB_NAME,
+                    {"target_submissions_per_period": target_per_period},
                 )
 
     return ProgressSettings(
