@@ -3,7 +3,6 @@
 import datetime
 import importlib
 import json
-import math
 import sys
 from unittest.mock import MagicMock, patch
 
@@ -11,33 +10,25 @@ import polars as pl
 import pytest
 from pydantic import ValidationError
 
+from datasure.checks import progress as progress_module
 from datasure.checks.progress import (
-    AttemptedInterviewsMetrics,
     AttemptedInterviewsResult,
-    ProgressChartMetrics,
     ProgressSettings,
-    ProgressSummary,
     TimePeriodConfig,
     _aggregate_attempts_by_survey_id,
     _compute_summary_stats,
     _display_chart_and_table,
-    _display_chart_if_configured,
     _display_metrics,
     _expand_attempt_dates,
     _get_unique_values,
     _prepare_display_columns,
-    _render_column_value_selection,
     compute_attempted_interviews,
-    compute_average_interviews,
-    compute_progress_chart,
-    compute_progress_overtime,
-    compute_progress_summary,
-    display_progress_chart,
-    display_progress_summary,
+    compute_progress,
+    display_overview,
+    display_progress_header,
     load_default_settings,
     progress_report,
     progress_report_settings,
-    render_time_period_selector,
 )
 from datasure.utils.dataframe_utils import ColumnByType
 
@@ -82,7 +73,10 @@ def _make_mock_st():
     mock_st.selectbox.return_value = None
     mock_st.multiselect.return_value = []
     mock_st.number_input.return_value = 0
+    mock_st.date_input.return_value = None
     mock_st.pills.return_value = "Day"
+    mock_st.segmented_control.return_value = "Cumulative"
+    mock_st.tabs.side_effect = lambda names, **kwargs: [MagicMock() for _ in names]
     mock_st.button.return_value = False
     mock_st.session_state = {}
     return mock_st
@@ -98,7 +92,8 @@ def patched_progress():
         patch("datasure.checks.progress.save_check_settings"),
         patch("datasure.checks.progress.trigger_save"),
         patch("datasure.checks.progress.demo_callout"),
-        patch("datasure.checks.progress.donut_chart", return_value=MagicMock()),
+        patch("datasure.checks.progress.metric_row"),
+        patch("datasure.checks.progress.section_header"),
     ):
         yield mock_st
 
@@ -116,7 +111,8 @@ def prog_bc():
         prog_module.save_check_settings = MagicMock()
         prog_module.trigger_save = MagicMock()
         prog_module.demo_callout = MagicMock()
-        prog_module.donut_chart = MagicMock(return_value=MagicMock())
+        prog_module.metric_row = MagicMock()
+        prog_module.section_header = MagicMock()
         with patch(
             "datasure.utils.onboarding_utils.is_demo_project", return_value=False
         ):
@@ -129,140 +125,6 @@ def prog_bc():
         importlib.reload(prog_module)
 
 
-class TestComputeProgressSummary:
-    """Test compute_progress_summary function."""
-
-    @patch("datasure.checks.progress.st.cache_data", lambda f: f)
-    def test_compute_progress_summary_structure(self, sample_dataframe):
-        """Test that compute_progress_summary returns ProgressSummary model."""
-        data_pl = pl.from_pandas(sample_dataframe)
-        result = compute_progress_summary(data_pl, 10)
-
-        assert isinstance(result, ProgressSummary)
-        assert hasattr(result, "total_submitted")
-        assert hasattr(result, "target")
-        assert hasattr(result, "percentage_completed")
-
-    @patch("datasure.checks.progress.st.cache_data", lambda f: f)
-    def test_compute_progress_summary_values_with_target(self, sample_dataframe):
-        """Test compute_progress_summary with valid target."""
-        data_pl = pl.from_pandas(sample_dataframe)
-        target = 10
-        result = compute_progress_summary(data_pl, target)
-
-        expected_total = len(sample_dataframe)
-        expected_percentage = (expected_total / target) * 100
-
-        assert result.total_submitted == expected_total
-        assert result.target == target
-        assert result.percentage_completed == expected_percentage
-
-    @patch("datasure.checks.progress.st.cache_data", lambda f: f)
-    def test_compute_progress_summary_no_target(self, sample_dataframe):
-        """Test compute_progress_summary with no target."""
-        data_pl = pl.from_pandas(sample_dataframe)
-        result = compute_progress_summary(data_pl, None)
-
-        assert result.total_submitted == len(sample_dataframe)
-        assert result.target is None
-        assert result.percentage_completed == 0
-
-    @patch("datasure.checks.progress.st.cache_data", lambda f: f)
-    def test_compute_progress_summary_zero_target(self, sample_dataframe):
-        """Test compute_progress_summary with zero target."""
-        data_pl = pl.from_pandas(sample_dataframe)
-        result = compute_progress_summary(data_pl, 0)
-
-        assert result.total_submitted == len(sample_dataframe)
-        assert result.target == 0
-        assert result.percentage_completed == 0
-
-    @patch("datasure.checks.progress.st.cache_data", lambda f: f)
-    def test_compute_progress_summary_empty_data(self):
-        """Test compute_progress_summary with empty dataframe (no rows)."""
-        # Empty DataFrame with columns to avoid Polars hashing issues
-        empty_pl = pl.DataFrame({"col1": [], "col2": []})
-        result = compute_progress_summary(empty_pl, 10)
-
-        assert result.total_submitted == 0
-        assert result.target == 10
-        assert result.percentage_completed == 0
-
-
-class TestComputeProgressChart:
-    """Test compute_progress_chart function."""
-
-    @patch("datasure.checks.progress.st.cache_data", lambda f: f)
-    def test_compute_progress_chart_structure(self, sample_dataframe):
-        """Test that compute_progress_chart returns expected structure."""
-        data_pl = pl.from_pandas(sample_dataframe)
-        result = compute_progress_chart(
-            data_pl, "consent", ["Yes"], "outcome", ["Complete"]
-        )
-
-        assert isinstance(result, tuple)
-        assert len(result) == 2
-        assert isinstance(result[0], float)  # consent_percentage
-        assert isinstance(result[1], float)  # completion_percentage
-
-    @patch("datasure.checks.progress.st.cache_data", lambda f: f)
-    def test_compute_progress_chart_with_valid_data(self, sample_dataframe):
-        """Test compute_progress_chart with valid consent and outcome data."""
-        data_pl = pl.from_pandas(sample_dataframe)
-        consent_vals = ["Yes"]
-        outcome_vals = ["Complete"]
-
-        result = compute_progress_chart(
-            data_pl, "consent", consent_vals, "outcome", outcome_vals
-        )
-
-        # Calculate expected values using Polars
-        total_submitted = data_pl.height
-        valid_consent_count = data_pl.filter(
-            pl.col("consent").is_in(consent_vals)
-        ).height
-        completed_count = data_pl.filter(pl.col("outcome").is_in(outcome_vals)).height
-
-        expected_consent_percentage = (valid_consent_count / total_submitted) * 100
-        expected_completion_percentage = (completed_count / total_submitted) * 100
-
-        assert result[0] == expected_consent_percentage
-        assert result[1] == expected_completion_percentage
-
-    @patch("datasure.checks.progress.st.cache_data", lambda f: f)
-    def test_compute_progress_chart_no_consent_col(self, sample_dataframe):
-        """Test compute_progress_chart with no consent column."""
-        data_pl = pl.from_pandas(sample_dataframe)
-        result = compute_progress_chart(data_pl, None, ["Yes"], "outcome", ["Complete"])
-
-        assert result[0] == 0  # consent_percentage should be 0
-        assert isinstance(
-            result[1], float
-        )  # completion_percentage should still be calculated
-
-    @patch("datasure.checks.progress.st.cache_data", lambda f: f)
-    def test_compute_progress_chart_no_outcome_col(self, sample_dataframe):
-        """Test compute_progress_chart with no outcome column."""
-        data_pl = pl.from_pandas(sample_dataframe)
-        result = compute_progress_chart(data_pl, "consent", ["Yes"], None, ["Complete"])
-
-        assert isinstance(
-            result[0], float
-        )  # consent_percentage should still be calculated
-        assert result[1] == 0  # completion_percentage should be 0
-
-    @patch("datasure.checks.progress.st.cache_data", lambda f: f)
-    def test_compute_progress_chart_empty_data(self):
-        """Test compute_progress_chart with empty dataframe."""
-        empty_pl = pl.DataFrame({"consent": [], "outcome": []})
-        result = compute_progress_chart(
-            empty_pl, "consent", ["Yes"], "outcome", ["Complete"]
-        )
-
-        assert result[0] == 0
-        assert result[1] == 0
-
-
 # ==============================================================================
 # New Tests for Pydantic Models and Helper Functions
 # ==============================================================================
@@ -271,66 +133,12 @@ class TestComputeProgressChart:
 class TestPydanticModels:
     """Test Pydantic models for data validation."""
 
-    def test_progress_summary_valid(self):
-        """Test creating valid ProgressSummary."""
-        summary = ProgressSummary(
-            total_submitted=100, target=150, percentage_completed=66.67
-        )
-        assert summary.total_submitted == 100
-        assert summary.target == 150
-        assert math.isclose(summary.percentage_completed, 66.67)
-
-    def test_progress_summary_no_target(self):
-        """Test ProgressSummary with no target."""
-        summary = ProgressSummary(
-            total_submitted=50, target=None, percentage_completed=0.0
-        )
-        assert summary.total_submitted == 50
-        assert summary.target is None
-        assert math.isclose(summary.percentage_completed, 0.0)
-
-    def test_progress_chart_metrics_valid(self):
-        """Test creating valid ProgressChartMetrics."""
-        metrics = ProgressChartMetrics(
-            consent_percentage=85.5, completion_percentage=92.3
-        )
-        assert math.isclose(metrics.consent_percentage, 85.5)
-        assert math.isclose(metrics.completion_percentage, 92.3)
-
-    def test_progress_chart_metrics_bounds(self):
-        """Test ProgressChartMetrics percentage bounds."""
-        with pytest.raises(ValidationError):
-            ProgressChartMetrics(
-                consent_percentage=-10.0,  # Below 0
-                completion_percentage=50.0,
-            )
-
-        with pytest.raises(ValidationError):
-            ProgressChartMetrics(
-                consent_percentage=50.0,
-                completion_percentage=105.0,  # Above 100
-            )
-
-    def test_attempted_interviews_metrics_valid(self):
-        """Test creating valid AttemptedInterviewsMetrics."""
-        metrics = AttemptedInterviewsMetrics(
-            total_submitted=200,
-            number_of_unique_ids=180,
-            min_attempts=1,
-            max_attempts=5,
-        )
-        assert metrics.total_submitted == 200
-        assert metrics.number_of_unique_ids == 180
-        assert metrics.min_attempts == 1
-        assert metrics.max_attempts == 5
-
     def test_progress_settings_valid(self):
         """Test creating valid ProgressSettings."""
         settings = ProgressSettings(
             survey_key="key_col",
             survey_id="id_col",
             survey_date="date_col",
-            enumerator="enum_col",
             survey_target=1000,
             target_submissions_per_period=50,
         )
@@ -478,110 +286,6 @@ class TestHelperFunctions:
         assert min_attempts == 1
         assert max_attempts == 3
 
-    @patch("datasure.checks.progress.st.cache_data", lambda f: f)
-    def test_compute_average_interviews(self):
-        """Test compute_average_interviews function."""
-        period_stats = pl.DataFrame(
-            {
-                "time_period": ["2024-01-01", "2024-01-02", "2024-01-03"],
-                "num_interviews": [10, 15, 20],
-            }
-        )
-
-        avg = compute_average_interviews(period_stats)
-
-        assert isinstance(avg, float)
-        assert math.isclose(avg, 15.0)
-
-    def test_compute_average_interviews_zero_rows(self):
-        """No time periods average to 0.0 rather than None."""
-        period_stats = pl.DataFrame(
-            schema={"time_period": pl.Date, "num_interviews": pl.UInt32}
-        )
-
-        assert compute_average_interviews(period_stats) == 0.0
-
-
-class TestComputeProgressOvertimeUpdated:
-    """Test compute_progress_overtime with new Polars API."""
-
-    @patch("datasure.checks.progress.st.cache_data", lambda f: f)
-    def test_compute_progress_overtime_day(self):
-        """Test compute_progress_overtime with Day aggregation."""
-        import datetime
-
-        data = pl.DataFrame(
-            {
-                "date": [
-                    datetime.datetime(2024, 1, 1),
-                    datetime.datetime(2024, 1, 1),
-                    datetime.datetime(2024, 1, 2),
-                    datetime.datetime(2024, 1, 2),
-                    datetime.datetime(2024, 1, 2),
-                ]
-            }
-        )
-
-        result = compute_progress_overtime(data, "date", "Day")
-
-        assert isinstance(result, pl.DataFrame)
-        assert "time_period" in result.columns
-        assert "num_interviews" in result.columns
-        assert result.height == 2  # 2 unique days
-
-    @patch("datasure.checks.progress.st.cache_data", lambda f: f)
-    def test_compute_progress_overtime_week(self):
-        """Test compute_progress_overtime with Week aggregation."""
-        import datetime
-
-        data = pl.DataFrame(
-            {
-                "date": [
-                    datetime.datetime(2024, 1, 1),
-                    datetime.datetime(2024, 1, 3),
-                    datetime.datetime(2024, 1, 8),
-                    datetime.datetime(2024, 1, 10),
-                ]
-            }
-        )
-
-        result = compute_progress_overtime(data, "date", "Week")
-
-        assert isinstance(result, pl.DataFrame)
-        assert "time_period" in result.columns
-        assert "num_interviews" in result.columns
-
-    @patch("datasure.checks.progress.st.cache_data", lambda f: f)
-    def test_compute_progress_overtime_month(self):
-        """Test compute_progress_overtime with Month aggregation."""
-        import datetime
-
-        data = pl.DataFrame(
-            {
-                "date": [
-                    datetime.datetime(2024, 1, 5),
-                    datetime.datetime(2024, 1, 15),
-                    datetime.datetime(2024, 2, 5),
-                    datetime.datetime(2024, 2, 20),
-                ]
-            }
-        )
-
-        result = compute_progress_overtime(data, "date", "Month")
-
-        assert isinstance(result, pl.DataFrame)
-        assert result.height == 2  # 2 unique months
-
-    @patch("datasure.checks.progress.st.cache_data", lambda f: f)
-    def test_compute_progress_overtime_invalid_period(self):
-        """Test compute_progress_overtime rejects invalid period."""
-        import datetime
-
-        data = pl.DataFrame({"date": [datetime.datetime(2024, 1, 1)]})
-
-        with pytest.raises(ValidationError):
-            compute_progress_overtime(data, "date", "Year")
-
 
 class TestComputeAttemptedInterviewsUpdated:
     """Test compute_attempted_interviews with new Polars/Pydantic API."""
@@ -676,169 +380,78 @@ def test_load_default_settings_basic(patched_progress):
 
 
 def test_progress_report_settings_renders(patched_progress):
-    """progress_report_settings renders settings UI and returns ProgressSettings."""
-    config = ProgressSettings(survey_id=None)
-    default_settings = ProgressSettings(survey_id=None)
+    """The Settings tab renders and returns ProgressSettings."""
+    data = pl.DataFrame({"survey_id": ["h1"], "consent": ["yes"]})
     patched_progress.selectbox.return_value = "survey_id"
-    patched_progress.number_input.return_value = 0
     with patch(
         "datasure.checks.progress.load_default_settings",
-        return_value=default_settings,
+        return_value=ProgressSettings(survey_id=None),
     ):
         result = progress_report_settings(
-            "settings.json",
-            config,
-            ["survey_id", "enum_col"],
-            ["date_col"],
+            data, "settings.json", ProgressSettings(survey_id=None), ["survey_id"], []
         )
     assert isinstance(result, ProgressSettings)
-    patched_progress.expander.assert_called()
+    patched_progress.date_input.assert_called()
 
 
-def test_display_progress_summary_with_target(patched_progress):
-    """display_progress_summary renders progress bar when target is set."""
-    data = pl.DataFrame({"value": list(range(10))})
-    display_progress_summary(data, target=20)
-    patched_progress.columns.assert_called()
-
-
-def test_display_progress_summary_no_target(patched_progress):
-    """display_progress_summary shows info messages when no target."""
-    data = pl.DataFrame({"value": list(range(5))})
-    display_progress_summary(data, target=None)
-    patched_progress.columns.assert_called()
-
-
-def test_render_time_period_selector_returns_period(patched_progress):
-    """render_time_period_selector returns the selected time period."""
-    patched_progress.pills.return_value = "Week"
-    result = render_time_period_selector("settings.json", "progress")
-    assert result == "Week"
-
-
-def test_display_progress_overtime_no_date(prog_bc):
-    """display_progress_overtime shows info when date is None."""
-    data = pl.DataFrame({"value": [1, 2, 3]})
-    prog_bc.display_progress_overtime(data, None, "settings.json")
-    prog_bc.st.info.assert_called()
-
-
-def test_display_progress_overtime_with_date(prog_bc):
-    """display_progress_overtime renders chart with valid date column."""
-    data = pl.DataFrame(
-        {
-            "date": pl.Series(
-                [datetime.datetime(2024, 1, 1), datetime.datetime(2024, 1, 2)]
-            ),
-            "value": [1, 2],
-        }
+@pytest.mark.parametrize("survey_target", [None, 10])
+def test_display_progress_header_renders(patched_progress, survey_target):
+    """The header renders with and without a target."""
+    settings = _settings(survey_target=survey_target, target_submissions_per_period=2)
+    result = compute_progress(
+        _daily({"2026-10-12": 2, "2026-10-13": 2, "2026-10-14": 2}), settings, AS_OF
     )
-    period_stats = pl.DataFrame(
-        {
-            "time_period": [datetime.date(2024, 1, 1), datetime.date(2024, 1, 2)],
-            "num_interviews": [3, 5],
-        }
+
+    display_progress_header(result, settings)
+
+    progress_module.metric_row.assert_called_once()
+
+
+@pytest.mark.parametrize("chart_view", ["Cumulative", "Per period"])
+def test_display_overview_draws_the_chart(patched_progress, chart_view):
+    settings = _settings(
+        survey_target=30,
+        target_submissions_per_period=2,
+        field_end_date=datetime.date(2026, 10, 31),
     )
-    prog_bc.render_time_period_selector = MagicMock(return_value="Day")
-    prog_bc.compute_progress_overtime = MagicMock(return_value=period_stats)
-    prog_bc.compute_average_interviews = MagicMock(return_value=4.0)
+    result = compute_progress(SURVEY, settings, AS_OF)
 
-    prog_bc.display_progress_overtime(data, "date", "settings.json")
-    prog_bc.st.plotly_chart.assert_called()
+    display_overview(result, settings, chart_view)
 
-
-def test_display_progress_overtime_with_target(prog_bc):
-    """display_progress_overtime colors bars based on target_per_period."""
-    data = pl.DataFrame(
-        {
-            "date": pl.Series(
-                [datetime.datetime(2024, 1, 1), datetime.datetime(2024, 1, 2)]
-            ),
-        }
-    )
-    period_stats = pl.DataFrame(
-        {
-            "time_period": [datetime.date(2024, 1, 1), datetime.date(2024, 1, 2)],
-            "num_interviews": [2, 6],
-        }
-    )
-    prog_bc.render_time_period_selector = MagicMock(return_value="Day")
-    prog_bc.compute_progress_overtime = MagicMock(return_value=period_stats)
-    prog_bc.compute_average_interviews = MagicMock(return_value=4.0)
-
-    prog_bc.display_progress_overtime(
-        data, "date", "settings.json", target_per_period=5
-    )
-    prog_bc.st.plotly_chart.assert_called()
+    patched_progress.plotly_chart.assert_called_once()
 
 
-def test_render_column_value_selection_no_col(patched_progress):
-    """_render_column_value_selection returns (None, None) when no column selected."""
-    data = pl.DataFrame({"consent": ["Yes", "No"], "outcome": ["Complete", "Refused"]})
-    patched_progress.selectbox.return_value = None
+def test_display_overview_without_dates_explains_the_chart(patched_progress):
+    settings = _settings(survey_date=None)
 
-    col, vals = _render_column_value_selection(
-        data=data,
-        setting_file="settings.json",
-        survey_cols=["consent", "outcome"],
-        default_column=None,
-        default_values=None,
-        column_label="Select consent column",
-        column_key="progress_consent_test",
-        values_key="consent_vals_test",
-        column_help="Help",
-        values_help="Values help",
-        info_message="Select column first",
-    )
-    assert col is None
-    assert vals is None
+    display_overview(compute_progress(SURVEY, settings, AS_OF), settings, "Cumulative")
+
+    patched_progress.info.assert_called()
+    patched_progress.plotly_chart.assert_not_called()
 
 
-def test_render_column_value_selection_with_col(patched_progress):
-    """_render_column_value_selection returns column and values when selected."""
-    data = pl.DataFrame({"consent": ["Yes", "No", "Yes"]})
-    patched_progress.selectbox.return_value = "consent"
-    patched_progress.multiselect.return_value = ["Yes"]
+def test_progress_report_renders_the_header_and_tabs(patched_progress, tmp_path):
+    """The page draws Overview, Follow-up and Settings tabs below the header."""
+    survey_cols = ColumnByType(categorical_columns=["hhid"], datetime_columns=["when"])
+    with (
+        patch(
+            "datasure.checks.progress.progress_report_settings",
+            return_value=_settings(survey_target=10),
+        ),
+        patch("datasure.checks.progress.display_progress_header") as header,
+        patch("datasure.checks.progress.display_overview") as overview,
+        patch("datasure.checks.progress.display_attempted_interviews") as follow_up,
+    ):
+        progress_report(
+            SURVEY, str(tmp_path / "settings.json"), {"survey_id": "hhid"}, survey_cols
+        )
 
-    col, vals = _render_column_value_selection(
-        data=data,
-        setting_file="settings.json",
-        survey_cols=["consent"],
-        default_column=None,
-        default_values=None,
-        column_label="Select consent column",
-        column_key="progress_consent_test2",
-        values_key="consent_vals_test2",
-        column_help="Help",
-        values_help="Values help",
-        info_message="Select column first",
-    )
-    assert col == "consent"
-    assert vals == ["Yes"]
-
-
-def test_display_chart_if_configured_not_shown(patched_progress):
-    """_display_chart_if_configured does not render when column is None."""
-    _display_chart_if_configured(None, ["Yes"], 75.0, "% Consent")
-    patched_progress.pyplot.assert_not_called()
-
-
-def test_display_chart_if_configured_shown(patched_progress):
-    """_display_chart_if_configured renders chart when column and values set."""
-    _display_chart_if_configured("consent_col", ["Yes"], 75.0, "% Consent")
-    patched_progress.pyplot.assert_called()
-
-
-def test_display_progress_chart_renders(patched_progress):
-    """display_progress_chart renders with no columns selected (info path)."""
-    data = pl.DataFrame(
-        {
-            "consent": ["Yes", "No", "Yes"],
-            "outcome": ["Complete", "Refused", "Complete"],
-        }
-    )
-    display_progress_chart(data, "settings.json")
-    patched_progress.columns.assert_called()
+    names = patched_progress.tabs.call_args.args[0]
+    assert names == ["Overview", "Follow-up", "Settings"]
+    assert patched_progress.tabs.call_args.kwargs["key"] == "progress_tab"
+    header.assert_called_once()
+    overview.assert_called_once()
+    follow_up.assert_called_once()
 
 
 def test_display_attempted_interviews_missing_id(prog_bc):
@@ -922,38 +535,6 @@ def test_display_chart_and_table_renders(patched_progress):
     patched_progress.dataframe.assert_called()
 
 
-def test_progress_report_renders(patched_progress):
-    """progress_report renders full dashboard, calling all sub-sections."""
-    data = pl.DataFrame(
-        {
-            "survey_id": ["ID1", "ID2"],
-            "date": pl.Series(
-                [datetime.datetime(2024, 1, 1), datetime.datetime(2024, 1, 2)]
-            ),
-        }
-    )
-    survey_cols = ColumnByType(
-        categorical_columns=["survey_id"],
-        datetime_columns=["date"],
-    )
-    with (
-        patch(
-            "datasure.checks.progress.progress_report_settings",
-            return_value=ProgressSettings(survey_id="survey_id"),
-        ),
-        patch("datasure.checks.progress.display_progress_summary"),
-        patch("datasure.checks.progress.display_progress_overtime"),
-        patch("datasure.checks.progress.display_attempted_interviews"),
-    ):
-        progress_report(
-            data,
-            "settings.json",
-            {"survey_id": "survey_id"},
-            survey_cols,
-        )
-    patched_progress.title.assert_called()
-
-
 # ==============================================================================
 # Saved targets load back (#407)
 # ==============================================================================
@@ -998,6 +579,7 @@ class TestSavedTargetsLoadBack:
             patch("datasure.checks.progress.demo_callout"),
         ):
             progress_report_settings(
+                pl.DataFrame({"survey_id": ["h1"]}),
                 str(settings_file),
                 TestSavedTargetsLoadBack.CONFIG,
                 ["survey_id"],
@@ -1046,3 +628,356 @@ class TestSavedTargetsLoadBack:
 
         assert loaded.survey_target == 100
         assert loaded.target_submissions_per_period is None
+
+
+# ==============================================================================
+# compute_progress (#408)
+# ==============================================================================
+
+AS_OF = datetime.date(2026, 10, 14)  # a Wednesday
+
+
+def _survey(rows: list[tuple]) -> pl.DataFrame:
+    """Survey rows of (id, date, consent, outcome); dates are ISO text."""
+    return pl.DataFrame(
+        rows,
+        schema={
+            "hhid": pl.String,
+            "when": pl.String,
+            "consent": pl.String,
+            "outcome": pl.String,
+        },
+        orient="row",
+    )
+
+
+def _settings(**overrides) -> ProgressSettings:
+    values = {"survey_id": "hhid", "survey_date": "when", **overrides}
+    return ProgressSettings(**values)
+
+
+CONDITION = {
+    "consent": "consent",
+    "consent_vals": ["yes"],
+    "outcome": "outcome",
+    "outcome_vals": ["complete"],
+}
+
+# h1 is submitted twice, h2 refused, h3 completed on its second try.
+SURVEY = _survey(
+    [
+        ("h1", "2026-10-12", "yes", "complete"),
+        ("h1", "2026-10-13", "yes", "complete"),
+        ("h2", "2026-10-12", "no", "refused"),
+        ("h3", "2026-10-12", "yes", "partial"),
+        ("h3", "2026-10-14", "yes", "complete"),
+    ]
+)
+
+
+class TestComputeProgressCounts:
+    def test_without_a_condition_completed_is_unique(self):
+        result = compute_progress(SURVEY, _settings(survey_target=10), AS_OF)
+
+        counts = result.counts
+        assert (counts.submissions, counts.unique, counts.completed) == (5, 3, 3)
+        assert counts.remaining == 7
+        assert counts.percentage == 30.0
+
+    def test_completed_counts_ids_with_a_row_meeting_the_condition(self):
+        # h1 counts once despite two qualifying rows; h2 never qualifies;
+        # h3 qualifies on its second row.
+        result = compute_progress(
+            SURVEY, _settings(survey_target=4, **CONDITION), AS_OF
+        )
+
+        counts = result.counts
+        assert (counts.submissions, counts.unique, counts.completed) == (5, 3, 2)
+        assert counts.remaining == 2
+        assert counts.percentage == 50.0
+
+    def test_both_consent_and_outcome_must_hold(self):
+        data = _survey(
+            [
+                ("h1", "2026-10-12", "no", "complete"),
+                ("h2", "2026-10-12", "yes", "refused"),
+                ("h3", "2026-10-12", "yes", "complete"),
+            ]
+        )
+
+        result = compute_progress(data, _settings(**CONDITION), AS_OF)
+
+        assert result.counts.completed == 1
+
+    def test_a_consent_column_alone_is_a_condition(self):
+        settings = _settings(consent="consent", consent_vals=["yes"])
+
+        assert compute_progress(SURVEY, settings, AS_OF).counts.completed == 2
+
+    def test_a_column_without_values_sets_no_condition(self):
+        settings = _settings(consent="consent", consent_vals=[])
+
+        assert compute_progress(SURVEY, settings, AS_OF).counts.completed == 3
+
+    def test_no_target_leaves_remaining_and_percentage_unset(self):
+        counts = compute_progress(SURVEY, _settings(), AS_OF).counts
+
+        assert (counts.target, counts.remaining, counts.percentage) == (
+            None,
+            None,
+            None,
+        )
+
+    def test_remaining_stops_at_zero_past_the_target(self):
+        counts = compute_progress(SURVEY, _settings(survey_target=2), AS_OF).counts
+
+        assert counts.remaining == 0
+        assert counts.percentage == 150.0
+
+
+def _points(series) -> list[tuple]:
+    return [(p.start, p.completed, p.cumulative, p.partial) for p in series]
+
+
+class TestComputeProgressSeries:
+    def test_each_id_counts_in_the_day_of_its_first_qualifying_row(self):
+        # h1 first qualifies on the 12th, h3 only on the 14th (today).
+        result = compute_progress(SURVEY, _settings(**CONDITION), AS_OF)
+
+        assert _points(result.series) == [
+            (datetime.date(2026, 10, 12), 1, 1, False),
+            (datetime.date(2026, 10, 13), 0, 1, False),
+            (datetime.date(2026, 10, 14), 1, 2, True),
+        ]
+
+    def test_days_without_completions_are_filled_up_to_today(self):
+        data = _survey([("h1", "2026-10-11", "yes", "complete")])
+
+        result = compute_progress(data, _settings(), AS_OF)
+
+        assert _points(result.series) == [
+            (datetime.date(2026, 10, 11), 1, 1, False),
+            (datetime.date(2026, 10, 12), 0, 1, False),
+            (datetime.date(2026, 10, 13), 0, 1, False),
+            (datetime.date(2026, 10, 14), 0, 1, True),
+        ]
+
+    def test_weeks_start_on_monday(self):
+        data = _survey(
+            [
+                ("h1", "2026-10-04", "yes", "complete"),  # a Sunday
+                ("h2", "2026-10-05", "yes", "complete"),
+                ("h3", "2026-10-14", "yes", "complete"),
+            ]
+        )
+
+        result = compute_progress(data, _settings(), AS_OF, period="Week")
+
+        assert _points(result.series) == [
+            (datetime.date(2026, 9, 28), 1, 1, False),
+            (datetime.date(2026, 10, 5), 1, 2, False),
+            (datetime.date(2026, 10, 12), 1, 3, True),
+        ]
+
+    def test_months(self):
+        data = _survey(
+            [
+                ("h1", "2026-09-30", "yes", "complete"),
+                ("h2", "2026-10-01", "yes", "complete"),
+            ]
+        )
+
+        result = compute_progress(data, _settings(), AS_OF, period="Month")
+
+        assert _points(result.series) == [
+            (datetime.date(2026, 9, 1), 1, 1, False),
+            (datetime.date(2026, 10, 1), 1, 2, True),
+        ]
+
+    def test_undated_rows_count_but_are_not_drawn(self):
+        data = _survey(
+            [("h1", "2026-10-14", "yes", "complete"), ("h2", None, "yes", "complete")]
+        )
+
+        result = compute_progress(data, _settings(), AS_OF)
+
+        assert result.counts.completed == 2
+        assert _points(result.series) == [(datetime.date(2026, 10, 14), 1, 1, True)]
+
+    def test_no_series_without_a_date_column(self):
+        result = compute_progress(SURVEY, _settings(survey_date=None), AS_OF)
+
+        assert result.series == []
+
+
+class TestCurrentPeriod:
+    # One completion on the 5th (last week), two this week, one today.
+    DATA = _survey(
+        [
+            ("h1", "2026-10-05", "yes", "complete"),
+            ("h2", "2026-10-12", "yes", "complete"),
+            ("h3", "2026-10-14", "yes", "complete"),
+        ]
+    )
+
+    @pytest.mark.parametrize(
+        ("period", "start", "completed"),
+        [
+            ("Day", datetime.date(2026, 10, 14), 1),
+            ("Week", datetime.date(2026, 10, 12), 2),
+            ("Month", datetime.date(2026, 10, 1), 3),
+        ],
+    )
+    def test_follows_the_selected_period(self, period, start, completed):
+        settings = _settings(target_submissions_per_period=5)
+
+        current = compute_progress(self.DATA, settings, AS_OF, period).current_period
+
+        assert (current.period, current.start) == (period, start)
+        assert (current.completed, current.target) == (completed, 5)
+
+    def test_a_period_without_completions_counts_zero(self):
+        settings = _settings(target_submissions_per_period=5)
+        later = datetime.date(2026, 10, 20)
+
+        current = compute_progress(self.DATA, settings, later).current_period
+
+        assert current.completed == 0
+
+    def test_hidden_without_a_per_period_target(self):
+        assert compute_progress(self.DATA, _settings(), AS_OF).current_period is None
+
+    def test_hidden_without_a_date_column(self):
+        settings = _settings(survey_date=None, target_submissions_per_period=5)
+
+        assert compute_progress(self.DATA, settings, AS_OF).current_period is None
+
+
+def _daily(days: dict[str, int]) -> pl.DataFrame:
+    """Completed IDs per ISO date, each with its own ID."""
+    rows = [
+        (f"{day}-{n}", day, "yes", "complete")
+        for day, count in days.items()
+        for n in range(count)
+    ]
+    return _survey(rows)
+
+
+class TestPace:
+    # One completion on 1 Oct, then 2 a day over the 7 days to today: 15
+    # completed, a pace of 2 a day.
+    DATA = _daily(
+        {"2026-10-01": 1, **{f"2026-10-{day:02d}": 2 for day in range(8, 15)}}
+    )
+
+    def test_projected_finish_uses_the_mean_of_the_last_7_days(self):
+        # 15 remaining at 2 a day is 8 days.
+        pace = compute_progress(self.DATA, _settings(survey_target=30), AS_OF).pace
+
+        assert pace.per_day == 2.0
+        assert pace.projected_finish == datetime.date(2026, 10, 22)
+
+    def test_a_shorter_fieldwork_averages_over_its_own_days(self):
+        data = _daily({"2026-10-12": 1, "2026-10-13": 2, "2026-10-14": 3})
+
+        pace = compute_progress(data, _settings(survey_target=12), AS_OF).pace
+
+        assert pace.per_day == 2.0
+        assert pace.projected_finish == datetime.date(2026, 10, 17)
+
+    def test_no_projection_with_fewer_than_3_days_of_data(self):
+        data = _daily({"2026-10-13": 5, "2026-10-14": 5})
+
+        pace = compute_progress(data, _settings(survey_target=30), AS_OF).pace
+
+        assert pace.projected_finish is None
+
+    def test_no_projection_without_completions_in_the_last_7_days(self):
+        data = _daily({"2026-10-01": 1, "2026-10-02": 1, "2026-10-03": 1})
+
+        pace = compute_progress(data, _settings(survey_target=30), AS_OF).pace
+
+        assert pace.per_day == 0
+        assert pace.projected_finish is None
+
+    def test_no_projection_once_the_target_is_reached(self):
+        pace = compute_progress(self.DATA, _settings(survey_target=15), AS_OF).pace
+
+        assert pace.projected_finish is None
+
+    def test_no_projection_without_a_target(self):
+        assert (
+            compute_progress(self.DATA, _settings(), AS_OF).pace.projected_finish
+            is None
+        )
+
+    def test_need_per_day_is_remaining_over_the_days_left(self):
+        # 15 remaining over the 10 days from today to 23 Oct.
+        settings = _settings(
+            survey_target=30, field_end_date=datetime.date(2026, 10, 23)
+        )
+
+        pace = compute_progress(self.DATA, settings, AS_OF).pace
+
+        assert pace.days_left == 10
+        assert pace.need_per_day == 1.5
+
+    def test_no_need_per_day_once_the_target_is_reached(self):
+        settings = _settings(
+            survey_target=15, field_end_date=datetime.date(2026, 10, 23)
+        )
+
+        assert compute_progress(self.DATA, settings, AS_OF).pace.need_per_day is None
+
+    def test_no_need_per_day_without_an_end_date(self):
+        pace = compute_progress(self.DATA, _settings(survey_target=30), AS_OF).pace
+
+        assert pace.need_per_day is None
+
+    def test_no_need_per_day_after_the_end_date(self):
+        settings = _settings(
+            survey_target=30, field_end_date=datetime.date(2026, 10, 13)
+        )
+
+        pace = compute_progress(self.DATA, settings, AS_OF).pace
+
+        assert pace.days_left == 0
+        assert pace.need_per_day is None
+
+
+class TestTargetPath:
+    DATA = _daily({"2026-10-12": 1, "2026-10-14": 1})
+
+    def test_runs_from_zero_to_the_target_by_the_field_end_date(self):
+        settings = _settings(
+            survey_target=30, field_end_date=datetime.date(2026, 10, 31)
+        )
+
+        path = compute_progress(self.DATA, settings, AS_OF).target_path
+
+        assert path == [
+            (datetime.date(2026, 10, 12), 0),
+            (datetime.date(2026, 10, 31), 30),
+        ]
+
+    def test_is_flat_without_an_end_date(self):
+        path = compute_progress(
+            self.DATA, _settings(survey_target=30), AS_OF
+        ).target_path
+
+        assert path == [
+            (datetime.date(2026, 10, 12), 30),
+            (datetime.date(2026, 10, 14), 30),
+        ]
+
+    def test_none_without_a_target(self):
+        assert compute_progress(self.DATA, _settings(), AS_OF).target_path == []
+
+
+class TestPageShape:
+    def test_a_fixed_target_shows_overview_follow_up_and_settings(self):
+        result = compute_progress(SURVEY, _settings(survey_target=10), AS_OF)
+
+        assert result.mode == "fixed"
+        assert result.tabs == ["Overview", "Follow-up", "Settings"]
+        assert result.todos == []

@@ -129,14 +129,18 @@ def _before(ctx: CheckContext, window: DeltaWindow) -> CheckContext | None:
 def progress(
     ctx: CheckContext, now: CheckHeadline, window: DeltaWindow
 ) -> CheckDelta | None:
-    """The submissions dated in the period."""
+    """The IDs first completed in the period.
+
+    The headline counted on the rows dated on or before the period start,
+    with the same completion condition, subtracted from the headline now.
+    """
     before = _before(ctx, window)
     if before is None or now.count is None:
         return None
     then = progress_headline(
         before.data.page_data, ctx.config.setting_file, progress_config(ctx)
     )
-    return CheckDelta(now.count - (then.count or 0), kind=DeltaKind.SUBMISSIONS)
+    return CheckDelta(now.count - (then.count or 0), kind=DeltaKind.COMPLETIONS)
 
 
 def missing(

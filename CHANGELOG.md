@@ -7,6 +7,52 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Progress compute layer**: `compute_progress(data, settings, as_of,
+  period="Day", tracking=None)` in `checks/progress.py` is the single, pure
+  function the Progress page and headline draw from. It returns a Pydantic
+  `ProgressResult` with `ProgressCounts` (Submissions, Unique, Completed,
+  Remaining, percentage), the over-time `series` (`SeriesPoint`: each ID
+  counted once, in the period of its first qualifying submission, with the
+  current period marked `partial`), the cumulative `target_path`, the
+  `CurrentPeriod` count against the per-period target, the `Pace`
+  (projected finish from the mean completions per day over the last 7
+  days, hidden with fewer than 3 days of data or a zero pace; need-per-day
+  to the field end date), the mode, the visible tabs and the to-do items
+  (none yet). `tracking` is unused until tracking-file and master-list
+  modes land — #408
+- **Progress settings**: `ProgressSettings` gains the completion condition
+  (`consent`, `consent_vals`, `outcome`, `outcome_vals`, read through
+  `condition()` and `has_condition`) and `field_end_date` — #408
+
+### Changed
+
+- **Progress page**: Rebuilt as a header shown on every tab
+  (`display_progress_header`) above Overview (`display_overview`, with the
+  Cumulative / Per period chart from `progress_figure`), Follow-up (the
+  unchanged attempted interviews) and Settings (`progress_report_settings`,
+  moved out of the settings expander). The open tab (`progress_tab`) and
+  chart view (`progress_chart_view`) are saved view state with the time
+  period — #408
+- **Progress headline and delta**: `progress_headline` now reports
+  Completed out of the target. The delta re-runs it on the rows dated on or
+  before the period start, so it counts IDs first completed in the period;
+  `DeltaKind.SUBMISSIONS` is renamed `DeltaKind.COMPLETIONS` ("▲ 3 new
+  completions since …") — #408
+
+### Removed
+
+- **Progress**: The Enumerator setting (dropped from `ProgressSettings` and
+  `progress_config`; saved values are ignored, so existing projects need no
+  migration), the never-shown consent and completion donut code
+  (`compute_progress_chart`, `display_progress_chart`, `ProgressChartMetrics`
+  and `utils/chart_utils.py`), and the code replaced by `compute_progress`
+  (`compute_progress_summary`, `display_progress_summary`,
+  `compute_progress_overtime`, `compute_average_interviews`,
+  `display_progress_overtime`, `ProgressSummary`,
+  `AttemptedInterviewsMetrics`) — #408
+
 ### Fixed
 
 - **Progress targets**: Targets entered on the Progress page did not load

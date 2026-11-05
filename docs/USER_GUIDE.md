@@ -980,7 +980,7 @@ as new.
 
 | Check | Change shows |
 | --- | --- |
-| Progress | New submissions dated in the period, for example "▲ 12 new submissions since yesterday" |
+| Progress | IDs first completed in the period, for example "▲ 12 new completions since yesterday". An ID completed before the period does not count again when it is submitted again |
 | Missing Values | The change in the share of columns all missing, in percentage points, for example "▼ 2.50 pp since yesterday" |
 | Duplicates | Unresolved duplicate IDs held by a submission dated in the period, for example "▲ 3 new since yesterday". An ID that was already duplicated before the period counts when a submission in the period joins it |
 | Outliers & Constraints | Flags on submissions dated in the period that are not accepted or corrected. The flags are not worked out again on the earlier submissions, since that would move the outlier bounds |
@@ -1027,58 +1027,82 @@ have no button; their row says why.
 
 ### Progress Report
 
-**Purpose**: Detailed submission tracking and progress monitoring
+**Purpose**: Track completed interviews against the target, and see whether
+fieldwork will finish on time
 
-#### Sections
+#### Counts
 
-##### Progress Settings
+Progress counts three things:
 
-Configure parameters:
+- **Submissions**: every submission
+- **Unique**: distinct survey IDs
+- **Completed**: distinct survey IDs with at least one submission that meets
+  the completion condition. With no completion condition, Completed equals
+  Unique
 
-- **Survey ID**: Respondent identifier
-- **Survey Key**: Unique row identifier
-- **Date**: Submission date column
-- **Enumerator**: Data collector column
-- **Target Number of Interviews**: Expected total
-- **Target Submissions Per Period**: Target rate per time interval
+The percentage complete, the progress bar and the Progress row on Summary use
+Completed out of the target, so duplicate submissions, refusals and partial
+interviews don't overstate progress.
 
-##### Progress Summary
+#### Header
 
-High-level metrics:
+The header stays at the top of every tab. It shows:
 
-- Submission progress (%)
-- Target interviews
-- Total submitted interviews
+- the target and the completion condition the numbers are based on
+- the percentage complete and a progress bar
+- **Submissions**, **Unique**, **Completed** and **Remaining** (completions
+  still needed to reach the target)
+- **Today**, **This week** or **This month**: IDs first completed in the
+  current period against the per-period target, following the period chosen
+  on Overview. Shown only when a per-period target is set
+- **Projected finish**: when the target is reached at the mean completions
+  per day over the last 7 days. Hidden with fewer than 3 days of submissions
+  or when nothing was completed in the last 7 days
 
-##### Submission Trends
+#### Overview
 
-Visualize collection patterns:
+A chart of completions against the target, with a **Daily**, **Weekly** or
+**Monthly** choice:
 
-- **Time Interval Toggle**: Day, Week, Month
-- Line chart showing cumulative submissions
-- Identify collection peaks and gaps
+- **Cumulative** (the default): completed IDs over time against the target
+  path. With a field end date the target path rises from 0 to the target on
+  that date; without one it is a flat line at the target
+- **Per period**: completions in each period against the per-period target.
+  Green bars meet the target, red bars fall short
 
-##### Attempted Interviews
+Each ID counts once, in the period of its first submission that meets the
+completion condition. The current period is drawn as unfinished: a dotted
+line or a faded bar. With a field end date set, "Need N/day to finish by
+[date]" shows below the chart until the target is reached. The days left
+count today.
 
-Track multiple attempts:
+The open tab, chart view and period are remembered for the page.
+
+#### Follow-up
+
+The attempted interviews for each survey ID:
 
 - Total submitted interviews
 - Number of unique IDs
 - Min/Max attempts per respondent
-- **Bar chart**: Attempts over time
-- **Data table**: Attempts by respondent ID
+- **Bar chart**: how many respondents had each number of attempts
+- **Data table**: attempts by respondent ID, with extra columns you choose
 
-##### Consent and Completion Progress
+#### Settings
 
-Monitor survey completion:
+Every Progress setting. Each is saved for the page as you change it:
 
-- **Consent Rate**: % who provided consent
-- **Completion Rate**: % who completed survey
-
-**Setup**:
-
-- Consent column and value (e.g., "consent" = "yes")
-- Completion column and value (e.g., "completion_status" = "complete")
+- **Survey Key**, **Survey ID** and **Survey Date** columns
+- **Total Expected Interviews**: the target number of completed IDs. It
+  starts from the page's survey target
+- **Target Completions Per Period**: completions per day, week or month; 0
+  sets no target
+- **Field End Date** (optional): the day fieldwork should finish
+- **Completion condition** (optional): a consent column and the values that
+  mean consent, and an outcome column and the values that mean a completed
+  interview (for example `consent` = "yes" and `completion_status` =
+  "complete"). A submission meets the condition when it has one of the
+  values in each column set
 
 ---
 

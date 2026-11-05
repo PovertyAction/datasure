@@ -338,14 +338,16 @@ On a check page this is the page settings file
   their session state. It does not touch the check's own settings. Each
   check draws it beside its settings expander by wrapping the settings call
   in `reset_filters_beside(check_view(setting_file))`; Missing Values and
-  Descriptive Stats, which have no settings section, wrap their title.
+  Descriptive Stats, which have no settings section, and Progress, whose
+  settings are a tab, wrap their title.
   Corrections (scope: the check page) draws the action above the selected
   page, and Prepare Data (scope: the dataset) beside the "Preview Prepared
   Data" header.
 - **Not saved.** Pagination, search boxes and inputs inside dialogs or
   popovers are never bound, so they start fresh in a new session. Bound
-  today: Summary's "Progress by" column and time period; the Progress time
-  period and extra attempted-interview columns; the Missing Values
+  today: Summary's "Progress by" column and time period; the Progress open
+  tab, chart view, time period and extra attempted-interview columns; the
+  Missing Values
   threshold, date column, group-by and compare columns, all-columns toggle
   and correlation columns;
   the duplicates dataset switcher, card sort, column selector and extra
@@ -368,8 +370,9 @@ On a check page this is the page settings file
   `ViewState.adopt_legacy` when opened: a legacy value moves into the
   check's scope (unless one is already there) and leaves the settings
   section, so old files still load and the value then behaves as view
-  state. Configuration (Progress and Summary columns and targets, Progress
-  consent and outcome) stays with the check's settings. Progress targets
+  state. Configuration (Progress and Summary columns and targets, the
+  Progress field end date and completion condition) stays with the check's
+  settings. Progress targets
   saved under the old `target` and `target_per_period` keys are read as
   `survey_target` and `target_submissions_per_period`
   (`progress.LEGACY_TARGET_KEYS`), but only when the page config has no
