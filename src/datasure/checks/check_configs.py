@@ -43,6 +43,7 @@ def progress_config(ctx: CheckContext) -> dict:
         "survey_id": config.survey_id,
         "survey_date": config.survey_date,
         "survey_target": config.survey_target,
+        "enumerator": config.enumerator,
     }
 
 

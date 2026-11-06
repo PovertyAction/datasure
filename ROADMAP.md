@@ -113,6 +113,8 @@ Features under exploration for future releases. These are not yet committed to t
 | **Debrief** | A check in the **Field team** group of the check page that collects the issues to discuss at the morning field team meeting | Exploring |
 | **Consent and Refusal Rates** | Track and flag unusual refusal or incomplete interview rates by enumerator | Exploring |
 | **Time-to-Complete Analysis** | Identify implausibly short or long interview durations | Exploring |
+| **Replacement Samples** | In Progress's master-list mode, swap a respondent who can't be reached for a replacement from a reserve list, keeping the unit's target | Exploring |
+| **Suggested Matches for Unexpected IDs** | Suggest the master-list ID an unexpected survey ID was probably meant to be, such as one with a typo or a missing leading zero | Exploring |
 | **Longitudinal Tracking** | Compare data quality metrics across survey rounds | Exploring |
 | **Automated Correction Suggestions** | ML-assisted flagging and correction recommendations | Exploring |
 | **Report Export** | Generate printable PDF or Word summary reports for project managers | Exploring |

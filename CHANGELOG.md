@@ -9,6 +9,54 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Progress tracking-file and master-list modes**: new pure module
+  `checks/progress_tracking.py`. `TrackingSettings` (mixed into
+  `ProgressSettings`) adds `tracking_target`, `tracking_unit`,
+  `survey_unit`, `tracking_id`, `tracking_parents`, `strip_leading_zeros`
+  and `tracking_display`. `detect_mode` works the mode out from the
+  settings (never stored): no tracking dataset → `fixed`, a target column →
+  `tracking file`, none → `master list`. `normalize_keys` casts IDs and
+  units to text, trims spaces, treats blanks as missing, reads whole-number
+  floats as integers and, with the toggle, strips leading zeros; no case
+  folding. `read_tracking` returns a `TrackingReference` with
+  `TrackingIssue`s: a repeated unit or ID, a setting not chosen or a column
+  no longer there is a blocking error; a missing key drops the row with a
+  warning and count; a missing, non-numeric or negative target counts as 0
+  with a warning listing the units. `assign_units` takes units from the
+  survey's unit column (tracking file) or through the ID (master list);
+  `unit_levels` rolls parents up as sums and puts rows of units not in the
+  dataset or with a target of 0, and unexpected IDs, in an `Untracked`
+  group; `respondents` gives each master-list ID its status (Completed,
+  Attempted not completed, Pending) and lists Unexpected IDs with their
+  last submission date — #410
+- **Progress result**: `compute_progress` uses its `tracking` argument.
+  `ProgressResult` gains `issues`, `unit_levels`, `untracked_units` and
+  `respondents`; `mode` and `sections` follow the mode (By unit with a
+  tracking dataset, Respondents with a master list). In file modes the
+  target is the dataset's total and the fixed target is kept but unused; a
+  usable master list normalizes survey IDs the same way. New to-do cards:
+  Unexpected IDs, Units below 50% of target and Untracked units.
+  `compute_counts` and `progress_headline` take the tracking dataset, so
+  Summary's Progress row and its delta agree with the page — #410
+- **`resolve_progress(ctx)`**: returns a `ProgressResolution` (mode,
+  target, achieved, basis "completed interviews" or "unique IDs", and the
+  unit and parent `unit_levels`) for Project Overview (#431, #435) — #410
+- **Progress UI**: `checks/progress_tracking_ui.py` draws By unit (level
+  and filter as per-page view state, a table sorted lowest % complete first
+  with a `ProgressColumn` bar, CSV export) and Respondents (status counts,
+  one To visit table grouped by unit lowest progress first with each unit's
+  % complete, Unexpected and Completed lists, extra master-list
+  columns, CSV exports), and the tracking issues. The settings expander
+  gains a Target source section; Total Expected Interviews is read-only in
+  file modes. The header strip names the mode and dataset, and an
+  attention pill links to the to-do cards. `progress_report` takes a
+  `TrackingSource` (alias and rows) — #410
+- **Tracking Dataset in the page config**: `render_tracking_dataset_selector`
+  in the add and edit forms (excludes the survey and backcheck datasets).
+  `CheckData` gains `tracking_data`, `tracking_state` and
+  `tracking_data_with_rows`; `load_check_data` loads it with the corrected
+  → prep → raw fallback — #410
+
 - **Progress compute layer**: `compute_progress(data, settings, as_of,
   period="Day", tracking=None)` in `checks/progress.py` is the single, pure
   function the Progress page and headline draw from. It returns a Pydantic
@@ -39,6 +87,29 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   column, the page warns that it counts without it
   (`stale_condition_columns`) — #408
 
+- **Progress Follow-up section**: `compute_progress` now returns the
+  Follow-up section's numbers in `ProgressResult`: `follow_up` (`FollowUpMetrics`: need
+  follow-up, first-try rate, average attempts per completion and open after
+  3+ attempts, plus the repeat-ID metrics that hold without a completion
+  condition), `attempts_to_outcome` (`AttemptBucket` for attempts 1, 2, 3 and
+  4+: completed at, open with exactly that many attempts, and submitted
+  that many times; the average counts attempts up to the first completion) and
+  `follow_up_queue` (`QueueRow` per open ID, sorted by attempts then days
+  since the last attempt, each with its `Attempt` history; empty without a
+  completion condition). The last outcome comes from the condition's outcome
+  column, or reads "not complete" without one; the enumerator comes from the
+  page config's enumerator column, now in `progress_config`. The new
+  `display_follow_up` draws the metrics, a grouped attempts-to-outcome chart
+  (`attempts_figure`) and the queue with last-outcome and minimum-attempts
+  filters (saved view state), a CSV download (`filter_queue`, `queue_frame`)
+  and the selected row's attempt history. The Follow-up section title
+  carries a count badge when the queue has rows (`follow_up_title`), and
+  Overview shows a "Respondents open after 3+ attempts" to-do card, only
+  above zero, that links down to the section. `section_header` gains an
+  `anchor` argument so the link survives the badge changing the title.
+  Without a survey ID column the follow-up fields stay empty, because each
+  row would count as its own ID — #409
+
 ### Changed
 
 - **Progress page**: Rebuilt as the settings expander
@@ -64,6 +135,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `DeltaKind.SUBMISSIONS` is renamed `DeltaKind.COMPLETIONS` ("▲ 3 new
   completions since …") — #408
 
+- **Progress page layout**: Overview and Follow-up are now sections one
+  after the other on the page instead of tabs. `ProgressResult.tabs` is
+  renamed `sections` (`SECTIONS_BY_MODE`) and `TodoItem.tab` is renamed
+  `section`; the open tab (`progress_tab`) is no longer saved view state —
+  #409
+
 ### Removed
 
 - **Progress**: The Enumerator setting (dropped from `ProgressSettings` and
@@ -75,6 +152,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `compute_progress_overtime`, `compute_average_interviews`,
   `display_progress_overtime`, `ProgressSummary`,
   `AttemptedInterviewsMetrics`) — #408
+- **Progress**: The per-ID attempted interviews table with its "Attempt
+  Date N" columns and its model and helpers (`AttemptedInterviewsResult`,
+  `compute_attempted_interviews`, `display_attempted_interviews` and their
+  private helpers), replaced by the Follow-up section — #409
 
 ### Fixed
 

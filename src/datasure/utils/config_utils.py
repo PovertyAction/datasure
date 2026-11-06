@@ -647,6 +647,41 @@ def render_backcheck_dataset_selector(
     )
 
 
+def render_tracking_dataset_selector(
+    alias_list: list[str],
+    exclude: list[str | None],
+    *,
+    key: str,
+    current: str | None = None,
+) -> str | None:
+    """
+    Render the Tracking Dataset selector for the Progress check.
+
+    A tracking file (targets per unit) or a master list (one row per
+    expected respondent); the Progress settings say which.
+
+    Args:
+        alias_list: List of available dataset aliases
+        exclude: The survey and backcheck datasets, which are not offered
+        key: The widget key
+        current: The dataset to preselect, when editing
+
+    Returns
+    -------
+        Selected dataset name or None
+    """
+    options = [alias for alias in sorted(alias_list) if alias not in exclude]
+    return st.selectbox(
+        "Select Tracking Dataset (Optional)",
+        options=options,
+        index=_get_index_or_none(current, options),
+        help="A tracking file with a target per unit, or a master list with "
+        "one row per expected respondent. The Progress check takes its "
+        "target from it.",
+        key=key,
+    )
+
+
 @st.fragment
 def render_backcheck_column_selectors(
     datetime_columns: list[str] | None = None,
@@ -828,7 +863,12 @@ def add_check_configuration_form(
             backcheck_column_selections
         )
 
-    # Step 6: Submit button
+    # Step 7: Tracking dataset selection, for the Progress check
+    column_selections["tracking_data_name"] = render_tracking_dataset_selector(
+        alias_list, [survey_data_name, backcheck_data_name], key="add_tracking_dataset"
+    )
+
+    # Step 8: Submit button
     add_button = st.button(
         "Add Check Configuration",
         type="primary",
@@ -1100,7 +1140,15 @@ def edit_check_configuration_form(
             backcheck_column_selections
         )
 
-    # Step 6: Submit button
+    # Step 6: Tracking dataset selection (pre-selected if present)
+    column_selections["tracking_data_name"] = render_tracking_dataset_selector(
+        alias_list,
+        [survey_data_name, backcheck_data_name],
+        key="edit_tracking_dataset",
+        current=current_config.get("tracking_data_name"),
+    )
+
+    # Step 7: Submit button
     save_button = st.button(
         "Save Changes",
         type="primary",
