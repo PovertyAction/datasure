@@ -340,7 +340,13 @@ def _read_master_list(
     survey_id: str | None,
     data_columns: list[str],
 ) -> TrackingReference:
-    optional = [settings.tracking_unit, *settings.tracking_parents]
+    # Without a unit column the finest parent is the unit; otherwise every
+    # respondent would be in one unit, and each parent level would collapse
+    # to that unit's first value
+    unit_column, parent_columns = settings.tracking_unit, settings.tracking_parents
+    if not unit_column and parent_columns:
+        unit_column, *parent_columns = parent_columns
+    optional = [unit_column, *parent_columns]
     errors = _setup_errors(
         {"ID column in the master list": settings.tracking_id}
         | {f"column {c}": c for c in optional + settings.tracking_display if c},
@@ -354,15 +360,15 @@ def _read_master_list(
     # A respondent with no unit is still expected: counted in a "(blank)"
     # unit, with a warning
     unit = (
-        normalize_keys(tracking[settings.tracking_unit], strip)
-        if settings.tracking_unit
+        normalize_keys(tracking[unit_column], strip)
+        if unit_column
         else pl.Series(values=[ALL_UNITS] * tracking.height, dtype=pl.String)
     )
     frame = pl.DataFrame(
         [
             normalize_keys(tracking[settings.tracking_id], strip).alias("id"),
             unit.alias("unit"),
-            *_parent_columns(tracking, settings.tracking_parents),
+            *_parent_columns(tracking, parent_columns),
             *(
                 tracking[c].cast(pl.String).alias(f"d{i}")
                 for i, c in enumerate(settings.tracking_display)
@@ -384,7 +390,7 @@ def _read_master_list(
             )
         )
         frame = frame.with_columns(pl.col("unit").fill_null(BLANK))
-    parents = [f"p{i}" for i in range(len(settings.tracking_parents))]
+    parents = [f"p{i}" for i in range(len(parent_columns))]
     units = (
         frame.group_by("unit", maintain_order=True)
         .agg(
@@ -411,7 +417,7 @@ def _read_master_list(
         issues,
         units=units,
         ids=frame.drop(parents),
-        levels=_levels(settings.tracking_unit, settings.tracking_parents),
+        levels=_levels(unit_column, parent_columns),
     )
 
 

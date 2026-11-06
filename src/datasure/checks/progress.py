@@ -1029,14 +1029,22 @@ def _setting_selectbox(
     options: list[str],
     default: str | None,
     help_text: str,
+    *,
+    optional: bool = False,
 ) -> str | None:
-    """Render a column picker for one progress setting and save the choice."""
+    """Render a column picker for one progress setting and save the choice.
+
+    An optional picker starts with a "None" choice, so a column chosen by
+    mistake can be cleared: Streamlit's selectbox has no clear button.
+    """
+    choices: list[str | None] = [None, *options] if optional else list(options)
     selected = st.selectbox(
         label,
-        options=options,
+        options=choices,
+        format_func=lambda column: "None" if column is None else str(column),
         help=help_text,
         key=f"{setting}_progress",
-        index=options.index(default) if default in options else None,
+        index=choices.index(default) if default in options else None,
         on_change=trigger_save,
         kwargs={"state_name": f"{TAB_NAME}_{setting}"},
     )
@@ -1423,7 +1431,7 @@ def _tracking_settings_section(
         columns = tracking.data.columns
         st.caption(
             f"Targets come from **{tracking.name}**. Choose a target column for "
-            "a tracking file (one row per unit), or leave it empty for a "
+            "a tracking file (one row per unit), or choose None for a "
             "master list (one row per expected respondent)."
         )
         c1, c2, c3 = st.columns(3)
@@ -1434,7 +1442,8 @@ def _tracking_settings_section(
                 "Target column",
                 columns,
                 saved.tracking_target,
-                "Each unit's target. Leave empty for a master list.",
+                "Each unit's target. Choose None for a master list.",
+                optional=True,
             )
         with c2:
             unit = _setting_selectbox(
@@ -1445,6 +1454,7 @@ def _tracking_settings_section(
                 saved.tracking_unit,
                 "The unit each row belongs to, such as a village. Optional for "
                 "a master list.",
+                optional=True,
             )
         survey_unit, tracking_id = saved.survey_unit, saved.tracking_id
         display = saved.tracking_display
@@ -1457,6 +1467,7 @@ def _tracking_settings_section(
                     categorical_columns,
                     saved.survey_unit,
                     "The survey column holding the same units",
+                    optional=True,
                 )
             else:
                 tracking_id = _setting_selectbox(

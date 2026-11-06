@@ -297,6 +297,24 @@ class TestMasterList:
 
         assert [r.unit for r in result.unit_levels[0].rows] == ["All", "Untracked"]
 
+    def test_without_a_unit_column_the_finest_parent_is_the_unit(self):
+        master = MASTER.with_columns(district=pl.Series(["d1", "d1", "d2", "d2"]))
+
+        result = self.result(
+            master, tracking_unit=None, tracking_parents=["vill", "district"]
+        )
+
+        levels = {
+            level.column: [(r.unit, r.target) for r in level.rows]
+            for level in result.unit_levels
+        }
+        assert levels == {
+            "vill": [("v1", 2), ("v2", 2), ("Untracked", None)],
+            "district": [("d1", 2), ("d2", 2), ("Untracked", None)],
+        }
+        assert {r.id: r.unit for r in result.respondents}["h5"] == "v2"
+        assert result.issues == []
+
 
 def _issues(result) -> list[tuple]:
     return [(i.level, i.values) for i in result.issues]
@@ -661,6 +679,52 @@ class TestRespondentHelpers:
             "landmark",
         ]
         assert table.filter(pl.col("ID") == "h5")["landmark"].item() == "by school"
+
+
+class TestTargetSourceSettings:
+    """The Target source pickers can be cleared after a choice."""
+
+    def render(self, saved: ProgressSettings, picks: dict[str, str | None]):
+        mock_st = _mock_st()
+        mock_st.selectbox.side_effect = lambda label, **kwargs: picks.get(label)
+        mock_st.multiselect.return_value = []
+        with (
+            patch.object(progress_module, "st", mock_st),
+            patch.object(progress_module, "section_header"),
+            patch.object(progress_module, "save_check_settings") as save,
+        ):
+            chosen = progress_module._tracking_settings_section(
+                "settings.json",
+                saved,
+                TrackingSource("master", MASTER),
+                ["village"],
+            )
+        options = {
+            c.args[0]: c.kwargs["options"] for c in mock_st.selectbox.call_args_list
+        }
+        return chosen, options, save
+
+    @pytest.mark.parametrize(
+        "label", ["Target column", "Unit column (tracking dataset)"]
+    )
+    def test_optional_pickers_offer_an_empty_choice(self, label):
+        _, options, _ = self.render(_settings(), {})
+        assert options[label][0] is None
+
+    def test_the_survey_unit_picker_offers_an_empty_choice(self):
+        _, options, _ = self.render(_settings(), {"Target column": "vill"})
+        assert options["Unit column (survey)"][0] is None
+
+    def test_clearing_the_unit_column_saves_no_unit(self):
+        saved = _settings(**MASTER_SETTINGS)
+        picks = {"ID column (master list)": "resp_id"}
+
+        chosen, _, save = self.render(saved, picks)
+
+        assert chosen.tracking_unit is None
+        save.assert_any_call(
+            "settings.json", progress_module.TAB_NAME, {"tracking_unit": None}
+        )
 
 
 class TestSectionsRender:

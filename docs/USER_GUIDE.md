@@ -1176,7 +1176,9 @@ The target is a fixed number unless the page configuration sets a
   get their unit from the survey's unit column.
 - **Master list**: each unit's target is its number of respondents.
   Submissions get their unit by matching their survey ID to the master
-  list's ID column, so the survey needs no unit column.
+  list's ID column, so the survey needs no unit column. The master list's
+  unit column is optional: without one, the first parent column is the
+  unit, and without either, everyone is in a single **All** unit.
 - **Parent columns** (optional, finest first, such as district then region)
   add levels to By unit. A parent's target is the sum of its units'.
 - The total target is the sum of the units' targets. **Total Expected
@@ -1250,7 +1252,9 @@ Progress setting. Each is saved for the page as you change it:
 - **Target source**: with a tracking dataset, the target column, the unit
   column in the tracking dataset, the unit column in the survey (tracking
   file) or the ID column in the master list, the parent columns, the
-  leading-zero toggle and the extra columns for respondent lists. Without
+  leading-zero toggle and the extra columns for respondent lists. To clear
+  the target column or either unit column, choose **None**: a master list
+  has no target column, and its unit column is optional. Without
   one, a note that adding a tracking dataset turns on By unit (and
   Respondents for a master list)
 - **Total Expected Interviews**: the target number of completed IDs. It
