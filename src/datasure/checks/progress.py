@@ -780,9 +780,7 @@ def compute_progress(
 
     series = _series(rows, firsts, as_of, period)
     pace = _pace(rows, firsts, settings, counts.remaining, as_of)
-    per_id = _per_id(_attempts(data, rows, settings))
-    follow_up = _follow_up_metrics(per_id, settings)
-    return ProgressResult(
+    result = ProgressResult(
         mode="fixed",
         sections=SECTIONS_BY_MODE["fixed"],
         counts=counts,
@@ -791,10 +789,20 @@ def compute_progress(
         current_period=_current_period(firsts, settings, as_of, period),
         series=series,
         target_path=_target_path(series, counts.target, settings.field_end_date),
-        todos=_todos(follow_up),
-        follow_up=follow_up,
-        attempts_to_outcome=_attempts_to_outcome(per_id, settings),
-        follow_up_queue=_follow_up_queue(per_id, settings, as_of),
+    )
+    # Without an ID column each row is its own ID, which the headline counts
+    # accept but which would make every follow-up number up
+    if not settings.survey_id:
+        return result
+    per_id = _per_id(_attempts(data, rows, settings))
+    follow_up = _follow_up_metrics(per_id, settings)
+    return result.model_copy(
+        update={
+            "todos": _todos(follow_up),
+            "follow_up": follow_up,
+            "attempts_to_outcome": _attempts_to_outcome(per_id, settings),
+            "follow_up_queue": _follow_up_queue(per_id, settings, as_of),
+        }
     )
 
 

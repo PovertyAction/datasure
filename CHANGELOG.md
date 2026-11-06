@@ -58,7 +58,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   carries a count badge when the queue has rows (`follow_up_title`), and
   Overview shows a "Respondents open after 3+ attempts" to-do card, only
   above zero, that links down to the section. `section_header` gains an
-  `anchor` argument so the link survives the badge changing the title — #409
+  `anchor` argument so the link survives the badge changing the title.
+  Without a survey ID column the follow-up fields stay empty, because each
+  row would count as its own ID — #409
 
 ### Changed
 

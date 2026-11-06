@@ -1470,3 +1470,18 @@ def test_the_last_date_outcome_and_enumerator_come_from_the_same_attempt():
         "bo",
         None,
     )
+
+
+def test_without_an_id_column_there_is_no_follow_up():
+    """Each row would be its own ID, so the follow-up numbers would be made up."""
+    settings = _settings(survey_id=None, **CONDITION)
+
+    result = compute_progress(ATTEMPTS, settings, AS_OF)
+
+    assert result.follow_up_queue == []
+    assert result.attempts_to_outcome == []
+    assert result.follow_up.need_follow_up is None
+    assert result.todos == []
+    assert progress_module.follow_up_title(result) == "Follow-up"
+    # The headline counts keep their one-row-per-submission fallback
+    assert result.counts.submissions == 9

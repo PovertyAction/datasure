@@ -1135,6 +1135,9 @@ Without a completion condition there is no queue. The section shows repeat IDs
 submissions of one ID, with a chart of how many IDs were submitted 1, 2, 3 or
 4+ times, and a note that setting a completion condition turns on the queue.
 
+Follow-up needs the survey ID column. Without it the section asks you to
+choose one, and shows no queue, badge or to-do card.
+
 The queue filters are remembered for the page.
 
 #### Settings
