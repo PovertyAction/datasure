@@ -47,7 +47,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   line under the chart moves into the status box) above Overview (`display_overview`, with the Cumulative / Per period chart
   from `progress_figure`) and Follow-up (the unchanged attempted
   interviews). The chart's series ends at the period of the last
-  submission, not today's. The open tab (`progress_tab`) and chart view
+  submission, not today's. Submissions dated after today are left out of
+  the series, the current period and the pace (they still count as
+  Completed), so a wrong device clock can't stretch the chart past today.
+  `progress_headline` uses the new `compute_counts`, which skips the series
+  and pace, so a mis-keyed date can't slow Summary. The open tab (`progress_tab`) and chart view
   (`progress_chart_view`) are saved view state with the time period — #408
 - **Progress headline and delta**: `progress_headline` now reports
   Completed out of the target. The delta re-runs it on the rows dated on or

@@ -23,6 +23,7 @@ from datasure.checks.progress import (
     _get_unique_values,
     _prepare_display_columns,
     compute_attempted_interviews,
+    compute_counts,
     compute_progress,
     display_overview,
     display_progress_header,
@@ -1127,6 +1128,60 @@ class TestPace:
 
         assert pace.days_left == 0
         assert pace.need_per_day is None
+
+
+class TestFutureDates:
+    """A submission dated after today, such as from a device with a wrong clock."""
+
+    # Two completions this week up to today, one later this week (Friday)
+    # and one dated 2099
+    DATA = _daily({"2026-10-12": 1, "2026-10-14": 1, "2026-10-16": 1, "2099-01-01": 1})
+
+    def _result(self, **overrides):
+        settings = _settings(**{"target_submissions_per_period": 5, **overrides})
+        return compute_progress(self.DATA, settings, AS_OF, "Week")
+
+    def test_counts_as_completed(self):
+        assert self._result().counts.completed == 4
+
+    def test_the_series_ends_at_the_current_period(self):
+        series = self._result().series
+
+        assert [p.start for p in series] == [datetime.date(2026, 10, 12)]
+        assert series[-1].partial
+        assert series[-1].completed == 2
+
+    def test_left_out_of_the_current_period(self):
+        assert self._result().current_period.completed == 2
+
+    def test_only_future_dates_give_no_series(self):
+        data = _daily({"2099-01-01": 2})
+
+        result = compute_progress(data, _settings(), AS_OF)
+
+        assert result.series == []
+        assert result.counts.completed == 2
+
+
+def test_compute_counts_matches_compute_progress():
+    settings = _settings(survey_target=10, **CONDITION)
+
+    assert compute_counts(SURVEY, settings) == (
+        compute_progress(SURVEY, settings, AS_OF).counts
+    )
+
+
+def test_progress_headline_does_not_build_the_series(tmp_path):
+    """Summary needs only the counts, so a stretched series can't slow it."""
+    with patch("datasure.checks.progress._series") as series:
+        headline = progress_module.progress_headline(
+            SURVEY,
+            str(tmp_path / "settings.json"),
+            {"survey_key": "hhid", "survey_id": "hhid", "survey_date": "when"},
+        )
+
+    series.assert_not_called()
+    assert headline.count == 3
 
 
 class TestStatus:

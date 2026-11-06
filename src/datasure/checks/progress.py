@@ -274,9 +274,12 @@ def _series(
 
     Periods with no completions between them count 0; periods after the
     last submission, such as the ones since data collection stopped, are
-    left out.
+    left out. Submissions dated after today are ignored, so the series never
+    runs past the current period. `firsts` holds no dates after today.
     """
-    if firsts.is_empty():
+    dates = rows["date"]
+    last_submission = dates.filter(dates <= as_of).max()
+    if firsts.is_empty() or last_submission is None:
         return []
     every = PERIOD_EVERY[period]
     counts = (
@@ -285,7 +288,7 @@ def _series(
         .agg(pl.len().alias("completed"))
     )
     current = period_start(as_of, period)
-    last = period_start(rows["date"].max(), period)
+    last = period_start(last_submission, period)
     starts = pl.date_range(counts["start"].min(), last, every, eager=True)
     filled = (
         pl.DataFrame({"start": starts})
@@ -490,23 +493,13 @@ def compute_progress(
     """
     TimePeriodConfig(time_period=period)
     rows = _progress_rows(data, settings)
-    unique = rows["id"].drop_nulls().n_unique()
-    completed = rows.filter(pl.col("qualifies"))["id"].drop_nulls().n_unique()
-    firsts = _first_completions(rows)
+    counts = _counts(rows, settings)
+    # A completion dated after today, such as one from a device with a wrong
+    # clock, counts in Completed but not in the chart, period or pace
+    firsts = _first_completions(rows).filter(pl.col("date") <= as_of)
 
-    target = settings.survey_target or None
-    remaining = max(target - completed, 0) if target else None
-    percentage = completed / target * 100 if target else None
     series = _series(rows, firsts, as_of, period)
-    counts = ProgressCounts(
-        submissions=data.height,
-        unique=unique,
-        completed=completed,
-        target=target,
-        remaining=remaining,
-        percentage=percentage,
-    )
-    pace = _pace(rows, firsts, settings, remaining, as_of)
+    pace = _pace(rows, firsts, settings, counts.remaining, as_of)
     return ProgressResult(
         mode="fixed",
         tabs=TABS_BY_MODE["fixed"],
@@ -515,8 +508,31 @@ def compute_progress(
         status=_status(counts, pace, settings.field_end_date, as_of),
         current_period=_current_period(firsts, settings, as_of, period),
         series=series,
-        target_path=_target_path(series, target, settings.field_end_date),
+        target_path=_target_path(series, counts.target, settings.field_end_date),
     )
+
+
+def _counts(rows: pl.DataFrame, settings: ProgressSettings) -> ProgressCounts:
+    """Count submissions, unique and completed IDs against the target."""
+    completed = rows.filter(pl.col("qualifies"))["id"].drop_nulls().n_unique()
+    target = settings.survey_target or None
+    return ProgressCounts(
+        submissions=rows.height,
+        unique=rows["id"].drop_nulls().n_unique(),
+        completed=completed,
+        target=target,
+        remaining=max(target - completed, 0) if target else None,
+        percentage=completed / target * 100 if target else None,
+    )
+
+
+def compute_counts(data: pl.DataFrame, settings: ProgressSettings) -> ProgressCounts:
+    """Count progress without the series and pace, for Summary's Progress row.
+
+    The same counts `compute_progress` returns. Leaving out the series keeps
+    Summary quick when a mis-keyed date stretches it over decades.
+    """
+    return _counts(_progress_rows(data, settings), settings)
 
 
 class TimePeriodConfig(BaseModel):
@@ -1685,7 +1701,7 @@ def progress_headline(
     """
     try:
         settings = load_default_settings(setting_file, ProgressSettings(**config))
-        counts = compute_progress(data, settings, date.today()).counts
+        counts = compute_counts(data, settings)
     except (pl.exceptions.PolarsError, ValidationError) as exc:
         raise settings_no_longer_fit("Progress", exc) from exc
     if counts.target is None:

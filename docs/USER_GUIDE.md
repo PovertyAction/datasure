@@ -1090,7 +1090,10 @@ A chart of completions against the target, with a **Daily**, **Weekly** or
 Each ID counts once, in the period of its first submission that meets the
 completion condition. The chart runs from the first completion to the
 period of the last submission, so periods after data collection stopped are
-not shown; periods in between with no completions show 0. When the last
+not shown; periods in between with no completions show 0. A submission
+dated after today, for example from a device with a wrong clock, counts as
+Completed but is left out of the chart, the current period and the pace, so
+the chart never runs past today. When the last
 period is the current one it is drawn as unfinished: a dotted line or a
 faded bar.
 
