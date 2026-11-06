@@ -72,13 +72,23 @@ class TestSectionHeader:
         """Plain text label renders as a subheader without an icon."""
         section_header("Change Log")
 
-        mock_st.subheader.assert_called_once_with("Change Log")
+        mock_st.subheader.assert_called_once_with("Change Log", anchor=None)
 
     def test_icon_prefixed_label(self, mock_st):
         """Icon shortcode is prefixed to the label."""
         section_header("Manage Credentials", icon=":material/key:")
 
-        mock_st.subheader.assert_called_once_with(":material/key: Manage Credentials")
+        mock_st.subheader.assert_called_once_with(
+            ":material/key: Manage Credentials", anchor=None
+        )
+
+    def test_fixed_anchor(self, mock_st):
+        """A fixed anchor keeps links working when the label changes."""
+        section_header("Follow-up :orange-badge[3]", anchor="follow-up")
+
+        mock_st.subheader.assert_called_once_with(
+            "Follow-up :orange-badge[3]", anchor="follow-up"
+        )
 
 
 class TestMetricRow:

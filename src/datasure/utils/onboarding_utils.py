@@ -731,10 +731,10 @@ class OutputOnboardingInfo:
             "content": """
         ### Survey Progress Report
         This check shows how far data collection has come against its target.
-        The :material/settings: **settings** section sits at the top. Below it, a header stays on
-        every tab: the percentage complete, Submissions, Unique, Completed and Remaining, the
+        The :material/settings: **settings** section sits at the top. Below it, a header shows
+        the percentage complete, Submissions, Unique, Completed and Remaining, the
         current period against its target, and a projected finish date.
-        Below the header are two tabs: **Overview** and **Follow-up**.
+        Below the header are two sections: **Overview** and **Follow-up**.
         **Next**: Open the :material/settings: **settings** section to configure the Progress check.
         """,
         },
@@ -758,14 +758,14 @@ class OutputOnboardingInfo:
           "{DemoColumn.COMPLETION_STATUS}" outcome column with the value "complete".
           Refusals and partial interviews now no longer count as completed.
 
-        **Next**: Look at the header, then open the **Overview** tab.
+        **Next**: Look at the header, then scroll down to **Overview**.
         """,
         },
         "display_progress_header": {
             "title": "Progress Header",
             "content": """
         ##### Progress Header
-        The header shows on every tab:
+        The header shows at the top of the page:
         - The target and the completion condition the numbers are based on.
         - The percentage complete (completed IDs out of the target) above a progress bar.
         - A status box that says whether fieldwork will finish on time, from the
@@ -790,14 +790,14 @@ class OutputOnboardingInfo:
           red bars fell short.
         - Set a **Field End Date** in the settings section to see the completions needed per day.
 
-        **Next**: Open the **Follow-up** tab.
+        **Next**: Scroll down to **Follow-up**.
         """,
         },
         "display_follow_up": {
             "title": "Follow-up",
             "content": """
         ##### Follow-up
-        This tab shows who needs another visit and how many tries a completion takes:
+        This section shows who needs another visit and how many tries a completion takes:
         - Need follow-up: IDs attempted but never completed.
         - Done on 1st try: completions at the first attempt, as a share of all completions.
         - Avg attempts per completion, and IDs still open after 3+ attempts.
@@ -805,7 +805,7 @@ class OutputOnboardingInfo:
         - A follow-up queue of the open IDs, most attempts first. Filter it by last
           outcome and minimum attempts, download it, and select a row to see each attempt.
 
-        Without a completion condition the tab shows repeat IDs instead, and no queue.
+        Without a completion condition the section shows repeat IDs instead, and no queue.
         """,
         },
     }

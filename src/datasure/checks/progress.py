@@ -2,9 +2,9 @@
 
 All counting lives in `compute_progress`, a pure function that returns a
 `ProgressResult`; the page and the summary headline only draw from it. The
-page has a settings expander at the top, then a header shown on every tab
-above the Overview (to-do cards and the completions chart) and Follow-up
-(who needs another visit, and how many tries a completion takes) tabs.
+page has a settings expander at the top, then a header, then two sections:
+Overview (to-do cards and the completions chart) and Follow-up (who needs
+another visit, and how many tries a completion takes).
 """
 
 import math
@@ -27,13 +27,15 @@ from datasure.utils.settings_utils import (
     trigger_save,
 )
 from datasure.utils.ui_utils import metric_row, section_header
-from datasure.utils.view_state import ViewState, reset_filters_beside, view_factory
+from datasure.utils.view_state import reset_filters_beside, view_factory
 
 TAB_NAME = "progress"
 Period = Literal["Day", "Week", "Month"]
 # Only a fixed target for now; the tracking file and master list come later
 ProgressMode = Literal["fixed"]
-TABS_BY_MODE: dict[str, list[str]] = {"fixed": ["Overview", "Follow-up"]}
+SECTIONS_BY_MODE: dict[str, list[str]] = {"fixed": ["Overview", "Follow-up"]}
+# Where a to-do card's link takes the reader, by section
+SECTION_ANCHORS = {"Follow-up": "follow-up"}
 # Keys older versions saved the targets under, mapped to the
 # ProgressSettings fields they belong to
 LEGACY_TARGET_KEYS = {
@@ -41,7 +43,7 @@ LEGACY_TARGET_KEYS = {
     "target_per_period": "target_submissions_per_period",
 }
 
-# Saved view state scope: the check's catalogue slug. The open tab, the chart
+# Saved view state scope: the check's catalogue slug. The chart
 # view, the time period and the follow-up queue filters are personal view
 # state. Older versions saved the time period and the removed attempted
 # interviews table's extra columns in the check's settings; they move on
@@ -195,11 +197,11 @@ class ProgressStatus(BaseModel):
 
 
 class TodoItem(BaseModel):
-    """A to-do card on Overview: something to act on, linking to its tab."""
+    """A to-do card on Overview: something to act on, linking to its section."""
 
     label: str = Field(description="What needs action")
     count: int = Field(gt=0, description="How many need it")
-    tab: str = Field(description="The tab with the detail")
+    section: str = Field(description="The section with the detail")
 
 
 class Attempt(BaseModel):
@@ -229,7 +231,7 @@ class QueueRow(BaseModel):
 
 
 class FollowUpMetrics(BaseModel):
-    """The Follow-up tab's metrics.
+    """The Follow-up section's metrics.
 
     The repeat-ID metrics always hold; the others need a completion
     condition and are None without one.
@@ -272,7 +274,7 @@ class ProgressResult(BaseModel):
     """Everything the Progress page draws, from `compute_progress`."""
 
     mode: ProgressMode = Field("fixed", description="Where the target comes from")
-    tabs: list[str] = Field(description="The tabs the page shows, in order")
+    sections: list[str] = Field(description="The sections the page shows, in order")
     counts: ProgressCounts
     target_path: list[tuple[date, float]] = Field(
         default_factory=list,
@@ -295,7 +297,7 @@ class ProgressResult(BaseModel):
     )
     follow_up: FollowUpMetrics = Field(
         default_factory=lambda: FollowUpMetrics(repeat_ids=0, max_attempts=0),
-        description="The Follow-up tab's metrics",
+        description="The Follow-up section's metrics",
     )
     attempts_to_outcome: list[AttemptBucket] = Field(
         default_factory=list,
@@ -458,7 +460,9 @@ def _todos(follow_up: FollowUpMetrics) -> list[TodoItem]:
     if follow_up.open_3_plus:
         todos.append(
             TodoItem(
-                label=OPEN_AFTER_3_LABEL, count=follow_up.open_3_plus, tab="Follow-up"
+                label=OPEN_AFTER_3_LABEL,
+                count=follow_up.open_3_plus,
+                section="Follow-up",
             )
         )
     return todos
@@ -780,7 +784,7 @@ def compute_progress(
     follow_up = _follow_up_metrics(per_id, settings)
     return ProgressResult(
         mode="fixed",
-        tabs=TABS_BY_MODE["fixed"],
+        sections=SECTIONS_BY_MODE["fixed"],
         counts=counts,
         pace=pace,
         status=_status(counts, pace, settings.field_end_date, as_of),
@@ -1192,7 +1196,7 @@ def _settings_sections(
 
 
 # =============================================================================
-# Header - shown on every tab
+# Header - above both sections
 # =============================================================================
 
 PERIOD_LABELS = {"Day": "Today", "Week": "This week", "Month": "This month"}
@@ -1213,7 +1217,7 @@ def describe_condition(settings: ProgressSettings) -> str:
 
 @demo_output_onboarding(TAB_NAME)
 def display_progress_header(result: ProgressResult, settings: ProgressSettings) -> None:
-    """Draw the header shown on every tab of the Progress page.
+    """Draw the header at the top of the Progress page.
 
     Parameters
     ----------
@@ -1358,62 +1362,13 @@ PERIODS: list[Period] = ["Day", "Week", "Month"]
 PERIOD_KEY = "time_period_progress_overtime"
 
 
-def chosen_period(settings_file: str) -> Period:
-    """Return the period the pills hold, before they are drawn.
-
-    The page counts progress before drawing the tabs, so the Follow-up tab
-    can show a badge; the pills are drawn later, on Overview. Binding
-    restores the saved period into session state, as drawing the pills does.
-    """
-    check_view(settings_file).bind(PERIOD_KEY, options=PERIODS)
-    period = st.session_state.get(PERIOD_KEY)
-    return period if period in PERIODS else PERIODS[0]
+FOLLOW_UP_ANCHOR = SECTION_ANCHORS["Follow-up"]
 
 
-TAB_KEY = "progress_tab"
-
-
-def tab_name(label: str) -> str:
-    """Return a tab's name without its count badge, such as "Follow-up"."""
-    return label.split(" :", 1)[0]
-
-
-def tab_labels(result: ProgressResult) -> list[str]:
-    """Return the tab labels; Follow-up has a count badge when its queue has rows."""
+def follow_up_title(result: ProgressResult) -> str:
+    """Return the Follow-up title; it has a count badge when the queue has rows."""
     queued = len(result.follow_up_queue)
-    return [
-        f"{name} :orange-badge[{queued:,}]" if name == "Follow-up" and queued else name
-        for name in result.tabs
-    ]
-
-
-def _matching_label(value: Any, labels: list[str]) -> str | None:
-    if not isinstance(value, str):
-        return None
-    return next((label for label in labels if tab_name(label) == tab_name(value)), None)
-
-
-def settle_tab(view: ViewState, labels: list[str]) -> None:
-    """Point the open tab at its current label before the tabs are drawn.
-
-    The open tab is remembered by its label, and the Follow-up label changes
-    with its badge's count. A remembered label, or a bare tab name set by a
-    to-do card, is moved to the same tab's current label so the tab stays
-    open.
-    """
-    current = st.session_state.get(TAB_KEY)
-    label = _matching_label(current, labels)
-    if label and label != current:
-        st.session_state[TAB_KEY] = label
-    saved = view.values().get(TAB_KEY)
-    label = _matching_label(saved, labels)
-    if label and label != saved:
-        view.save(TAB_KEY, label)
-
-
-def open_tab(name: str) -> None:
-    """Open a tab by name, from a to-do card's button."""
-    st.session_state[TAB_KEY] = name
+    return f"Follow-up :orange-badge[{queued:,}]" if queued else "Follow-up"
 
 
 def render_chart_controls(settings_file: str) -> tuple[str, Period]:
@@ -1551,7 +1506,7 @@ def progress_figure(
 def display_overview(
     result: ProgressResult, settings: ProgressSettings, chart_view: str
 ) -> None:
-    """Draw the Overview tab's to-do cards and completions chart.
+    """Draw the Overview section's to-do cards and completions chart.
 
     Parameters
     ----------
@@ -1563,17 +1518,11 @@ def display_overview(
         "Cumulative" or "Per period".
     """
     for todo in result.todos:
-        with st.container(border=True, horizontal=True, vertical_alignment="center"):
+        with st.container(border=True):
             st.markdown(
-                f":material/warning: **{todo.label}**: {todo.count:,}",
-                width="stretch",
-            )
-            st.button(
-                f"Open {todo.tab}",
-                key=f"progress_todo_{todo.label}",
-                icon=":material/arrow_forward:",
-                on_click=open_tab,
-                args=(todo.tab,),
+                f":material/warning: **{todo.label}**: {todo.count:,} · "
+                f"[See {todo.section} :material/arrow_downward:]"
+                f"(#{SECTION_ANCHORS[todo.section]})"
             )
 
     if not result.series:
@@ -1767,9 +1716,9 @@ def _display_queue(queue: list[QueueRow], settings_file: str) -> None:
 def display_follow_up(
     result: ProgressResult, settings: ProgressSettings, settings_file: str
 ) -> None:
-    """Draw the Follow-up tab: metrics, attempts-to-outcome chart and queue.
+    """Draw the Follow-up section: metrics, attempts-to-outcome chart and queue.
 
-    Without a completion condition there is no queue: the tab shows the
+    Without a completion condition there is no queue: the section shows the
     repeat-ID metrics and chart, and says how to turn the queue on.
 
     Parameters
@@ -1833,11 +1782,11 @@ def progress_report(
     config: dict,
     survey_columns: ColumnByType,
 ) -> None:
-    """Display the Progress page: settings, then a header above Overview and Follow-up.
+    """Display the Progress page: settings, header, then Overview and Follow-up.
 
     The settings expander sits at the top, as on Summary, with "Reset
     filters" beside it. `compute_progress` then counts the progress once and
-    the header (shown on every tab) and the tabs draw from its result.
+    the header and both sections draw from its result.
 
     Parameters
     ----------
@@ -1871,23 +1820,24 @@ def progress_report(
             icon=":material/warning:",
         )
 
-    # Counted before the tabs are drawn: the Follow-up tab's badge needs the
-    # queue. The period pills, drawn later on Overview, hold the same period.
-    result = compute_progress(data, settings, date.today(), chosen_period(setting_file))
-    display_progress_header(result, settings)
+    # The header sits above the chart controls but needs the period they hold
+    header = st.container()
+    section_header("Overview", icon=":material/insights:")
+    chart_view, period = render_chart_controls(setting_file)
 
-    tab_names = tab_labels(result)
-    settle_tab(saved_view, tab_names)
-    overview, follow_up = st.tabs(
-        tab_names,
-        **saved_view.bind(TAB_KEY, options=tab_names, default=tab_names[0]),
+    result = compute_progress(data, settings, date.today(), period)
+
+    with header:
+        display_progress_header(result, settings)
+    display_overview(result, settings, chart_view)
+
+    st.divider()
+    section_header(
+        follow_up_title(result),
+        icon=":material/assignment_return:",
+        anchor=FOLLOW_UP_ANCHOR,
     )
-
-    with overview:
-        chart_view, _ = render_chart_controls(setting_file)
-        display_overview(result, settings, chart_view)
-    with follow_up:
-        display_follow_up(result, settings, setting_file)
+    display_follow_up(result, settings, setting_file)
 
 
 def progress_headline(

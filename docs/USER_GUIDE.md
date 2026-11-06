@@ -1046,7 +1046,8 @@ interviews don't overstate progress.
 
 #### Header
 
-The header stays at the top of every tab. It shows:
+The header sits at the top of the page, above the Overview and Follow-up
+sections. It shows:
 
 - the target and the completion condition the numbers are based on
 - the percentage complete and the completed IDs out of the target, with how
@@ -1098,7 +1099,7 @@ the chart never runs past today. When the last
 period is the current one it is drawn as unfinished: a dotted line or a
 faded bar.
 
-The open tab, chart view and period are remembered for the page.
+The chart view and period are remembered for the page.
 
 #### Follow-up
 
@@ -1112,7 +1113,7 @@ is a submission of an ID; an ID's attempts are numbered from 1 in date order.
   Submissions after an ID's first completion are not counted
 - **3+ attempts, still open**: IDs still open after 3 or more attempts. When
   there are any, Overview shows a **Respondents open after 3+ attempts** card
-  with a button that opens this tab
+  with a link down to this section
 - **Attempts to outcome**: a chart that shows, for attempts 1, 2, 3 and 4+, how
   many IDs were completed at that attempt and how many are still open after
   exactly that many attempts (4 or more for 4+), so each open ID is in one bar
@@ -1127,9 +1128,9 @@ The last outcome is the value of the outcome column in the completion
 condition. Without an outcome column it shows "not complete". The enumerator
 is the page's enumerator column.
 
-The tab's name shows how many IDs are in the queue when there are any.
+The section's title shows how many IDs are in the queue when there are any.
 
-Without a completion condition there is no queue. The tab shows repeat IDs
+Without a completion condition there is no queue. The section shows repeat IDs
 (IDs submitted more than once), the submissions per ID and the most
 submissions of one ID, with a chart of how many IDs were submitted 1, 2, 3 or
 4+ times, and a note that setting a completion condition turns on the queue.

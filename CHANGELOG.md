@@ -39,8 +39,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   column, the page warns that it counts without it
   (`stale_condition_columns`) — #408
 
-- **Progress Follow-up tab**: `compute_progress` now returns the Follow-up
-  tab's numbers in `ProgressResult`: `follow_up` (`FollowUpMetrics`: need
+- **Progress Follow-up section**: `compute_progress` now returns the
+  Follow-up section's numbers in `ProgressResult`: `follow_up` (`FollowUpMetrics`: need
   follow-up, first-try rate, average attempts per completion and open after
   3+ attempts, plus the repeat-ID metrics that hold without a completion
   condition), `attempts_to_outcome` (`AttemptBucket` for attempts 1, 2, 3 and
@@ -54,12 +54,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `display_follow_up` draws the metrics, a grouped attempts-to-outcome chart
   (`attempts_figure`) and the queue with last-outcome and minimum-attempts
   filters (saved view state), a CSV download (`filter_queue`, `queue_frame`)
-  and the selected row's attempt history. The Follow-up tab label carries a
-  count badge when the queue has rows (`tab_labels`; `settle_tab` keeps the
-  open tab as the badge changes), and Overview shows a "Respondents open
-  after 3+ attempts" to-do card, only above zero, whose button opens the tab.
-  The page now counts progress before drawing the tabs, reading the chosen
-  period with `chosen_period` — #409
+  and the selected row's attempt history. The Follow-up section title
+  carries a count badge when the queue has rows (`follow_up_title`), and
+  Overview shows a "Respondents open after 3+ attempts" to-do card, only
+  above zero, that links down to the section. `section_header` gains an
+  `anchor` argument so the link survives the badge changing the title — #409
 
 ### Changed
 
@@ -86,6 +85,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `DeltaKind.SUBMISSIONS` is renamed `DeltaKind.COMPLETIONS` ("▲ 3 new
   completions since …") — #408
 
+- **Progress page layout**: Overview and Follow-up are now sections one
+  after the other on the page instead of tabs. `ProgressResult.tabs` is
+  renamed `sections` (`SECTIONS_BY_MODE`) and `TodoItem.tab` is renamed
+  `section`; the open tab (`progress_tab`) is no longer saved view state —
+  #409
+
 ### Removed
 
 - **Progress**: The Enumerator setting (dropped from `ProgressSettings` and
@@ -100,7 +105,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Progress**: The per-ID attempted interviews table with its "Attempt
   Date N" columns and its model and helpers (`AttemptedInterviewsResult`,
   `compute_attempted_interviews`, `display_attempted_interviews` and their
-  private helpers), replaced by the Follow-up tab — #409
+  private helpers), replaced by the Follow-up section — #409
 
 ### Fixed
 

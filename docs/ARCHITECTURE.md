@@ -344,9 +344,9 @@ On a check page this is the page settings file
   Data" header.
 - **Not saved.** Pagination, search boxes and inputs inside dialogs or
   popovers are never bound, so they start fresh in a new session. Bound
-  today: Summary's "Progress by" column and time period; the Progress open
-  tab, chart view, time period and follow-up queue filters (last outcome
-  and minimum attempts); the
+  today: Summary's "Progress by" column and time period; the Progress
+  chart view, time period and follow-up queue filters (last outcome and
+  minimum attempts); the
   Missing Values
   threshold, date column, group-by and compare columns, all-columns toggle
   and correlation columns;

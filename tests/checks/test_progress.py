@@ -346,8 +346,14 @@ def test_display_overview_without_dates_explains_the_chart(patched_progress):
     patched_progress.plotly_chart.assert_not_called()
 
 
-def test_progress_report_renders_settings_header_and_tabs(patched_progress, tmp_path):
-    """The page draws the settings, then Overview and Follow-up tabs."""
+def _section_titles() -> list[str]:
+    return [c.args[0] for c in progress_module.section_header.call_args_list]
+
+
+def test_progress_report_renders_settings_header_and_sections(
+    patched_progress, tmp_path
+):
+    """The page draws the settings, the header, then Overview and Follow-up."""
     survey_cols = ColumnByType(categorical_columns=["hhid"], datetime_columns=["when"])
     with (
         patch(
@@ -362,10 +368,9 @@ def test_progress_report_renders_settings_header_and_tabs(patched_progress, tmp_
             SURVEY, str(tmp_path / "settings.json"), {"survey_id": "hhid"}, survey_cols
         )
 
-    names = patched_progress.tabs.call_args.args[0]
-    assert names == ["Overview", "Follow-up"]
+    assert _section_titles() == ["Overview", "Follow-up"]
+    patched_progress.tabs.assert_not_called()
     settings.assert_called_once()
-    assert patched_progress.tabs.call_args.kwargs["key"] == "progress_tab"
     header.assert_called_once()
     overview.assert_called_once()
     follow_up.assert_called_once()
@@ -1116,7 +1121,7 @@ class TestPageShape:
         result = compute_progress(SURVEY, _settings(survey_target=10), AS_OF)
 
         assert result.mode == "fixed"
-        assert result.tabs == ["Overview", "Follow-up"]
+        assert result.sections == ["Overview", "Follow-up"]
         assert result.todos == []
 
 
@@ -1292,7 +1297,7 @@ class TestFollowUpTodo:
     def test_open_after_three_attempts_links_to_follow_up(self):
         todos = _follow_up().todos
 
-        assert [(t.label, t.count, t.tab) for t in todos] == [
+        assert [(t.label, t.count, t.section) for t in todos] == [
             ("Respondents open after 3+ attempts", 1, "Follow-up")
         ]
 
@@ -1402,44 +1407,26 @@ def test_display_follow_up_without_an_id_column_explains(patched_progress, tmp_p
     patched_progress.plotly_chart.assert_not_called()
 
 
-def test_a_todo_card_opens_its_tab(patched_progress):
+def test_a_todo_card_links_to_its_section(patched_progress):
     settings = _settings(**CONDITION)
     result = compute_progress(ATTEMPTS, settings, AS_OF)
 
     display_overview(result, settings, "Cumulative")
 
-    button = patched_progress.button.call_args
-    assert button.kwargs["on_click"] is progress_module.open_tab
-    button.kwargs["on_click"](*button.kwargs["args"])
-    assert patched_progress.session_state["progress_tab"] == "Follow-up"
+    card = patched_progress.markdown.call_args.args[0]
+    assert "Respondents open after 3+ attempts" in card
+    assert "(#follow-up)" in card
 
 
-class TestTabBadge:
-    def test_follow_up_has_a_badge_only_when_its_queue_has_rows(self):
-        with_queue = compute_progress(ATTEMPTS, _settings(**CONDITION), AS_OF)
-        without = compute_progress(ATTEMPTS, _settings(), AS_OF)
+def test_follow_up_title_has_a_badge_only_when_the_queue_has_rows():
+    with_queue = compute_progress(ATTEMPTS, _settings(**CONDITION), AS_OF)
+    without = compute_progress(ATTEMPTS, _settings(), AS_OF)
 
-        assert progress_module.tab_labels(with_queue) == [
-            "Overview",
-            "Follow-up :orange-badge[3]",
-        ]
-        assert progress_module.tab_labels(without) == ["Overview", "Follow-up"]
-
-    def test_the_open_tab_follows_its_label_as_the_badge_changes(
-        self, patched_progress, tmp_path
-    ):
-        view = progress_module.check_view(str(tmp_path / "s.json"))
-        view.save("progress_tab", "Follow-up :orange-badge[3]")
-        patched_progress.session_state["progress_tab"] = "Follow-up"
-        labels = ["Overview", "Follow-up :orange-badge[2]"]
-
-        progress_module.settle_tab(view, labels)
-
-        assert patched_progress.session_state["progress_tab"] == labels[1]
-        assert view.values()["progress_tab"] == labels[1]
+    assert progress_module.follow_up_title(with_queue) == "Follow-up :orange-badge[3]"
+    assert progress_module.follow_up_title(without) == "Follow-up"
 
 
-def test_progress_report_puts_the_badge_on_the_follow_up_tab(
+def test_progress_report_puts_the_badge_on_the_follow_up_section(
     patched_progress, tmp_path
 ):
     survey_cols = ColumnByType(categorical_columns=["hhid"], datetime_columns=["when"])
@@ -1456,8 +1443,9 @@ def test_progress_report_puts_the_badge_on_the_follow_up_tab(
             ATTEMPTS, str(tmp_path / "s.json"), {"survey_id": "hhid"}, survey_cols
         )
 
-    names = patched_progress.tabs.call_args.args[0]
-    assert names == ["Overview", "Follow-up :orange-badge[3]"]
+    assert _section_titles() == ["Overview", "Follow-up :orange-badge[3]"]
+    follow_up_header = progress_module.section_header.call_args_list[1]
+    assert follow_up_header.kwargs["anchor"] == "follow-up"
     follow_up.assert_called_once()
 
 
