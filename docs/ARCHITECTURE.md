@@ -369,7 +369,11 @@ On a check page this is the page settings file
   check's scope (unless one is already there) and leaves the settings
   section, so old files still load and the value then behaves as view
   state. Configuration (Progress and Summary columns and targets, Progress
-  consent and outcome) stays with the check's settings.
+  consent and outcome) stays with the check's settings. Progress targets
+  saved under the old `target` and `target_per_period` keys are read as
+  `survey_target` and `target_submissions_per_period`
+  (`progress.LEGACY_TARGET_KEYS`), but only when the page config has no
+  value for that field.
 - **Not shared.** View state is personal. `without_view_state` drops it from
   project configuration exports, together with legacy values not yet moved
   (`LEGACY_VIEW_KEYS`, which `view_factory` checks each check's legacy keys

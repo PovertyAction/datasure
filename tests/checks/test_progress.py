@@ -2,6 +2,7 @@
 
 import datetime
 import importlib
+import json
 import math
 import sys
 from unittest.mock import MagicMock, patch
@@ -951,3 +952,97 @@ def test_progress_report_renders(patched_progress):
             survey_cols,
         )
     patched_progress.title.assert_called()
+
+
+# ==============================================================================
+# Saved targets load back (#407)
+# ==============================================================================
+
+
+class TestSavedTargetsLoadBack:
+    """Targets saved on the Progress page load back on the next visit."""
+
+    CONFIG = ProgressSettings(
+        survey_key="key", survey_id="survey_id", survey_target=100
+    )
+
+    @staticmethod
+    def _edit_targets(settings_file, target, target_per_period):
+        """Render the settings with the user entering both targets.
+
+        Each edited widget fires its on_change callback, which flags its
+        value for saving, the way Streamlit does on a real edit.
+        """
+        session_state = {}
+        entered = {
+            "total_goal_progress": target,
+            "target_per_period_progress": target_per_period,
+        }
+
+        def number_input(*args, **kwargs):
+            session_state[kwargs["kwargs"]["state_name"]] = True
+            return entered[kwargs["key"]]
+
+        mock_st = _make_mock_st()
+        mock_st.number_input.side_effect = number_input
+        mock_st.selectbox.side_effect = lambda *args, **kwargs: kwargs["options"][0]
+        mock_st.session_state = session_state
+        mock_settings_st = MagicMock()
+        mock_settings_st.session_state = session_state
+        with (
+            patch("datasure.checks.progress.st", mock_st),
+            patch("datasure.utils.settings_utils.st", mock_settings_st),
+            patch(
+                "datasure.utils.onboarding_utils.is_demo_project", return_value=False
+            ),
+            patch("datasure.checks.progress.demo_callout"),
+        ):
+            progress_report_settings(
+                str(settings_file),
+                TestSavedTargetsLoadBack.CONFIG,
+                ["survey_id"],
+                ["date"],
+            )
+
+    def test_targets_entered_on_the_page_load_back(self, tmp_path):
+        settings_file = tmp_path / "page_settings.json"
+
+        self._edit_targets(settings_file, target=250, target_per_period=12)
+        loaded = load_default_settings(str(settings_file), self.CONFIG)
+
+        assert loaded.survey_target == 250
+        assert loaded.target_submissions_per_period == 12
+
+    def test_targets_saved_under_the_old_keys_still_load(self, tmp_path):
+        settings_file = tmp_path / "page_settings.json"
+        settings_file.write_text(
+            json.dumps({"progress": {"target": 250, "target_per_period": 12}})
+        )
+        config = self.CONFIG.model_copy(update={"survey_target": None})
+
+        loaded = load_default_settings(str(settings_file), config)
+
+        assert loaded.survey_target == 250
+        assert loaded.target_submissions_per_period == 12
+
+    def test_page_config_target_beats_a_target_saved_under_the_old_key(self, tmp_path):
+        # The old key never took effect, so the page config's target may be
+        # the newer one: users were told to set it there instead
+        settings_file = tmp_path / "page_settings.json"
+        settings_file.write_text(
+            json.dumps({"progress": {"target": 250, "target_per_period": 12}})
+        )
+
+        loaded = load_default_settings(str(settings_file), self.CONFIG)
+
+        assert loaded.survey_target == 100
+        assert loaded.target_submissions_per_period == 12
+
+    def test_page_config_target_is_used_when_no_target_is_saved(self, tmp_path):
+        settings_file = tmp_path / "page_settings.json"
+        settings_file.write_text(json.dumps({"progress": {"enumerator": "enum"}}))
+
+        loaded = load_default_settings(str(settings_file), self.CONFIG)
+
+        assert loaded.survey_target == 100
+        assert loaded.target_submissions_per_period is None
