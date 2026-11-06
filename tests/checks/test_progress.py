@@ -397,6 +397,114 @@ def test_progress_report_settings_renders(patched_progress):
     patched_progress.date_input.assert_called()
 
 
+def test_condition_pickers_offer_only_categorical_columns(patched_progress):
+    """A date column's values can't be saved as JSON, so none is offered."""
+    data = pl.DataFrame(
+        {
+            "hhid": ["h1"],
+            "consent": ["yes"],
+            "when": [datetime.date(2026, 10, 12)],
+        }
+    )
+    categorical = ["hhid", "consent"]
+    patched_progress.selectbox.return_value = "hhid"
+    patched_progress.multiselect.return_value = []
+
+    with patch(
+        "datasure.checks.progress.load_default_settings",
+        return_value=ProgressSettings(survey_id=None),
+    ):
+        progress_module._settings_sections(
+            data,
+            "settings.json",
+            ProgressSettings(survey_id=None),
+            categorical,
+            ["when"],
+        )
+
+    pickers = {
+        c.kwargs["key"]: c.kwargs["options"]
+        for c in patched_progress.selectbox.call_args_list
+    }
+    assert pickers["consent_progress"] == categorical
+    assert pickers["outcome_progress"] == categorical
+
+
+class TestConditionValuesSaved:
+    """The saved condition values match the ones the page applies."""
+
+    def _render(self, mock_st, settings_file, column, picked, saved):
+        """Render the consent picker with the column and values chosen."""
+        mock_st.selectbox.return_value = column
+        mock_st.multiselect.return_value = picked
+        return progress_module._render_condition_part(
+            SURVEY,
+            str(settings_file),
+            "consent",
+            "Consent column",
+            ["hhid", "consent", "outcome"],
+            saved["consent"],
+            saved["consent_vals"],
+            "help",
+        )
+
+    @pytest.fixture
+    def real_saving(self, patched_progress, tmp_path):
+        """Save to a real settings file, sharing session state with the page."""
+        from datasure.utils import settings_utils
+
+        settings_file = tmp_path / "settings.json"
+        with (
+            patch.object(
+                settings_utils.st, "session_state", patched_progress.session_state
+            ),
+            patch(
+                "datasure.checks.progress.save_check_settings",
+                settings_utils.save_check_settings,
+            ),
+        ):
+            yield patched_progress, settings_file
+
+    def _saved(self, settings_file):
+        return json.loads(settings_file.read_text())["progress"]
+
+    def test_changing_the_column_saves_the_values_kept_for_it(self, real_saving):
+        mock_st, settings_file = real_saving
+        saved = {"consent": "consent", "consent_vals": ["yes"]}
+        settings_file.write_text(json.dumps({"progress": saved}))
+        mock_st.session_state["consent_vals_progress"] = ["yes"]
+        # The user picks the outcome column, which has no "yes"
+        mock_st.session_state["progress_consent"] = True
+
+        self._render(mock_st, settings_file, "outcome", [], saved)
+
+        assert self._saved(settings_file) == {"consent": "outcome", "consent_vals": []}
+        assert "consent_vals_progress" not in mock_st.session_state
+        assert mock_st.multiselect.call_args.kwargs["default"] is None
+
+    def test_values_missing_from_the_column_are_dropped_from_the_file(
+        self, real_saving
+    ):
+        mock_st, settings_file = real_saving
+        saved = {"consent": "consent", "consent_vals": ["yes", "maybe"]}
+        settings_file.write_text(json.dumps({"progress": saved}))
+
+        self._render(mock_st, settings_file, "consent", ["yes"], saved)
+
+        assert self._saved(settings_file)["consent_vals"] == ["yes"]
+
+    def test_unchanged_values_are_not_saved_again(self, real_saving):
+        mock_st, settings_file = real_saving
+        saved = {"consent": "consent", "consent_vals": ["yes"]}
+        settings_file.write_text(json.dumps({"progress": saved}))
+        before = settings_file.stat().st_mtime_ns
+
+        self._render(mock_st, settings_file, "consent", ["yes"], saved)
+
+        assert settings_file.stat().st_mtime_ns == before
+        assert "consent_vals_progress" not in mock_st.session_state
+
+
 @pytest.mark.parametrize("survey_target", [None, 10])
 def test_display_progress_header_renders(patched_progress, survey_target):
     """The header renders with and without a target."""

@@ -1121,7 +1121,10 @@ Progress setting. Each is saved for the page as you change it:
   mean consent, and an outcome column and the values that mean a completed
   interview (for example `consent` = "yes" and `completion_status` =
   "complete"). A submission meets the condition when it has one of the
-  values in each column set
+  values in each column set. Only text and category columns are offered,
+  not date columns. When you change a column, values the new column doesn't
+  have are dropped, so Summary's Progress row counts the same condition as
+  the page
 
 ---
 

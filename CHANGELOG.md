@@ -27,7 +27,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   tracking-file and master-list modes land — #408
 - **Progress settings**: `ProgressSettings` gains the completion condition
   (`consent`, `consent_vals`, `outcome`, `outcome_vals`, read through
-  `condition()` and `has_condition`) and `field_end_date` — #408
+  `condition()` and `has_condition`) and `field_end_date`. The consent and
+  outcome pickers list only categorical columns, since a date value can't be
+  saved as JSON and a failed save would leave the settings file truncated.
+  When the column changes, or saved values are no longer in it, the kept
+  values are saved again, so `progress_headline` applies the same condition
+  as the page — #408
 
 ### Changed
 

@@ -648,11 +648,16 @@ def _render_condition_part(
     settings_file: str,
     setting: str,
     label: str,
+    columns: list[str],
     default_column: str | None,
     default_values: list[Any] | None,
     values_help: str,
 ) -> tuple[str | None, list[Any] | None]:
     """Render one part of the completion condition: a column and its values.
+
+    The saved values always match the ones the page applies. When the column
+    changes, or saved values are no longer in the column, the kept values
+    are saved again, so Summary's Progress row counts the same condition.
 
     Parameters
     ----------
@@ -665,6 +670,9 @@ def _render_condition_part(
         saved under ``<setting>_vals``.
     label : str
         The column picker's label.
+    columns : list[str]
+        The columns offered: categorical only, since the chosen values are
+        saved as JSON and dates can't be.
     default_column : str | None
         The saved column.
     default_values : list[Any] | None
@@ -681,7 +689,7 @@ def _render_condition_part(
         settings_file,
         setting,
         label,
-        data.columns,
+        columns,
         default_column,
         f"Leave empty to set no {setting} condition.",
     )
@@ -689,15 +697,24 @@ def _render_condition_part(
         return None, None
 
     value_options = _get_unique_values(data, column)
-    defaults = [value for value in default_values or [] if value in value_options]
+    saved = list(default_values or [])
+    defaults = [value for value in saved if value in value_options]
+    values_key = f"{setting}_vals_progress"
+    save_flag = f"{TAB_NAME}_{setting}_vals"
+    if column != default_column:
+        # The picker still holds the old column's values: start from the
+        # saved values the new column has
+        st.session_state.pop(values_key, None)
+    if column != default_column or defaults != saved:
+        st.session_state[save_flag] = True
     values = st.multiselect(
         label=f"{label} values",
         options=value_options,
         help=values_help,
-        key=f"{setting}_vals_progress",
+        key=values_key,
         default=defaults or None,
         on_change=trigger_save,
-        kwargs={"state_name": f"{TAB_NAME}_{setting}_vals"},
+        kwargs={"state_name": save_flag},
     )
     save_check_settings(settings_file, TAB_NAME, {f"{setting}_vals": values})
     return column, values
@@ -851,6 +868,7 @@ def _settings_sections(
                 settings_file,
                 "consent",
                 "Consent column",
+                categorical_columns,
                 default_settings.consent,
                 default_settings.consent_vals,
                 "Values that mean the respondent consented",
@@ -861,6 +879,7 @@ def _settings_sections(
                 settings_file,
                 "outcome",
                 "Outcome column",
+                categorical_columns,
                 default_settings.outcome,
                 default_settings.outcome_vals,
                 "Values that mean the interview was completed",
