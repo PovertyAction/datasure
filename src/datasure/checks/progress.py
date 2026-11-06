@@ -71,7 +71,7 @@ ensure_styler_limit(1_000_000)
 class ProgressSettings(BaseModel):
     """Settings for progress report configuration."""
 
-    survey_key: str = Field(None, description="Survey key column")
+    survey_key: str | None = Field(None, description="Survey key column")
     survey_id: str | None = Field(..., min_length=1, description="Survey ID column")
     survey_date: str | None = Field(None, description="Survey date column")
     survey_target: int | None = Field(
@@ -111,7 +111,10 @@ class ProgressSettings(BaseModel):
             (self.outcome, self.outcome_vals),
         ):
             if column and values:
-                condition &= pl.col(column).is_in(values).fill_null(False)
+                # nulls_equal: a selected null value matches null rows
+                condition &= (
+                    pl.col(column).is_in(values, nulls_equal=True).fill_null(False)
+                )
         return condition
 
     @field_validator("survey_target", "target_submissions_per_period")
@@ -335,8 +338,8 @@ def _pace(
     The pace is the mean completions per day over the 7 days up to the last
     submission, or over the days since the first submission when fieldwork
     is shorter, so a pause in the data does not drop it to 0. It is left out
-    with fewer than 3 days of submissions. The projected finish counts on
-    from today.
+    with fewer than 3 days of submissions. The projected finish counts today
+    as a day of fieldwork, as the days left do.
     """
     days_left = need_per_day = None
     if settings.field_end_date:
@@ -355,7 +358,8 @@ def _pace(
 
     projected_finish = None
     if remaining and per_day:
-        projected_finish = as_of + timedelta(days=math.ceil(remaining / per_day))
+        days_needed = math.ceil(remaining / per_day)
+        projected_finish = as_of + timedelta(days=days_needed - 1)
     return Pace(
         per_day=per_day,
         projected_finish=projected_finish,
@@ -454,11 +458,15 @@ def _status(
 def _target_path(
     series: list[SeriesPoint], target: int | None, end: date | None
 ) -> list[tuple[date, float]]:
-    """Return the cumulative target line from the first period."""
+    """Return the cumulative target line from the first period.
+
+    It rises from 0 to the target by the field end date. Without an end date,
+    or with one no later than the first period, it stays flat at the target.
+    """
     if not target or not series:
         return []
     first = series[0].start
-    if end:
+    if end and end > first:
         return [(first, 0), (end, target)]
     return [(first, target), (series[-1].start, target)]
 
@@ -671,9 +679,10 @@ def _render_condition_part(
 ) -> tuple[str | None, list[Any] | None]:
     """Render one part of the completion condition: a column and its values.
 
-    The saved values always match the ones the page applies. When the column
-    changes, or saved values are no longer in the column, the kept values
-    are saved again, so Summary's Progress row counts the same condition.
+    The saved values always match the ones the page applies, so Summary's
+    Progress row counts the same condition. When the column changes, the
+    saved values the new column has are saved again. With the same column,
+    saved values missing from the current data stay selected and saved.
 
     Parameters
     ----------
@@ -714,14 +723,20 @@ def _render_condition_part(
 
     value_options = _get_unique_values(data, column)
     saved = list(default_values or [])
-    defaults = [value for value in saved if value in value_options]
     values_key = f"{setting}_vals_progress"
     save_flag = f"{TAB_NAME}_{setting}_vals"
-    if column != default_column:
+    if column == default_column:
+        # Keep saved values the current data lacks: a refresh with no
+        # "complete" rows must not drop "complete" from the condition
+        value_options = value_options + [
+            value for value in saved if value not in value_options
+        ]
+        defaults = saved
+    else:
         # The picker still holds the old column's values: start from the
-        # saved values the new column has
+        # saved values the new column has, and save them
+        defaults = [value for value in saved if value in value_options]
         st.session_state.pop(values_key, None)
-    if column != default_column or defaults != saved:
         st.session_state[save_flag] = True
     values = st.multiselect(
         label=f"{label} values",
@@ -1097,6 +1112,29 @@ def render_chart_controls(settings_file: str) -> tuple[str, Period]:
     return chart_view, period
 
 
+def _add_target_line(fig: go.Figure, path: list[tuple[date, float]]) -> None:
+    """Draw the cumulative target line on the Overview chart.
+
+    With one period and no end date, the path's two points are the same and
+    a line between them draws nothing, so the target spans the chart instead.
+    """
+    if not path:
+        return
+    line = {"color": TARGET_COLOR, "width": 2, "dash": "dash"}
+    if path[0][0] == path[-1][0]:
+        fig.add_hline(y=path[0][1], line=line, annotation_text="Target")
+        return
+    fig.add_trace(
+        go.Scatter(
+            x=[day for day, _ in path],
+            y=[value for _, value in path],
+            mode="lines",
+            name="Target",
+            line=line,
+        )
+    )
+
+
 def progress_figure(
     result: ProgressResult, chart_view: str, target_per_period: int | None
 ) -> go.Figure:
@@ -1130,16 +1168,7 @@ def progress_figure(
                     line={"color": LINE_COLOR, "width": 2, "dash": "dot"},
                 )
             )
-        if result.target_path:
-            fig.add_trace(
-                go.Scatter(
-                    x=[day for day, _ in result.target_path],
-                    y=[value for _, value in result.target_path],
-                    mode="lines",
-                    name="Target",
-                    line={"color": TARGET_COLOR, "width": 2, "dash": "dash"},
-                )
-            )
+        _add_target_line(fig, result.target_path)
         y_title = "Completed (cumulative)"
     else:
         completed = [point.completed for point in points]
@@ -1623,6 +1652,20 @@ def _display_chart_and_table(
 # =============================================================================
 
 
+def stale_condition_columns(saved: ProgressSettings, columns: list[str]) -> list[str]:
+    """Return the saved consent and outcome columns the pickers no longer offer.
+
+    A prep step can drop or rename a column. Its picker then starts empty
+    without saving, so the page counts without that part of the condition
+    while Summary still reads the missing column. The page warns instead.
+    """
+    return [
+        column
+        for column in (saved.consent, saved.outcome)
+        if column and column not in columns
+    ]
+
+
 @demo_output_onboarding(TAB_NAME)
 def progress_report(
     data: pl.DataFrame,
@@ -1656,6 +1699,16 @@ def progress_report(
             ProgressSettings(**config),
             survey_columns.categorical_columns,
             survey_columns.datetime_columns,
+        )
+
+    saved = load_default_settings(setting_file, ProgressSettings(**config))
+    for column in stale_condition_columns(saved, survey_columns.categorical_columns):
+        st.warning(
+            f"The saved completion condition uses **{column}**, which is no "
+            "longer in the data. This page counts without it, so Summary's "
+            "Progress row won't match. Pick another column in the "
+            ":material/settings: settings section above.",
+            icon=":material/warning:",
         )
 
     header = st.container()

@@ -17,7 +17,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   counted once, in the period of its first qualifying submission, with the
   current period marked `partial`), the cumulative `target_path`, the
   `CurrentPeriod` count against the per-period target, the `Pace`
-  (projected finish, counted from today, at the mean completions per day
+  (projected finish, counting today as the first day, as the days left
+  do, at the mean completions per day
   over the 7 days up to the last submission, hidden with fewer than 3 days
   of data or a zero pace; need-per-day
   to the field end date), the `ProgressStatus` the header's status box
@@ -30,9 +31,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `condition()` and `has_condition`) and `field_end_date`. The consent and
   outcome pickers list only categorical columns, since a date value can't be
   saved as JSON and a failed save would leave the settings file truncated.
-  When the column changes, or saved values are no longer in it, the kept
-  values are saved again, so `progress_headline` applies the same condition
-  as the page — #408
+  When the column changes, the saved values the new column has are saved
+  again, so `progress_headline` applies the same condition as the page.
+  With the same column, saved values missing from refreshed data stay
+  selected, so a refresh can't empty the condition. A selected null value
+  matches null rows. When a prep step removes a saved consent or outcome
+  column, the page warns that it counts without it
+  (`stale_condition_columns`) — #408
 
 ### Changed
 

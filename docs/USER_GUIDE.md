@@ -1053,8 +1053,8 @@ The header stays at the top of every tab. It shows:
   many are still to go, above a progress bar. Past the target the bar stays
   full and the percentage goes above 100%
 - a status box that says in a sentence whether fieldwork will finish on
-  time. The projected finish is when the target is reached, counting from
-  today, at the current pace:
+  time. The projected finish is when the target is reached at the current
+  pace, counting today as a day of fieldwork, as **Days left** does:
   - **On track** (green): the projected finish and how many days before the
     field end date it falls
   - **Behind schedule** (amber): how many days after the field end date the
@@ -1083,7 +1083,8 @@ A chart of completions against the target, with a **Daily**, **Weekly** or
 
 - **Cumulative** (the default): completed IDs over time against the target
   path. With a field end date the target path rises from 0 to the target on
-  that date; without one it is a flat line at the target
+  that date; without one, or when the field end date is before the first
+  completion, it is a flat line at the target
 - **Per period**: completions in each period against the per-period target.
   Green bars meet the target, red bars fall short
 
@@ -1127,7 +1128,9 @@ Progress setting. Each is saved for the page as you change it:
   values in each column set. Only text and category columns are offered,
   not date columns. When you change a column, values the new column doesn't
   have are dropped, so Summary's Progress row counts the same condition as
-  the page
+  the page. Values you chose stay chosen when refreshed data no longer has
+  them. If a prep step removes or renames a column the condition uses, the
+  page warns you and counts without it until you pick another column
 
 ---
 

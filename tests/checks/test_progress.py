@@ -483,16 +483,19 @@ class TestConditionValuesSaved:
         assert "consent_vals_progress" not in mock_st.session_state
         assert mock_st.multiselect.call_args.kwargs["default"] is None
 
-    def test_values_missing_from_the_column_are_dropped_from_the_file(
-        self, real_saving
-    ):
+    def test_values_missing_from_the_data_stay_selected_and_saved(self, real_saving):
+        # A refresh with no "maybe" rows must not drop "maybe" from the
+        # condition: with no values left, every ID would count as completed.
         mock_st, settings_file = real_saving
         saved = {"consent": "consent", "consent_vals": ["yes", "maybe"]}
         settings_file.write_text(json.dumps({"progress": saved}))
 
-        self._render(mock_st, settings_file, "consent", ["yes"], saved)
+        self._render(mock_st, settings_file, "consent", ["yes", "maybe"], saved)
 
-        assert self._saved(settings_file)["consent_vals"] == ["yes"]
+        picker = mock_st.multiselect.call_args.kwargs
+        assert picker["options"] == ["yes", "no", "maybe"]
+        assert picker["default"] == ["yes", "maybe"]
+        assert self._saved(settings_file) == saved
 
     def test_unchanged_values_are_not_saved_again(self, real_saving):
         mock_st, settings_file = real_saving
@@ -589,6 +592,40 @@ def test_progress_report_renders_settings_header_and_tabs(patched_progress, tmp_
     header.assert_called_once()
     overview.assert_called_once()
     follow_up.assert_called_once()
+
+
+def test_stale_condition_columns_lists_saved_columns_no_longer_offered():
+    saved = _settings(consent="consent", outcome="gone")
+
+    assert progress_module.stale_condition_columns(saved, ["hhid", "consent"]) == [
+        "gone"
+    ]
+    assert progress_module.stale_condition_columns(_settings(), ["hhid"]) == []
+
+
+def test_progress_report_warns_about_a_saved_column_no_longer_in_the_data(
+    patched_progress, tmp_path
+):
+    """A prep step removed the outcome column: the page says so."""
+    settings_file = tmp_path / "settings.json"
+    survey_cols = ColumnByType(categorical_columns=["hhid"], datetime_columns=["when"])
+    with (
+        patch(
+            "datasure.checks.progress.load_check_settings",
+            return_value={"outcome": "old_outcome", "outcome_vals": ["complete"]},
+        ),
+        patch(
+            "datasure.checks.progress.progress_report_settings",
+            return_value=_settings(survey_target=10),
+        ),
+        patch("datasure.checks.progress.display_progress_header"),
+        patch("datasure.checks.progress.display_overview"),
+        patch("datasure.checks.progress.display_attempted_interviews"),
+    ):
+        progress_report(SURVEY, str(settings_file), {"survey_id": "hhid"}, survey_cols)
+
+    patched_progress.warning.assert_called_once()
+    assert "**old_outcome**" in patched_progress.warning.call_args.args[0]
 
 
 def test_display_attempted_interviews_missing_id(prog_bc):
@@ -851,6 +888,23 @@ class TestComputeProgressCounts:
 
         assert compute_progress(SURVEY, settings, AS_OF).counts.completed == 2
 
+    def test_a_selected_null_value_matches_null_rows(self):
+        data = _survey(
+            [
+                ("h1", "2026-10-12", "yes", None),
+                ("h2", "2026-10-12", "yes", "refused"),
+            ]
+        )
+        settings = _settings(outcome="outcome", outcome_vals=[None])
+
+        assert compute_progress(data, settings, AS_OF).counts.completed == 1
+
+    def test_an_unselected_null_value_does_not_match(self):
+        data = _survey([("h1", "2026-10-12", "yes", None)])
+        settings = _settings(outcome="outcome", outcome_vals=["complete"])
+
+        assert compute_progress(data, settings, AS_OF).counts.completed == 0
+
     def test_a_column_without_values_sets_no_condition(self):
         settings = _settings(consent="consent", consent_vals=[])
 
@@ -1040,11 +1094,11 @@ class TestPace:
     )
 
     def test_projected_finish_uses_the_mean_of_the_last_7_days(self):
-        # 15 remaining at 2 a day is 8 days.
+        # 15 remaining at 2 a day is 8 days, today the first of them.
         pace = compute_progress(self.DATA, _settings(survey_target=30), AS_OF).pace
 
         assert pace.per_day == 2.0
-        assert pace.projected_finish == datetime.date(2026, 10, 22)
+        assert pace.projected_finish == datetime.date(2026, 10, 21)
 
     def test_a_shorter_fieldwork_averages_over_its_own_days(self):
         data = _daily({"2026-10-12": 1, "2026-10-13": 2, "2026-10-14": 3})
@@ -1052,7 +1106,7 @@ class TestPace:
         pace = compute_progress(data, _settings(survey_target=12), AS_OF).pace
 
         assert pace.per_day == 2.0
-        assert pace.projected_finish == datetime.date(2026, 10, 17)
+        assert pace.projected_finish == datetime.date(2026, 10, 16)
 
     def test_no_projection_with_fewer_than_3_days_of_data(self):
         data = _daily({"2026-10-13": 5, "2026-10-14": 5})
@@ -1063,13 +1117,13 @@ class TestPace:
 
     def test_the_window_ends_at_the_last_submission_not_today(self):
         # Submissions stopped on 3 Oct: the pace is 1 a day over 1-3 Oct, and
-        # the 27 remaining are projected from today.
+        # the 27 remaining are projected from today, counting today.
         data = _daily({"2026-10-01": 1, "2026-10-02": 1, "2026-10-03": 1})
 
         pace = compute_progress(data, _settings(survey_target=30), AS_OF).pace
 
         assert pace.per_day == 1.0
-        assert pace.projected_finish == datetime.date(2026, 11, 10)
+        assert pace.projected_finish == datetime.date(2026, 11, 9)
 
     def test_no_projection_without_completions_in_the_last_7_days(self):
         # Completions stop on 3 Oct, but submissions go on to today.
@@ -1205,27 +1259,37 @@ class TestStatus:
         status = self._status()
 
         assert status.level == "info"
-        assert status.title == "Projected finish: Thu 22 Oct"
+        assert status.title == "Projected finish: Wed 21 Oct"
         assert "field end date" in status.message
 
     def test_on_track_counts_the_days_before_the_end_date(self):
-        status = self._status(field_end_date=datetime.date(2026, 10, 23))
-
-        assert (status.level, status.title) == ("success", "On track to finish on time")
-        assert "1 day before the field end date (Fri 23 Oct)" in status.message
-
-    def test_finishing_on_the_end_date_is_on_track(self):
         status = self._status(field_end_date=datetime.date(2026, 10, 22))
 
+        assert (status.level, status.title) == ("success", "On track to finish on time")
+        assert "1 day before the field end date (Thu 22 Oct)" in status.message
+
+    def test_finishing_on_the_end_date_is_on_track(self):
+        status = self._status(field_end_date=datetime.date(2026, 10, 21))
+
         assert status.level == "success"
-        assert "on the field end date (Thu 22 Oct)" in status.message
+        assert "on the field end date (Wed 21 Oct)" in status.message
+
+    def test_exactly_the_pace_needed_is_on_track(self):
+        # 14 remaining over the 7 days from today to 20 Oct needs 2 a day,
+        # the pace: the days left and the projection both count today.
+        status = self._status(
+            survey_target=29, field_end_date=datetime.date(2026, 10, 20)
+        )
+
+        assert (status.level, status.title) == ("success", "On track to finish on time")
+        assert "on the field end date (Tue 20 Oct)" in status.message
 
     def test_behind_counts_the_days_after_and_the_pace_needed(self):
         # 15 remaining over the 7 days from today to 20 Oct: 2.1 a day.
         status = self._status(field_end_date=datetime.date(2026, 10, 20))
 
         assert (status.level, status.title) == ("warning", "Behind schedule")
-        assert "2 days after the field end date (Tue 20 Oct)" in status.message
+        assert "1 day after the field end date (Tue 20 Oct)" in status.message
         assert "**2.1 a day**" in status.message
 
     def test_field_end_date_passed(self):
@@ -1309,8 +1373,46 @@ class TestTargetPath:
             (datetime.date(2026, 10, 14), 30),
         ]
 
+    def test_is_flat_when_the_end_date_is_before_the_first_period(self):
+        # Fieldwork started late: the line must not run back to the end date.
+        settings = _settings(
+            survey_target=30, field_end_date=datetime.date(2026, 10, 10)
+        )
+
+        path = compute_progress(self.DATA, settings, AS_OF).target_path
+
+        assert path == [
+            (datetime.date(2026, 10, 12), 30),
+            (datetime.date(2026, 10, 14), 30),
+        ]
+
     def test_none_without_a_target(self):
         assert compute_progress(self.DATA, _settings(), AS_OF).target_path == []
+
+
+class TestTargetLine:
+    def test_one_period_without_an_end_date_spans_the_chart(self):
+        # Both target points share the first day: a line between them would
+        # draw nothing.
+        data = _daily({"2026-10-14": 2})
+        result = compute_progress(data, _settings(survey_target=30), AS_OF)
+
+        fig = progress_module.progress_figure(result, "Cumulative", None)
+
+        assert [trace.name for trace in fig.data] == [
+            "Completed",
+            "So far (unfinished)",
+        ]
+        assert [shape.y0 for shape in fig.layout.shapes] == [30]
+
+    def test_several_periods_draw_a_target_trace(self):
+        data = _daily({"2026-10-12": 1, "2026-10-14": 1})
+        result = compute_progress(data, _settings(survey_target=30), AS_OF)
+
+        fig = progress_module.progress_figure(result, "Cumulative", None)
+
+        assert "Target" in [trace.name for trace in fig.data]
+        assert fig.layout.shapes == ()
 
 
 class TestPageShape:
