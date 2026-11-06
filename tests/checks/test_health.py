@@ -652,16 +652,16 @@ class TestDeltaText:
                 "No change since yesterday",
             ),
             (
-                CheckDelta(outstanding=12, kind=DeltaKind.SUBMISSIONS),
-                "▲ 12 new submissions since yesterday",
+                CheckDelta(outstanding=12, kind=DeltaKind.COMPLETIONS),
+                "▲ 12 new completions since yesterday",
             ),
             (
-                CheckDelta(outstanding=1, kind=DeltaKind.SUBMISSIONS),
-                "▲ 1 new submission since yesterday",
+                CheckDelta(outstanding=1, kind=DeltaKind.COMPLETIONS),
+                "▲ 1 new completion since yesterday",
             ),
             (
-                CheckDelta(outstanding=0, kind=DeltaKind.SUBMISSIONS),
-                "No new submissions since yesterday",
+                CheckDelta(outstanding=0, kind=DeltaKind.COMPLETIONS),
+                "No new completions since yesterday",
             ),
             (
                 CheckDelta(outstanding=2, kind=DeltaKind.ACTIVE),

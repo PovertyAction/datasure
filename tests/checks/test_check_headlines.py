@@ -76,16 +76,17 @@ SURVEY = pl.DataFrame(
 class TestProgressHeadline:
     CONFIG = {"survey_key": "key", "survey_id": "hhid"}  # noqa: RUF012
 
-    def test_submissions_without_a_target(self, setting_file):
+    def test_completed_ids_without_a_target(self, setting_file):
+        # Without a completion condition every one of the 3 IDs is completed.
         assert progress_headline(SURVEY, setting_file, self.CONFIG) == (
-            CheckHeadline("5", "submitted interviews", informational=True, count=5)
+            CheckHeadline("3", "completed", informational=True, count=3)
         )
 
-    def test_submitted_out_of_the_target_from_the_page_config(self, setting_file):
+    def test_completed_out_of_the_target_from_the_page_config(self, setting_file):
         config = {**self.CONFIG, "survey_target": 20}
 
         assert progress_headline(SURVEY, setting_file, config) == (
-            CheckHeadline("5 / 20", "25.00% of target", informational=True, count=5)
+            CheckHeadline("3 / 20", "15.00% of target", informational=True, count=3)
         )
 
     def test_a_target_saved_in_the_check_settings_wins(self, setting_file):
@@ -94,7 +95,18 @@ class TestProgressHeadline:
 
         headline = progress_headline(SURVEY, setting_file, config)
 
-        assert (headline.value, headline.detail) == ("5 / 8", "62.50% of target")
+        assert (headline.value, headline.detail) == ("3 / 8", "37.50% of target")
+
+    def test_only_ids_meeting_the_saved_completion_condition_count(self, setting_file):
+        # h2 (age 31) and h3 (age 33) have a qualifying record; h1 does not.
+        _save_settings(
+            setting_file, "progress", {"outcome": "age", "outcome_vals": [31, 33]}
+        )
+        config = {**self.CONFIG, "survey_target": 4}
+
+        headline = progress_headline(SURVEY, setting_file, config)
+
+        assert (headline.value, headline.count) == ("2 / 4", 2)
 
 
 class TestMissingHeadline:

@@ -218,7 +218,7 @@ def _change_text(change: float, kind: DeltaKind, since: str) -> str:
     if change == 0:
         nothing = {
             DeltaKind.NEW: "No new issues",
-            DeltaKind.SUBMISSIONS: "No new submissions",
+            DeltaKind.COMPLETIONS: "No new completions",
         }.get(kind, "No change")
         return f"{nothing} since {since}"
     arrow = "▲" if change > 0 else "▼"
@@ -226,8 +226,8 @@ def _change_text(change: float, kind: DeltaKind, since: str) -> str:
     if kind is DeltaKind.POINTS:
         return f"{arrow} {size:.2f} pp since {since}"
     size = int(size)
-    if kind is DeltaKind.SUBMISSIONS:
-        noun = "submission" if size == 1 else "submissions"
+    if kind is DeltaKind.COMPLETIONS:
+        noun = "completion" if size == 1 else "completions"
         return f"{arrow} {size:,} new {noun} since {since}"
     if kind is DeltaKind.ACTIVE:
         more = "more" if change > 0 else "fewer"

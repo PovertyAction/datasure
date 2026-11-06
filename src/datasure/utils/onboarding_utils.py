@@ -694,7 +694,7 @@ class OutputOnboardingInfo:
         - **Outstanding**: the issues still to deal with, such as duplicate IDs not yet
           resolved, with a detail line under the number.
         - **Change**: how Outstanding changed since the start of the comparison period,
-          for example "▲ 2 new submissions since yesterday".
+          for example "▲ 2 new completions since yesterday".
         - **Resolved**: the issues already resolved through corrections, acceptances or
           error-source attributions, with "+N since …" for those resolved in the period,
           or "—" for checks that resolve nothing.
@@ -716,7 +716,7 @@ class OutputOnboardingInfo:
 
         ##### Instructions for Demo:
         - The demo's latest submissions fall on yesterday and today, so with **Day**
-          selected the **Progress** row shows today's new submissions under **Change**.
+          selected the **Progress** row shows today's new completions under **Change**.
         - Open the **Comparison period** box and switch to **7 days** to see the changes grow.
         - Rows for checks you have not set up yet, such as Outliers & Constraints, show their
           numbers once you set them up. After you resolve the duplicate IDs on the
@@ -730,60 +730,67 @@ class OutputOnboardingInfo:
             "title": "Progress Report",
             "content": """
         ### Survey Progress Report
-        This check provides detailed insights into the progress of your survey data collection.
-        It includes metrics such as submission counts over time, progress by enumerator or selected categories, and overall submission trends.
-        **Next**: Go to the :material/settings: settings icon to configure global settings for the Progress check.
+        This check shows how far data collection has come against its target.
+        The :material/settings: **settings** section sits at the top. Below it, a header stays on
+        every tab: the percentage complete, Submissions, Unique, Completed and Remaining, the
+        current period against its target, and a projected finish date.
+        Below the header are two tabs: **Overview** and **Follow-up**.
+        **Next**: Open the :material/settings: **settings** section to configure the Progress check.
         """,
         },
         "progress_report_settings": {
             "title": "Progress Settings",
             "content": f"""
         ##### Setup for Progress
-        In this section, you can configure global settings for the Progress check, you will notice that some settings are pre-filled based on your check configuration.
-        This check contains the following settings:
+        This section holds every Progress setting. Some are pre-filled from your check configuration.
         - Survey ID: The main identifier for your survey respondents (e.g., {DemoColumn.HHID}).
-        - Survey Date: The column indicating the date when the survey was conducted or submitted (e.g., {DemoColumn.SUBMISSIONDATE}).
-        - Enumerator ID: The column indicating who collected the data (e.g., {DemoColumn.ENUM_NAME}).
-        - Total Expected Interviews: The total number of survey interviews you expect to collect (e.g., 200).
-        - Target Submissions Per Period: The number of submissions you aim to collect in each period shown on the Progress Over Time chart. This sets its threshold line.
+          Unique and Completed count distinct IDs.
+        - Survey Date: The column indicating when the survey was submitted (e.g., {DemoColumn.SUBMISSIONDATE}).
+        - Total Expected Interviews: The number of completed interviews you expect (e.g., 200).
+        - Target Completions Per Period: The completions you aim for each day, week or month.
+        - Field End Date: The day fieldwork should finish.
+        - Completion condition: The consent and outcome values that make an interview complete.
 
         ##### Instructions for Demo:
         - Set **Total Expected Interviews** to **200**.
-        - Set **Target Submissions Per Period** to **3**. The demo team averages a little over
-          2 submissions a day, so some days meet this daily target and others fall short.
+        - Set **Target Completions Per Period** to **3**.
+        - Select the "{DemoColumn.CONSENT}" consent column with the value "yes", and the
+          "{DemoColumn.COMPLETION_STATUS}" outcome column with the value "complete".
+          Refusals and partial interviews now no longer count as completed.
 
-        **Next**: Explore the **Progress Summary** section below.
+        **Next**: Look at the header, then open the **Overview** tab.
         """,
         },
-        "display_progress_summary": {
-            "title": "Progress Summary",
+        "display_progress_header": {
+            "title": "Progress Header",
             "content": """
-        ##### Progress Summary
-        This section provides a quick overview of your survey data collection progress, including:
-        - Submission Progress: Percentage of completed submissions against the total expected interviews.
-        - Target Interviews: Total number of interviews you aim to collect.
-        - Total Submitted Interviews: Total number of submissions received to date.
-        **Next**: Explore the **Progress Over Time** section below.
+        ##### Progress Header
+        The header shows on every tab:
+        - The target and the completion condition the numbers are based on.
+        - The percentage complete (completed IDs out of the target) above a progress bar.
+        - A status box that says whether fieldwork will finish on time, from the
+          projected finish and the field end date.
+        - Submissions (every submission), Unique (distinct IDs), completions
+          today, this week or this month against the per-period target, the
+          pace (completions a day over the 7 days up to the last submission)
+          and the days left to the field end date.
         """,
         },
-        "display_progress_overtime": {
-            "title": "Progress Over Time",
+        "display_overview": {
+            "title": "Overview",
             "content": """
-        ##### Submission Trends
-        This section visualizes the submission trends of your survey data over time, helping you identify patterns and peaks in data collection.
-
-        Bars are color-coded: **green** when the number of submissions meets or exceeds the threshold, **red** when below. The threshold is the **Target Submissions Per Period** if set in settings, otherwise the overall average.
+        ##### Completions Over Time
+        The chart opens on **Cumulative**: completed IDs over time against the target path.
+        Switch to **Per period** to see completions per day, week or month against the
+        per-period target. Each ID counts once, in the period it was first completed, and
+        the current period is drawn as unfinished.
 
         ##### Instructions for Demo:
-        - With the **Daily** pill selected, notice that some bars are green and some are red:
-          red days fell short of the target of 3 submissions.
-        - Switch to **Weekly** and **Monthly** using the pills above the chart. The same target
-          applies to every period, so the weekly and monthly bars all meet it; a target is
-          most useful for the period you track.
-        - Set **Target Submissions Per Period** back to **0** in settings to compare each
-          period with the average instead.
+        - Switch to **Per period** with **Daily** selected: green bars met the target of 3,
+          red bars fell short.
+        - Set a **Field End Date** in the settings section to see the completions needed per day.
 
-        **Next**: Explore the **Attempted Interviews** section below.
+        **Next**: Open the **Follow-up** tab.
         """,
         },
         "display_attempted_interviews": {
@@ -799,21 +806,6 @@ class OutputOnboardingInfo:
         It also includes the following visualizations:
         - A horizontal bar chart showing the **distribution of attempt counts** — how many respondents had exactly 1 attempt, 2 attempts, 3 or more, etc.
         - A data table summarizing attempted interviews by respondent ID (e.g., household ID), including the date of each attempt.
-        """,
-        },
-        "display_progress_chart": {
-            "title": "Consent and Completion Progress",
-            "content": f"""
-        ##### Consent and Completion Progress
-        This section helps you monitor the consent and completion rates of your survey data collection, including:
-        - Consent Rate: Percentage of respondents who provided consent.
-        - Completion Rate: Percentage of respondents who completed the survey.
-
-        ##### Instructions for Demo:
-        For the demo, you will setup the consent and completion criteria as follows:
-        - Consent Criteria: Select the "{DemoColumn.CONSENT}" column and set the value to "yes".
-        - Completion Criteria: Select the "{DemoColumn.COMPLETION_STATUS}" column and set the value to "complete".
-        **Next**: Explore the other checks for more data quality insights.
         """,
         },
     }
