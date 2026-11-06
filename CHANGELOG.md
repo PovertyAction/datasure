@@ -39,6 +39,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   column, the page warns that it counts without it
   (`stale_condition_columns`) — #408
 
+- **Progress Follow-up tab**: `compute_progress` now returns the Follow-up
+  tab's numbers in `ProgressResult`: `follow_up` (`FollowUpMetrics`: need
+  follow-up, first-try rate, average attempts per completion and open after
+  3+ attempts, plus the repeat-ID metrics that hold without a completion
+  condition), `attempts_to_outcome` (`AttemptBucket` for attempts 1, 2, 3 and
+  4+: completed at, open with exactly that many attempts, and submitted
+  that many times; the average counts attempts up to the first completion) and
+  `follow_up_queue` (`QueueRow` per open ID, sorted by attempts then days
+  since the last attempt, each with its `Attempt` history; empty without a
+  completion condition). The last outcome comes from the condition's outcome
+  column, or reads "not complete" without one; the enumerator comes from the
+  page config's enumerator column, now in `progress_config`. The new
+  `display_follow_up` draws the metrics, a grouped attempts-to-outcome chart
+  (`attempts_figure`) and the queue with last-outcome and minimum-attempts
+  filters (saved view state), a CSV download (`filter_queue`, `queue_frame`)
+  and the selected row's attempt history. The Follow-up tab label carries a
+  count badge when the queue has rows (`tab_labels`; `settle_tab` keeps the
+  open tab as the badge changes), and Overview shows a "Respondents open
+  after 3+ attempts" to-do card, only above zero, whose button opens the tab.
+  The page now counts progress before drawing the tabs, reading the chosen
+  period with `chosen_period` — #409
+
 ### Changed
 
 - **Progress page**: Rebuilt as the settings expander
@@ -75,6 +97,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `compute_progress_overtime`, `compute_average_interviews`,
   `display_progress_overtime`, `ProgressSummary`,
   `AttemptedInterviewsMetrics`) — #408
+- **Progress**: The per-ID attempted interviews table with its "Attempt
+  Date N" columns and its model and helpers (`AttemptedInterviewsResult`,
+  `compute_attempted_interviews`, `display_attempted_interviews` and their
+  private helpers), replaced by the Follow-up tab — #409
 
 ### Fixed
 

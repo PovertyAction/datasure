@@ -793,19 +793,19 @@ class OutputOnboardingInfo:
         **Next**: Open the **Follow-up** tab.
         """,
         },
-        "display_attempted_interviews": {
-            "title": "Attempted Interviews",
+        "display_follow_up": {
+            "title": "Follow-up",
             "content": """
-        ##### Attempted Interviews
-        This section provides insights into the number of attempted interviews in your survey data, including:
-        - Total Submitted Interviews: Total number of submissions received to date.
-        - Number of Unique IDs: Count of unique respondents based on the ID column.
-        - Min Attempts: Minimum number of attempts made by any respondent.
-        - Max Attempts: Maximum number of attempts made by any respondent.
+        ##### Follow-up
+        This tab shows who needs another visit and how many tries a completion takes:
+        - Need follow-up: IDs attempted but never completed.
+        - Done on 1st try: completions at the first attempt, as a share of all completions.
+        - Avg attempts per completion, and IDs still open after 3+ attempts.
+        - An attempts-to-outcome chart: completed versus still open at attempts 1, 2, 3 and 4+.
+        - A follow-up queue of the open IDs, most attempts first. Filter it by last
+          outcome and minimum attempts, download it, and select a row to see each attempt.
 
-        It also includes the following visualizations:
-        - A horizontal bar chart showing the **distribution of attempt counts** — how many respondents had exactly 1 attempt, 2 attempts, 3 or more, etc.
-        - A data table summarizing attempted interviews by respondent ID (e.g., household ID), including the date of each attempt.
+        Without a completion condition the tab shows repeat IDs instead, and no queue.
         """,
         },
     }

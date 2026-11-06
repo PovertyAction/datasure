@@ -1102,13 +1102,39 @@ The open tab, chart view and period are remembered for the page.
 
 #### Follow-up
 
-The attempted interviews for each survey ID:
+Who needs another visit, and how many tries a completion takes. An attempt
+is a submission of an ID; an ID's attempts are numbered from 1 in date order.
 
-- Total submitted interviews
-- Number of unique IDs
-- Min/Max attempts per respondent
-- **Bar chart**: how many respondents had each number of attempts
-- **Data table**: attempts by respondent ID, with extra columns you choose
+- **Need follow-up**: IDs attempted but never completed
+- **Done on 1st try**: completions at the first attempt, as a share of all
+  completions
+- **Avg attempts per completion**: the mean attempt number completions came at.
+  Submissions after an ID's first completion are not counted
+- **3+ attempts, still open**: IDs still open after 3 or more attempts. When
+  there are any, Overview shows a **Respondents open after 3+ attempts** card
+  with a button that opens this tab
+- **Attempts to outcome**: a chart that shows, for attempts 1, 2, 3 and 4+, how
+  many IDs were completed at that attempt and how many are still open after
+  exactly that many attempts (4 or more for 4+), so each open ID is in one bar
+- **Follow-up queue**: one row per open ID, with its number of attempts and
+  the outcome, date, days since and enumerator of its last attempt. The IDs
+  with the most attempts come first, then those waiting longest since their
+  last attempt. Filter it by last outcome and minimum attempts, and download
+  it as CSV with the filters applied. Select a row to see each of its
+  attempts: number, date, outcome and enumerator
+
+The last outcome is the value of the outcome column in the completion
+condition. Without an outcome column it shows "not complete". The enumerator
+is the page's enumerator column.
+
+The tab's name shows how many IDs are in the queue when there are any.
+
+Without a completion condition there is no queue. The tab shows repeat IDs
+(IDs submitted more than once), the submissions per ID and the most
+submissions of one ID, with a chart of how many IDs were submitted 1, 2, 3 or
+4+ times, and a note that setting a completion condition turns on the queue.
+
+The queue filters are remembered for the page.
 
 #### Settings
 
