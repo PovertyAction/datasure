@@ -20,9 +20,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (projected finish, counted from today, at the mean completions per day
   over the 7 days up to the last submission, hidden with fewer than 3 days
   of data or a zero pace; need-per-day
-  to the field end date), the mode, the visible tabs and the to-do items
-  (none yet). `tracking` is unused until tracking-file and master-list
-  modes land — #408
+  to the field end date), the `ProgressStatus` the header's status box
+  draws (on track, behind, no field end date, target reached, field end
+  date passed, too little data or no recent completions), the mode, the
+  visible tabs and the to-do items (none yet). `tracking` is unused until
+  tracking-file and master-list modes land — #408
 - **Progress settings**: `ProgressSettings` gains the completion condition
   (`consent`, `consent_vals`, `outcome`, `outcome_vals`, read through
   `condition()` and `has_condition`) and `field_end_date` — #408
@@ -31,8 +33,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Progress page**: Rebuilt as the settings expander
   (`progress_report_settings`, with "Reset filters" beside it, as on
-  Summary), then a header shown on every tab (`display_progress_header`)
-  above Overview (`display_overview`, with the Cumulative / Per period chart
+  Summary), then a header shown on every tab (`display_progress_header`:
+  the percentage and completed count above an `st.progress` bar, capped at
+  full by `progress_fraction` when completions pass the target, a status box
+  saying whether fieldwork will finish on time, and a `metric_row` of
+  Submissions, Unique, the current period, Pace and Days left, replacing the
+  six-column row that cut off the projected finish date; the "Need N/day"
+  line under the chart moves into the status box) above Overview (`display_overview`, with the Cumulative / Per period chart
   from `progress_figure`) and Follow-up (the unchanged attempted
   interviews). The chart's series ends at the period of the last
   submission, not today's. The open tab (`progress_tab`) and chart view

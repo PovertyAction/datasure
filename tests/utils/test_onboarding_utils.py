@@ -317,7 +317,7 @@ class TestOutputOnboardingInfo:
             "progress", "display_progress_header"
         )
         assert message["title"] == "Progress Header"
-        assert "Remaining" in message["content"]
+        assert "finish on time" in message["content"]
 
     def test_get_onboarding_message_progress_overview(self):
         """Test display_overview entry."""

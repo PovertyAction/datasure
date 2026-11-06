@@ -767,11 +767,13 @@ class OutputOnboardingInfo:
         ##### Progress Header
         The header shows on every tab:
         - The target and the completion condition the numbers are based on.
-        - The percentage complete: completed IDs out of the target.
-        - Submissions (every submission), Unique (distinct IDs) and Remaining.
-        - Completions today, this week or this month against the per-period target,
-          following the period chosen on Overview.
-        - A projected finish date, from the mean completions per day over the 7 days up to the last submission.
+        - The percentage complete (completed IDs out of the target) above a progress bar.
+        - A status box that says whether fieldwork will finish on time, from the
+          projected finish and the field end date.
+        - Submissions (every submission), Unique (distinct IDs), completions
+          today, this week or this month against the per-period target, the
+          pace (completions a day over the 7 days up to the last submission)
+          and the days left to the field end date.
         """,
         },
         "display_overview": {

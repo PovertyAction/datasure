@@ -1049,17 +1049,32 @@ interviews don't overstate progress.
 The header stays at the top of every tab. It shows:
 
 - the target and the completion condition the numbers are based on
-- the percentage complete and a progress bar
-- **Submissions**, **Unique**, **Completed** and **Remaining** (completions
-  still needed to reach the target)
-- **Today**, **This week** or **This month**: IDs first completed in the
-  current period against the per-period target, following the period chosen
-  on Overview. Shown only when a per-period target is set
-- **Projected finish**: when the target is reached, counting from today, at
-  the mean completions per day over the 7 days up to the last submission (or
-  since the first submission, when fieldwork lasted less than 7 days). A
-  pause in submissions doesn't lower the pace. Hidden with fewer than 3 days
-  of submissions, or when nothing was completed in those 7 days
+- the percentage complete and the completed IDs out of the target, with how
+  many are still to go, above a progress bar. Past the target the bar stays
+  full and the percentage goes above 100%
+- a status box that says in a sentence whether fieldwork will finish on
+  time. The projected finish is when the target is reached, counting from
+  today, at the current pace:
+  - **On track** (green): the projected finish and how many days before the
+    field end date it falls
+  - **Behind schedule** (amber): how many days after the field end date the
+    projected finish falls, and the completions a day needed to finish on
+    time
+  - With no field end date, the projected finish alone
+  - It also tells you when the target is reached, when the field end date
+    has passed, when there are fewer than 3 days of submissions to work out
+    a pace, and when nothing was completed in the last 7 days
+- a row of smaller numbers:
+  - **Submissions** and **Unique**, and **Completed** when no target is set
+  - **Today**, **This week** or **This month**: IDs first completed in the
+    current period against the per-period target, following the period
+    chosen on Overview. Shown only when a per-period target is set
+  - **Pace**: the mean completions per day over the 7 days up to the last
+    submission (or since the first submission, when fieldwork lasted less
+    than 7 days). A pause in submissions doesn't lower the pace. Shown as
+    "—" with fewer than 3 days of submissions
+  - **Days left**: days to the field end date, counting today. Shown only
+    when a field end date is set
 
 #### Overview
 
@@ -1077,9 +1092,7 @@ completion condition. The chart runs from the first completion to the
 period of the last submission, so periods after data collection stopped are
 not shown; periods in between with no completions show 0. When the last
 period is the current one it is drawn as unfinished: a dotted line or a
-faded bar. With a field end date set, "Need N/day to finish by
-[date]" shows below the chart until the target is reached. The days left
-count today.
+faded bar.
 
 The open tab, chart view and period are remembered for the page.
 

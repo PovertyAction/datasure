@@ -27,8 +27,10 @@ from datasure.checks.progress import (
     display_overview,
     display_progress_header,
     load_default_settings,
+    progress_fraction,
     progress_report,
     progress_report_settings,
+    short_date,
 )
 from datasure.utils.dataframe_utils import ColumnByType
 
@@ -406,6 +408,30 @@ def test_display_progress_header_renders(patched_progress, survey_target):
     display_progress_header(result, settings)
 
     progress_module.metric_row.assert_called_once()
+    labels = [m[0] for m in progress_module.metric_row.call_args.args[0]]
+    if survey_target is None:
+        # No headline: Completed moves into the strip
+        assert "Completed" in labels
+        patched_progress.progress.assert_not_called()
+    else:
+        assert "Completed" not in labels
+        assert "Pace" in labels
+
+
+def test_display_progress_header_draws_the_status(patched_progress):
+    """The status box uses the status level, beside the progress bar."""
+    settings = _settings(survey_target=30, field_end_date=datetime.date(2026, 10, 20))
+    result = compute_progress(TestPace.DATA, settings, AS_OF)
+    headline, status_col = MagicMock(), MagicMock()
+    patched_progress.columns.side_effect = [(headline, status_col)]
+
+    display_progress_header(result, settings)
+
+    patched_progress.progress.assert_called_once_with(0.5)
+    status_col.warning.assert_called_once()
+    assert "Behind schedule" in status_col.warning.call_args.args[0]
+    labels = [m[0] for m in progress_module.metric_row.call_args.args[0]]
+    assert labels[-1] == "Days left"
 
 
 @pytest.mark.parametrize("chart_view", ["Cumulative", "Per period"])
@@ -993,6 +1019,106 @@ class TestPace:
 
         assert pace.days_left == 0
         assert pace.need_per_day is None
+
+
+class TestStatus:
+    """The header's on-time status, with TestPace's 2 completions a day."""
+
+    DATA = TestPace.DATA
+
+    def _status(self, **overrides):
+        settings = _settings(**{"survey_target": 30, **overrides})
+        return compute_progress(self.DATA, settings, AS_OF).status
+
+    def test_none_without_a_target(self):
+        assert compute_progress(self.DATA, _settings(), AS_OF).status is None
+
+    def test_target_reached(self):
+        status = self._status(survey_target=15)
+
+        assert (status.level, status.title) == ("success", "Target reached")
+
+    def test_without_an_end_date_shows_the_projected_finish(self):
+        status = self._status()
+
+        assert status.level == "info"
+        assert status.title == "Projected finish: Thu 22 Oct"
+        assert "field end date" in status.message
+
+    def test_on_track_counts_the_days_before_the_end_date(self):
+        status = self._status(field_end_date=datetime.date(2026, 10, 23))
+
+        assert (status.level, status.title) == ("success", "On track to finish on time")
+        assert "1 day before the field end date (Fri 23 Oct)" in status.message
+
+    def test_finishing_on_the_end_date_is_on_track(self):
+        status = self._status(field_end_date=datetime.date(2026, 10, 22))
+
+        assert status.level == "success"
+        assert "on the field end date (Thu 22 Oct)" in status.message
+
+    def test_behind_counts_the_days_after_and_the_pace_needed(self):
+        # 15 remaining over the 7 days from today to 20 Oct: 2.1 a day.
+        status = self._status(field_end_date=datetime.date(2026, 10, 20))
+
+        assert (status.level, status.title) == ("warning", "Behind schedule")
+        assert "2 days after the field end date (Tue 20 Oct)" in status.message
+        assert "**2.1 a day**" in status.message
+
+    def test_field_end_date_passed(self):
+        status = self._status(field_end_date=datetime.date(2026, 10, 13))
+
+        assert (status.level, status.title) == ("warning", "Field end date passed")
+        assert "**15** completions to go" in status.message
+
+    def test_too_little_data(self):
+        data = _daily({"2026-10-13": 5, "2026-10-14": 5})
+
+        status = compute_progress(data, _settings(survey_target=30), AS_OF).status
+
+        assert status.level == "info"
+        assert status.title == "Not enough data for a projected finish"
+
+    def test_no_recent_completions(self):
+        completions = _daily({"2026-10-01": 1, "2026-10-02": 1, "2026-10-03": 1})
+        refusals = _survey(
+            [(f"r{day}", f"2026-10-{day}", "no", "refused") for day in (12, 13, 14)]
+        )
+        settings = _settings(survey_target=30, **CONDITION)
+
+        status = compute_progress(
+            pl.concat([completions, refusals]), settings, AS_OF
+        ).status
+
+        assert (status.level, status.title) == (
+            "warning",
+            "No completions in the last 7 days",
+        )
+
+
+@pytest.mark.parametrize(
+    ("percentage", "fraction"), [(0, 0.0), (45.5, 0.455), (100, 1.0), (180, 1.0)]
+)
+def test_progress_fraction_stays_within_what_st_progress_accepts(percentage, fraction):
+    assert progress_fraction(percentage) == pytest.approx(fraction)
+
+
+def test_display_progress_header_past_the_target(patched_progress):
+    """More completions than the target: the bar stops full, the text says so."""
+    settings = _settings(survey_target=10)
+    result = compute_progress(TestPace.DATA, settings, AS_OF)  # 15 completed
+
+    display_progress_header(result, settings)
+
+    patched_progress.progress.assert_called_once_with(1.0)
+    text = patched_progress.markdown.call_args.args[0]
+    assert "150.0% complete" in text
+    assert "target reached" in text
+
+
+def test_short_date_adds_the_year_only_when_it_differs():
+    assert short_date(datetime.date(2026, 11, 16), AS_OF) == "Mon 16 Nov"
+    assert short_date(datetime.date(2027, 1, 4), AS_OF) == "Mon 4 Jan 2027"
 
 
 class TestTargetPath:

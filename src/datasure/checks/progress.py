@@ -178,6 +178,16 @@ class Pace(BaseModel):
     )
 
 
+class ProgressStatus(BaseModel):
+    """The header's one-sentence answer to "will fieldwork finish on time?"."""
+
+    level: Literal["success", "warning", "info"] = Field(
+        description="How the status box is drawn: green, amber or neutral"
+    )
+    title: str = Field(description="The status in a few words")
+    message: str = Field(description="One or two sentences of Markdown")
+
+
 class TodoItem(BaseModel):
     """A to-do card on Overview: something to act on, linking to its tab."""
 
@@ -201,6 +211,9 @@ class ProgressResult(BaseModel):
         default_factory=list, description="To-do cards, only those above zero"
     )
     pace: Pace = Field(default_factory=Pace)
+    status: ProgressStatus | None = Field(
+        None, description="Whether fieldwork will finish on time; None without a target"
+    )
     current_period: CurrentPeriod | None = Field(
         None, description="None without a per-period target or a date column"
     )
@@ -348,6 +361,93 @@ def _pace(
     )
 
 
+def short_date(day: date, as_of: date) -> str:
+    """Format a date as "Mon 16 Nov", adding the year when it isn't as_of's."""
+    text = f"{day:%a} {day.day} {day:%b}"
+    return text if day.year == as_of.year else f"{text} {day.year}"
+
+
+def per_day_text(rate: float) -> str:
+    """Format a daily rate, with two decimals below 1 so a slow pace isn't 0.0."""
+    return f"{rate:,.{1 if rate >= 1 else 2}f}"
+
+
+def _days(n: int) -> str:
+    return f"{n:,} day" if n == 1 else f"{n:,} days"
+
+
+def _status(
+    counts: ProgressCounts, pace: Pace, end: date | None, as_of: date
+) -> ProgressStatus | None:
+    """Say in a sentence whether fieldwork will finish by the field end date.
+
+    None without a target: the header asks for one instead.
+    """
+    if not counts.target:
+        return None
+    if not counts.remaining:
+        return ProgressStatus(
+            level="success",
+            title="Target reached",
+            message=f"All **{counts.target:,}** completions are in.",
+        )
+    need = (
+        f" Finishing by {short_date(end, as_of)} needs "
+        f"**{per_day_text(pace.need_per_day)} a day**."
+        if pace.need_per_day is not None
+        else ""
+    )
+    finish = pace.projected_finish
+    at_pace = (
+        f"At **{per_day_text(pace.per_day)} completions a day**, the target is "
+        f"reached on **{short_date(finish, as_of)}**"
+        if finish is not None
+        else ""
+    )
+    if end is not None and pace.days_left == 0:
+        return ProgressStatus(
+            level="warning",
+            title="Field end date passed",
+            message=f"The field end date ({short_date(end, as_of)}) has passed "
+            f"with **{counts.remaining:,}** completions to go."
+            + (f" {at_pace}." if at_pace else ""),
+        )
+    if pace.per_day is None:
+        return ProgressStatus(
+            level="info",
+            title="Not enough data for a projected finish",
+            message="A projected finish needs at least 3 days of submissions." + need,
+        )
+    if finish is None:
+        return ProgressStatus(
+            level="warning",
+            title="No completions in the last 7 days",
+            message="Nothing was completed in the 7 days up to the last "
+            "submission, so there is no projected finish." + need,
+        )
+    if end is None:
+        return ProgressStatus(
+            level="info",
+            title=f"Projected finish: {short_date(finish, as_of)}",
+            message=f"{at_pace}. Set a field end date in the :material/settings: "
+            "settings section above to see whether this is on time.",
+        )
+    gap = (end - finish).days
+    end_text = f"the field end date ({short_date(end, as_of)})"
+    if gap >= 0:
+        when = f"on {end_text}" if gap == 0 else f"{_days(gap)} before {end_text}"
+        return ProgressStatus(
+            level="success",
+            title="On track to finish on time",
+            message=f"{at_pace}, {when}.",
+        )
+    return ProgressStatus(
+        level="warning",
+        title="Behind schedule",
+        message=f"{at_pace}, {_days(-gap)} after {end_text}.{need}",
+    )
+
+
 def _target_path(
     series: list[SeriesPoint], target: int | None, end: date | None
 ) -> list[tuple[date, float]]:
@@ -398,18 +498,21 @@ def compute_progress(
     remaining = max(target - completed, 0) if target else None
     percentage = completed / target * 100 if target else None
     series = _series(rows, firsts, as_of, period)
+    counts = ProgressCounts(
+        submissions=data.height,
+        unique=unique,
+        completed=completed,
+        target=target,
+        remaining=remaining,
+        percentage=percentage,
+    )
+    pace = _pace(rows, firsts, settings, remaining, as_of)
     return ProgressResult(
         mode="fixed",
         tabs=TABS_BY_MODE["fixed"],
-        counts=ProgressCounts(
-            submissions=data.height,
-            unique=unique,
-            completed=completed,
-            target=target,
-            remaining=remaining,
-            percentage=percentage,
-        ),
-        pace=_pace(rows, firsts, settings, remaining, as_of),
+        counts=counts,
+        pace=pace,
+        status=_status(counts, pace, settings.field_end_date, as_of),
         current_period=_current_period(firsts, settings, as_of, period),
         series=series,
         target_path=_target_path(series, target, settings.field_end_date),
@@ -814,32 +917,22 @@ def display_progress_header(result: ProgressResult, settings: ProgressSettings) 
         f"**Target:** fixed number, {target_text} · "
         f"**Completion condition:** {describe_condition(settings)}"
     )
+    completed_help = (
+        "Distinct IDs with a submission that meets the completion condition"
+    )
+    metrics = [
+        ("Submissions", f"{counts.submissions:,}", "Every submission"),
+        ("Unique", f"{counts.unique:,}", "Distinct IDs"),
+    ]
     if counts.percentage is None:
         st.info(
             "Target number of interviews is not set. Set it in the "
             ":material/settings: settings section above."
         )
+        metrics.append(("Completed", f"{counts.completed:,}", completed_help))
     else:
-        st.progress(
-            min(counts.percentage / 100, 1.0),
-            text=f"**{counts.percentage:.2f}% complete**: "
-            f"{counts.completed:,} of {counts.target:,} completed",
-        )
+        _display_headline(result)
 
-    metrics = [
-        ("Submissions", f"{counts.submissions:,}", "Every submission"),
-        ("Unique", f"{counts.unique:,}", "Distinct IDs"),
-        (
-            "Completed",
-            f"{counts.completed:,}",
-            "Distinct IDs with a submission that meets the completion condition",
-        ),
-        (
-            "Remaining",
-            "—" if counts.remaining is None else f"{counts.remaining:,}",
-            "Completions still needed to reach the target",
-        ),
-    ]
     current = result.current_period
     if current is not None:
         metrics.append(
@@ -850,16 +943,58 @@ def display_progress_header(result: ProgressResult, settings: ProgressSettings) 
                 "per-period target",
             )
         )
-    if result.pace.projected_finish is not None:
+    pace = result.pace
+    metrics.append(
+        (
+            "Pace",
+            "—" if pace.per_day is None else f"{per_day_text(pace.per_day)}/day",
+            "Mean completions per day over the 7 days up to the last submission; "
+            "needs at least 3 days of submissions",
+        )
+    )
+    if pace.days_left is not None:
         metrics.append(
             (
-                "Projected finish",
-                f"{result.pace.projected_finish:%d %b %Y}",
-                f"At {result.pace.per_day:.1f} completions a day, the mean "
-                "over the 7 days up to the last submission",
+                "Days left",
+                f"{pace.days_left:,}",
+                f"Days to the field end date ({settings.field_end_date:%d %b %Y}), "
+                "counting today",
             )
         )
     metric_row(metrics)
+
+
+STATUS_ICONS = {
+    "success": ":material/check_circle:",
+    "warning": ":material/warning:",
+    "info": ":material/info:",
+}
+
+
+def progress_fraction(percentage: float) -> float:
+    """Return the percentage as the 0-1 fraction `st.progress` accepts.
+
+    Completions can pass the target, and `st.progress` raises on a value
+    above 1, so the bar stops full at 100%; the text keeps the real figure.
+    """
+    return min(max(percentage / 100, 0.0), 1.0)
+
+
+def _display_headline(result: ProgressResult) -> None:
+    """Draw the percentage and counts above a progress bar, with the status beside."""
+    counts = result.counts
+    headline, status_col = st.columns([2, 3], vertical_alignment="center")
+    to_go = f"{counts.remaining:,} to go" if counts.remaining else "target reached"
+    with headline:
+        st.markdown(
+            f"### {counts.percentage:.1f}% complete\n"
+            f"**{counts.completed:,}** of {counts.target:,} completed · {to_go}"
+        )
+        st.progress(progress_fraction(counts.percentage))
+    status = result.status
+    if status is not None:
+        draw = getattr(status_col, status.level)
+        draw(f"**{status.title}**  \n{status.message}", icon=STATUS_ICONS[status.level])
 
 
 # =============================================================================
@@ -1056,19 +1191,6 @@ def display_overview(
             progress_figure(result, chart_view, settings.target_submissions_per_period),
             theme=None,
             width="stretch",
-        )
-
-    pace = result.pace
-    if pace.need_per_day is not None:
-        # Two decimals below 1 a day, so a slow pace doesn't read as 0.0
-        need = f"{pace.need_per_day:,.{1 if pace.need_per_day >= 1 else 2}f}"
-        st.markdown(
-            f"Need **{need}/day** to finish by {settings.field_end_date:%d %b %Y}."
-        )
-    elif pace.days_left == 0 and result.counts.remaining:
-        st.warning(
-            f"The field end date ({settings.field_end_date:%d %b %Y}) has "
-            f"passed with {result.counts.remaining:,} completions to go."
         )
 
 
