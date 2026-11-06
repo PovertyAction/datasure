@@ -47,8 +47,7 @@ For feature requests and bug reports, see our [GitHub Issues](https://github.com
 
 ### Check-Page Corrections ([#295](https://github.com/PovertyAction/datasure/issues/295))
 
-**Status:** In Development (v1.2.0, in release candidate testing; Launched
-when 1.2.0 ships)
+**Status:** Launched (v1.2.0)
 
 Correct flagged data, or accept it as valid, from the check pages that flag it.
 Check pages and the Correct Data page write to the same correction log.
