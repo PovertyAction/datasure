@@ -640,6 +640,9 @@ class TestByUnitHelpers:
     def test_furthest_behind_puts_the_lowest_first_and_skips_untracked(self):
         assert [r.unit for r in ui.furthest_behind(UNITS)] == ["b", "a", "c"]
 
+    def test_the_table_lists_the_lowest_first_and_untracked_last(self):
+        assert [r.unit for r in ui.lowest_first(UNITS)] == ["b", "a", "c", "Untracked"]
+
     def test_the_table_tags_units_over_target(self):
         table = ui.unit_frame(UNITS, "village")
 
@@ -666,6 +669,17 @@ class TestRespondentHelpers:
             ("v2", ["h5"]),
             ("v1", ["h2"]),
         ]
+
+    def test_the_visit_table_is_one_table_with_each_units_progress(self):
+        units = [_unit("v1", 2, 1, "on track"), _unit("v2", 2, 0, "behind")]
+        lists = ui.visit_lists(self.respondents(), units)
+
+        table = ui.visit_frame(lists, ["landmark"], "vill")
+
+        assert table.columns[:3] == ["ID", "vill", ui.VISIT_PCT]
+        assert table["ID"].to_list() == ["h5", "h2"]
+        assert table[ui.VISIT_PCT].to_list() == [0.0, 50.0]
+        assert "landmark" in table.columns
 
     def test_the_respondent_table_carries_the_extra_columns(self):
         table = ui.respondent_frame(self.respondents(), ["landmark"], "vill")
@@ -745,7 +759,8 @@ class TestSectionsRender:
             ui.display_by_unit(result.unit_levels, view)
             ui.display_respondents(result.respondents, result.unit_levels, [])
 
-        mock_st.plotly_chart.assert_called_once()
+        mock_st.plotly_chart.assert_not_called()
+        mock_st.column_config.ProgressColumn.assert_called_once()
         # By unit, visit list, unexpected IDs, completed
         assert mock_st.download_button.call_count == 4
         values = [metric[1] for metric in metrics.call_args.args[0]]

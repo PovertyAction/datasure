@@ -9,7 +9,6 @@ filter) comes in as a `ViewState`, so this module needs nothing from
 
 from collections.abc import Sequence
 
-import plotly.graph_objects as go
 import polars as pl
 import streamlit as st
 
@@ -34,10 +33,7 @@ STATUS_TEXT = {
 }
 LEVEL_KEY = "by_unit_level"
 FILTER_KEY = "by_unit_filter"
-CHART_UNITS = 15
-BEHIND_COLOR = "#f87171"
-ON_TRACK_COLOR = "#4D5E90"
-TRANSPARENT = "rgba(0,0,0,0)"
+VISIT_PCT = "Unit % complete"
 
 
 # =============================================================================
@@ -58,10 +54,16 @@ def filter_units(rows: Sequence[UnitRow], choice: str) -> list[UnitRow]:
     return list(rows)
 
 
-def furthest_behind(rows: Sequence[UnitRow], limit: int = CHART_UNITS) -> list[UnitRow]:
+def furthest_behind(rows: Sequence[UnitRow]) -> list[UnitRow]:
     """Return the tracked units with the lowest % complete first."""
     tracked = [row for row in rows if row.percentage is not None]
-    return sorted(tracked, key=lambda row: (row.percentage, row.unit))[:limit]
+    return sorted(tracked, key=lambda row: (row.percentage, row.unit))
+
+
+def lowest_first(rows: Sequence[UnitRow]) -> list[UnitRow]:
+    """Order the By unit table: lowest % complete first, Untracked last."""
+    untracked = [row for row in rows if row.percentage is None]
+    return furthest_behind(rows) + untracked
 
 
 def unit_frame(rows: Sequence[UnitRow], column: str) -> pl.DataFrame:
@@ -108,7 +110,7 @@ def visit_lists(
             by_unit.setdefault(respondent.unit, []).append(respondent)
     return [
         (unit, by_unit[unit.unit])
-        for unit in furthest_behind(units, None)
+        for unit in furthest_behind(units)
         if unit.unit in by_unit
     ]
 
@@ -134,6 +136,24 @@ def respondent_frame(
         ],
         schema=columns | dict.fromkeys(extra_names.values(), pl.String),
         orient="row",
+    )
+
+
+def visit_frame(
+    lists: Sequence[tuple[UnitRow, list[Respondent]]],
+    extra: Sequence[str],
+    unit_column: str,
+) -> pl.DataFrame:
+    """Return the visit lists as one table, with each unit's % complete.
+
+    Rows keep the lists' order: the furthest-behind unit first.
+    """
+    people = [r for _, group in lists for r in group]
+    unit_pct = [unit.percentage for unit, group in lists for _ in group]
+    frame = respondent_frame(people, extra, unit_column)
+    return frame.insert_column(
+        frame.columns.index(unit_column) + 1,
+        pl.Series(VISIT_PCT, unit_pct, dtype=pl.Float64),
     )
 
 
@@ -167,37 +187,8 @@ def _download(frame: pl.DataFrame, label: str, file_name: str, key: str) -> None
     )
 
 
-def furthest_behind_figure(rows: Sequence[UnitRow], column: str) -> go.Figure:
-    """Build the furthest-behind chart: % complete, lowest at the top."""
-    shown = list(reversed(furthest_behind(rows)))
-    fig = go.Figure(
-        go.Bar(
-            x=[row.percentage for row in shown],
-            y=[row.unit for row in shown],
-            orientation="h",
-            marker_color=[
-                BEHIND_COLOR if row.status == "behind" else ON_TRACK_COLOR
-                for row in shown
-            ],
-            customdata=[[row.completed, row.target] for row in shown],
-            hovertemplate="<b>%{y}</b><br>%{x:.1f}% complete "
-            "(%{customdata[0]:,} of %{customdata[1]:,})<extra></extra>",
-        )
-    )
-    fig.add_vline(x=100, line={"color": "#E67E22", "width": 1, "dash": "dash"})
-    fig.update_layout(
-        plot_bgcolor=TRANSPARENT,
-        paper_bgcolor=TRANSPARENT,
-        height=max(220, 28 * len(shown) + 80),
-        margin={"t": 30, "b": 40, "l": 10, "r": 30},
-        xaxis={"title_text": "% complete", "showgrid": False, "rangemode": "tozero"},
-        yaxis={"title_text": column, "type": "category", "automargin": True},
-    )
-    return fig
-
-
 def display_by_unit(levels: Sequence[UnitLevel], view: ViewState) -> None:
-    """Draw By unit: level and filter, the furthest-behind chart, table, export.
+    """Draw By unit: level and filter, the table lowest % first, export.
 
     Parameters
     ----------
@@ -236,15 +227,7 @@ def display_by_unit(levels: Sequence[UnitLevel], view: ViewState) -> None:
         )
     level = levels[names.index(name)] if name in names else levels[0]
 
-    if any(row.percentage is not None for row in level.rows):
-        st.markdown("**Furthest behind**")
-        st.plotly_chart(
-            furthest_behind_figure(level.rows, level.column),
-            theme=None,
-            width="stretch",
-        )
-
-    shown = filter_units(level.rows, choice or UNIT_FILTERS[0])
+    shown = lowest_first(filter_units(level.rows, choice or UNIT_FILTERS[0]))
     table = unit_frame(shown, level.column)
     _download(
         table,
@@ -261,7 +244,15 @@ def display_by_unit(levels: Sequence[UnitLevel], view: ViewState) -> None:
         width="stretch",
         column_config={
             level.column: st.column_config.Column(pinned=True),
-            "% complete": st.column_config.NumberColumn(format="%.1f%%"),
+            # The bar fills at 100%; "auto" draws it red below half, which
+            # is the Behind cutoff.
+            "% complete": st.column_config.ProgressColumn(
+                format="%.1f%%",
+                min_value=0,
+                max_value=100,
+                color="auto",
+                help="Completed of target. Red below 50% (Behind).",
+            ),
         },
     )
     if any(row.unit == UNTRACKED for row in shown):
@@ -322,27 +313,28 @@ def display_respondents(
             "Everyone on the master list has completed.", icon=":material/check_circle:"
         )
     else:
-        to_visit = [r for _, people in lists for r in people]
+        table = visit_frame(lists, extra, unit_column)
         st.caption(
-            f"{len(to_visit):,} pending and attempted respondents, by "
-            f"{unit_column}, the furthest behind first."
+            f"{table.height:,} pending and attempted respondents in "
+            f"{len(lists):,} {unit_column} units, the furthest behind first."
         )
         _download(
-            respondent_frame(to_visit, extra, unit_column),
+            table,
             "Download visit list (CSV)",
             "progress_visit_list.csv",
             key="visit_list_download",
         )
-        for unit, people in lists:
-            with st.expander(
-                f"{unit.unit} · {unit.percentage:.0f}% complete · "
-                f"{len(people):,} to visit"
-            ):
-                st.dataframe(
-                    respondent_frame(people, extra, unit_column).drop(unit_column),
-                    hide_index=True,
-                    width="stretch",
-                )
+        st.dataframe(
+            table,
+            hide_index=True,
+            width="stretch",
+            column_config={
+                "ID": st.column_config.Column(pinned=True),
+                VISIT_PCT: st.column_config.NumberColumn(
+                    format="%.0f%%", help=f"% complete of the {unit_column}"
+                ),
+            },
+        )
 
     unexpected = by_status.get("Unexpected", [])
     section_header("Unexpected IDs", icon=":material/help:")

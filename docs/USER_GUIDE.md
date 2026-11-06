@@ -1207,12 +1207,12 @@ fixed target in use until it is imported.
 
 Shown with a tracking file or a master list. A table of each unit's target,
 submissions, unique and completed IDs, % complete and remaining
-completions:
+completions, with the lowest % complete first and the Untracked group last:
 
 - **Level**: units, or a parent level, when parent columns are set
 - **Show**: all units, those **behind** (below 50% of target), those **over
   target** (above 100%, tagged "Over target"), or the **Untracked** group
-- **Furthest behind**: a chart of % complete, the lowest first
+- **% complete** is a bar that fills at 100% and is red below 50%
 - **Untracked** counts submissions whose unit isn't in the tracking
   dataset or has a target of 0, and survey IDs not on the master list
 - Download the table as CSV, with the filter applied
@@ -1230,8 +1230,9 @@ Shown with a master list. Each respondent on the list has a status:
 A survey ID not on the master list is **Unexpected**. Unexpected IDs have
 no unit and are counted in the Untracked group.
 
-- **To visit**: the Pending and Attempted-not-completed respondents, by
-  unit, the unit furthest behind first. Download them as one CSV
+- **To visit**: one table of the Pending and Attempted-not-completed
+  respondents, grouped by unit with the unit furthest behind first, and
+  each unit's % complete. Download it as a CSV
 - **Unexpected IDs**: with their number of submissions and last submission
   date
 - **Completed**: the respondents who completed

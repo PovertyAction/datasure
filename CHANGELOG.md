@@ -42,9 +42,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   target, achieved, basis "completed interviews" or "unique IDs", and the
   unit and parent `unit_levels`) for Project Overview (#431, #435) — #410
 - **Progress UI**: `checks/progress_tracking_ui.py` draws By unit (level
-  and filter as per-page view state, furthest-behind chart, table, CSV
-  export) and Respondents (status counts, visit lists by unit lowest
-  progress first, Unexpected and Completed lists, extra master-list
+  and filter as per-page view state, a table sorted lowest % complete first
+  with a `ProgressColumn` bar, CSV export) and Respondents (status counts,
+  one To visit table grouped by unit lowest progress first with each unit's
+  % complete, Unexpected and Completed lists, extra master-list
   columns, CSV exports), and the tracking issues. The settings expander
   gains a Target source section; Total Expected Interviews is read-only in
   file modes. The header strip names the mode and dataset, and an
