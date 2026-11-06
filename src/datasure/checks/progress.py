@@ -8,6 +8,7 @@ another visit, and how many tries a completion takes).
 """
 
 import math
+from dataclasses import dataclass
 from datetime import date, timedelta
 from typing import Any, Literal
 
@@ -16,8 +17,30 @@ import polars as pl
 import streamlit as st
 from pydantic import BaseModel, Field, ValidationError, field_validator
 
+from datasure.checks.check_configs import progress_config
+from datasure.checks.context import CheckContext
 from datasure.checks.headline import CheckHeadline, settings_no_longer_fit
 from datasure.checks.health_period import date_expr
+from datasure.checks.progress_tracking import (
+    ProgressMode,
+    Respondent,
+    TrackingIssue,
+    TrackingReference,
+    TrackingSettings,
+    UnitLevel,
+    assign_units,
+    detect_mode,
+    normalize_keys,
+    read_tracking,
+    respondents,
+    unit_levels,
+    untracked_unit_count,
+)
+from datasure.checks.progress_tracking_ui import (
+    display_by_unit,
+    display_issues,
+    display_respondents,
+)
 from datasure.utils.dataframe_utils import ColumnByType
 from datasure.utils.navigations_utils import demo_callout
 from datasure.utils.onboarding_utils import demo_output_onboarding
@@ -31,11 +54,19 @@ from datasure.utils.view_state import reset_filters_beside, view_factory
 
 TAB_NAME = "progress"
 Period = Literal["Day", "Week", "Month"]
-# Only a fixed target for now; the tracking file and master list come later
-ProgressMode = Literal["fixed"]
-SECTIONS_BY_MODE: dict[str, list[str]] = {"fixed": ["Overview", "Follow-up"]}
+SECTIONS_BY_MODE: dict[str, list[str]] = {
+    "fixed": ["Overview", "Follow-up"],
+    "tracking file": ["Overview", "Follow-up", "By unit"],
+    "master list": ["Overview", "Follow-up", "By unit", "Respondents"],
+}
 # Where a to-do card's link takes the reader, by section
-SECTION_ANCHORS = {"Follow-up": "follow-up"}
+SECTION_ANCHORS = {
+    "Follow-up": "follow-up",
+    "By unit": "by-unit",
+    "Respondents": "respondents",
+}
+# The header's attention pill jumps here, to the to-do cards
+OVERVIEW_ANCHOR = "overview"
 # Keys older versions saved the targets under, mapped to the
 # ProgressSettings fields they belong to
 LEGACY_TARGET_KEYS = {
@@ -68,7 +99,7 @@ check_view = view_factory(
 # =============================================================================
 
 
-class ProgressSettings(BaseModel):
+class ProgressSettings(TrackingSettings):
     """Settings for progress report configuration."""
 
     survey_key: str | None = Field(None, description="Survey key column")
@@ -129,6 +160,22 @@ class ProgressSettings(BaseModel):
         if v is not None and v < 0:
             raise ValueError("Target must be a positive number")
         return v
+
+
+@dataclass(frozen=True)
+class TrackingSource:
+    """The page's tracking dataset, as the Progress page receives it.
+
+    Attributes
+    ----------
+    name : str | None
+        Its alias in the page config; None when the page has none.
+    data : pl.DataFrame | None
+        Its rows; None when not set, not imported yet or empty.
+    """
+
+    name: str | None = None
+    data: pl.DataFrame | None = None
 
 
 class ProgressCounts(BaseModel):
@@ -308,6 +355,23 @@ class ProgressResult(BaseModel):
         description="Open IDs, most attempts first, then longest since the last "
         "attempt; empty without a completion condition",
     )
+    issues: list[TrackingIssue] = Field(
+        default_factory=list,
+        description="Errors and warnings about the tracking dataset",
+    )
+    unit_levels: list[UnitLevel] = Field(
+        default_factory=list,
+        description="The By unit table at each level, units first; empty in "
+        "fixed mode or when an error stops the tracking dataset being used",
+    )
+    untracked_units: int = Field(
+        0, ge=0, description="Survey units the tracking file has no target for"
+    )
+    respondents: list[Respondent] = Field(
+        default_factory=list,
+        description="Master-list respondents and unexpected IDs; empty outside "
+        "master-list mode",
+    )
 
 
 def _progress_rows(data: pl.DataFrame, settings: ProgressSettings) -> pl.DataFrame:
@@ -454,18 +518,29 @@ def _attempts_to_outcome(
     ]
 
 
-def _todos(follow_up: FollowUpMetrics) -> list[TodoItem]:
+BEHIND_LABEL = "Units below 50% of target"
+UNTRACKED_LABEL = "Untracked units"
+UNEXPECTED_LABEL = "Unexpected IDs"
+
+
+def _todos(result: "ProgressResult") -> list[TodoItem]:
     """List the to-do cards whose count is above zero."""
-    todos = []
-    if follow_up.open_3_plus:
-        todos.append(
-            TodoItem(
-                label=OPEN_AFTER_3_LABEL,
-                count=follow_up.open_3_plus,
-                section="Follow-up",
-            )
-        )
-    return todos
+    finest = result.unit_levels[0].rows if result.unit_levels else []
+    counts = [
+        (
+            UNEXPECTED_LABEL,
+            sum(r.status == "Unexpected" for r in result.respondents),
+            "Respondents",
+        ),
+        (BEHIND_LABEL, sum(r.status == "behind" for r in finest), "By unit"),
+        (UNTRACKED_LABEL, result.untracked_units, "By unit"),
+        (OPEN_AFTER_3_LABEL, result.follow_up.open_3_plus or 0, "Follow-up"),
+    ]
+    return [
+        TodoItem(label=label, count=count, section=section)
+        for label, count, section in counts
+        if count
+    ]
 
 
 def _follow_up_queue(
@@ -764,7 +839,8 @@ def compute_progress(
     period : {"Day", "Week", "Month"}
         The period of the over-time series and of the current-period count.
     tracking : pl.DataFrame | None
-        The tracking dataset. Not used yet: only the fixed target is.
+        The tracking dataset: a tracking file or a master list. None for a
+        fixed target.
 
     Returns
     -------
@@ -772,8 +848,9 @@ def compute_progress(
         The counts, series and pace the page draws.
     """
     TimePeriodConfig(time_period=period)
-    rows = _progress_rows(data, settings)
-    counts = _counts(rows, settings)
+    mode = detect_mode(tracking is not None, settings)
+    rows, reference = _rows_and_reference(data, settings, tracking)
+    counts = _counts(rows, _target(settings, reference))
     # A completion dated after today, such as one from a device with a wrong
     # clock, counts in Completed but not in the chart, period or pace
     firsts = _first_completions(rows).filter(pl.col("date") <= as_of)
@@ -781,35 +858,77 @@ def compute_progress(
     series = _series(rows, firsts, as_of, period)
     pace = _pace(rows, firsts, settings, counts.remaining, as_of)
     result = ProgressResult(
-        mode="fixed",
-        sections=SECTIONS_BY_MODE["fixed"],
+        mode=mode,
+        sections=SECTIONS_BY_MODE[mode],
         counts=counts,
         pace=pace,
         status=_status(counts, pace, settings.field_end_date, as_of),
         current_period=_current_period(firsts, settings, as_of, period),
         series=series,
         target_path=_target_path(series, counts.target, settings.field_end_date),
+        issues=reference.issues if reference else [],
     )
+    tagged = None
+    if reference is not None and reference.usable:
+        tagged = assign_units(rows, data, reference, settings)
+        result = result.model_copy(
+            update={
+                "unit_levels": unit_levels(tagged, reference),
+                "untracked_units": untracked_unit_count(tagged, reference),
+            }
+        )
     # Without an ID column each row is its own ID, which the headline counts
     # accept but which would make every follow-up number up
     if not settings.survey_id:
-        return result
+        return result.model_copy(update={"todos": _todos(result)})
     per_id = _per_id(_attempts(data, rows, settings))
-    follow_up = _follow_up_metrics(per_id, settings)
-    return result.model_copy(
+    result = result.model_copy(
         update={
-            "todos": _todos(follow_up),
-            "follow_up": follow_up,
+            "follow_up": _follow_up_metrics(per_id, settings),
             "attempts_to_outcome": _attempts_to_outcome(per_id, settings),
             "follow_up_queue": _follow_up_queue(per_id, settings, as_of),
         }
     )
+    if tagged is not None and reference.ids is not None:
+        result = result.model_copy(
+            update={
+                "respondents": respondents(per_id, reference, settings.tracking_display)
+            }
+        )
+    return result.model_copy(update={"todos": _todos(result)})
 
 
-def _counts(rows: pl.DataFrame, settings: ProgressSettings) -> ProgressCounts:
+def _rows_and_reference(
+    data: pl.DataFrame, settings: ProgressSettings, tracking: pl.DataFrame | None
+) -> tuple[pl.DataFrame, TrackingReference | None]:
+    """Return the progress rows and the checked tracking dataset, if any.
+
+    With a usable master list, the survey IDs are normalized the way the
+    master list's are, so every count matches IDs the same way.
+    """
+    rows = _progress_rows(data, settings)
+    if tracking is None:
+        return rows, None
+    reference = read_tracking(tracking, settings, settings.survey_id, data.columns)
+    if reference.usable and reference.ids is not None:
+        rows = rows.with_columns(
+            normalize_keys(rows["id"], settings.strip_leading_zeros).alias("id")
+        )
+    return rows, reference
+
+
+def _target(
+    settings: ProgressSettings, reference: TrackingReference | None
+) -> int | None:
+    """The fixed target, or the tracking dataset's total in the file modes."""
+    if reference is None:
+        return settings.survey_target or None
+    return reference.target or None
+
+
+def _counts(rows: pl.DataFrame, target: int | None) -> ProgressCounts:
     """Count submissions, unique and completed IDs against the target."""
     completed = rows.filter(pl.col("qualifies"))["id"].drop_nulls().n_unique()
-    target = settings.survey_target or None
     return ProgressCounts(
         submissions=rows.height,
         unique=rows["id"].drop_nulls().n_unique(),
@@ -820,13 +939,18 @@ def _counts(rows: pl.DataFrame, settings: ProgressSettings) -> ProgressCounts:
     )
 
 
-def compute_counts(data: pl.DataFrame, settings: ProgressSettings) -> ProgressCounts:
+def compute_counts(
+    data: pl.DataFrame,
+    settings: ProgressSettings,
+    tracking: pl.DataFrame | None = None,
+) -> ProgressCounts:
     """Count progress without the series and pace, for Summary's Progress row.
 
     The same counts `compute_progress` returns. Leaving out the series keeps
     Summary quick when a mis-keyed date stretches it over decades.
     """
-    return _counts(_progress_rows(data, settings), settings)
+    rows, reference = _rows_and_reference(data, settings, tracking)
+    return _counts(rows, _target(settings, reference))
 
 
 class TimePeriodConfig(BaseModel):
@@ -1030,12 +1154,14 @@ def progress_report_settings(
     config: ProgressSettings,
     categorical_columns: list[str],
     datetime_columns: list[str],
+    tracking: TrackingSource | None = None,
 ) -> ProgressSettings:
     """Render the settings expander at the top of the page; return the settings.
 
-    The expander holds the survey columns, the targets, the field end date
-    and the completion condition. Each setting is saved to the settings file
-    when the user changes it, and loads back on the next visit.
+    The expander holds the survey columns, the target source, the targets,
+    the field end date and the completion condition. Each setting is saved
+    to the settings file when the user changes it, and loads back on the
+    next visit.
 
     Parameters
     ----------
@@ -1049,6 +1175,8 @@ def progress_report_settings(
         Available categorical columns for selection (survey key and ID).
     datetime_columns : list[str]
         Available datetime columns for date selection.
+    tracking : TrackingSource | None
+        The page's tracking dataset; None when the page config has none.
 
     Returns
     -------
@@ -1059,7 +1187,12 @@ def progress_report_settings(
         st.markdown("## Configure settings for progress report")
         st.divider()
         return _settings_sections(
-            data, settings_file, config, categorical_columns, datetime_columns
+            data,
+            settings_file,
+            config,
+            categorical_columns,
+            datetime_columns,
+            tracking,
         )
 
 
@@ -1069,8 +1202,10 @@ def _settings_sections(
     config: ProgressSettings,
     categorical_columns: list[str],
     datetime_columns: list[str],
+    tracking: TrackingSource | None = None,
 ) -> ProgressSettings:
     """Render the settings sections; see `progress_report_settings`."""
+    tracking = tracking or TrackingSource()
     default_settings = load_default_settings(settings_file, config)
 
     with st.container(border=True):
@@ -1106,21 +1241,43 @@ def _settings_sections(
                 "the current period and the projected finish need it.",
             )
 
+    tracking_settings = _tracking_settings_section(
+        settings_file, default_settings, tracking, categorical_columns
+    )
+
     with st.container(border=True):
         section_header("Targets", icon=":material/flag:")
         tc1, tc2, tc3 = st.columns(3)
         default_target_per_period = default_settings.target_submissions_per_period
         with tc1:
-            target = st.number_input(
-                label="Total Expected Interviews",
-                min_value=0,
-                value=default_settings.survey_target,
-                help="Total number of completed interviews expected",
-                key="total_goal_progress",
-                on_change=trigger_save,
-                kwargs={"state_name": TAB_NAME + "_survey_target"},
-            )
-            save_check_settings(settings_file, TAB_NAME, {"survey_target": target})
+            if tracking.data is None:
+                target = st.number_input(
+                    label="Total Expected Interviews",
+                    min_value=0,
+                    value=default_settings.survey_target,
+                    help="Total number of completed interviews expected",
+                    key="total_goal_progress",
+                    on_change=trigger_save,
+                    kwargs={"state_name": TAB_NAME + "_survey_target"},
+                )
+                save_check_settings(settings_file, TAB_NAME, {"survey_target": target})
+            else:
+                # The tracking dataset sets the target. The saved fixed
+                # target is kept, for when the tracking dataset is removed.
+                target = default_settings.survey_target
+                file_total = read_tracking(
+                    tracking.data, tracking_settings, survey_id, data.columns
+                ).target
+                st.number_input(
+                    label="Total Expected Interviews",
+                    min_value=0,
+                    value=file_total,
+                    disabled=True,
+                    help="Set by the tracking dataset: the sum of the unit "
+                    "targets. To set a fixed target, remove the tracking "
+                    "dataset in the page configuration.",
+                    key="total_goal_progress_tracking",
+                )
         with tc2:
             target_per_period = st.number_input(
                 label="Target Completions Per Period",
@@ -1200,6 +1357,154 @@ def _settings_sections(
         outcome_vals=outcome_vals,
         field_end_date=field_end_date,
         enumerator=default_settings.enumerator,
+        **tracking_settings.model_dump(),
+    )
+
+
+def _setting_multiselect(
+    settings_file: str,
+    setting: str,
+    label: str,
+    options: list[str],
+    default: list[str],
+    help_text: str,
+) -> list[str]:
+    """Render a multi-column picker for one progress setting and save the choice."""
+    selected = st.multiselect(
+        label,
+        options=options,
+        default=[column for column in default if column in options] or None,
+        help=help_text,
+        key=f"{setting}_progress",
+        on_change=trigger_save,
+        kwargs={"state_name": f"{TAB_NAME}_{setting}"},
+    )
+    save_check_settings(settings_file, TAB_NAME, {setting: selected})
+    return selected
+
+
+def _saved_tracking(saved: ProgressSettings) -> TrackingSettings:
+    return TrackingSettings(
+        **saved.model_dump(include=set(TrackingSettings.model_fields))
+    )
+
+
+def _tracking_settings_section(
+    settings_file: str,
+    saved: ProgressSettings,
+    tracking: TrackingSource,
+    categorical_columns: list[str],
+) -> TrackingSettings:
+    """Render the target source settings; return the tracking settings.
+
+    Without a tracking dataset this only says how to add one. The mode
+    follows from the target column: chosen for a tracking file, empty for a
+    master list.
+    """
+    with st.container(border=True):
+        section_header("Target source", icon=":material/table_view:")
+        if not tracking.name:
+            st.caption(
+                "The target is a fixed number. To set targets per unit from a "
+                "tracking file, or per respondent from a master list, add a "
+                "**Tracking Dataset** in the page configuration. That turns "
+                "on the **By unit** section, and **Respondents** for a master "
+                "list."
+            )
+            return _saved_tracking(saved)
+        if tracking.data is None:
+            st.warning(
+                f"The tracking dataset **{tracking.name}** has no rows or is "
+                "not imported yet. Import it on the Import Data page. Until "
+                "then the target is the fixed number.",
+                icon=":material/warning:",
+            )
+            return _saved_tracking(saved)
+        columns = tracking.data.columns
+        st.caption(
+            f"Targets come from **{tracking.name}**. Choose a target column for "
+            "a tracking file (one row per unit), or leave it empty for a "
+            "master list (one row per expected respondent)."
+        )
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            target_column = _setting_selectbox(
+                settings_file,
+                "tracking_target",
+                "Target column",
+                columns,
+                saved.tracking_target,
+                "Each unit's target. Leave empty for a master list.",
+            )
+        with c2:
+            unit = _setting_selectbox(
+                settings_file,
+                "tracking_unit",
+                "Unit column (tracking dataset)",
+                columns,
+                saved.tracking_unit,
+                "The unit each row belongs to, such as a village. Optional for "
+                "a master list.",
+            )
+        survey_unit, tracking_id = saved.survey_unit, saved.tracking_id
+        display = saved.tracking_display
+        with c3:
+            if target_column:
+                survey_unit = _setting_selectbox(
+                    settings_file,
+                    "survey_unit",
+                    "Unit column (survey)",
+                    categorical_columns,
+                    saved.survey_unit,
+                    "The survey column holding the same units",
+                )
+            else:
+                tracking_id = _setting_selectbox(
+                    settings_file,
+                    "tracking_id",
+                    "ID column (master list)",
+                    columns,
+                    saved.tracking_id,
+                    "Matched to the Survey ID column above",
+                )
+        used = {target_column, unit, tracking_id}
+        parents = _setting_multiselect(
+            settings_file,
+            "tracking_parents",
+            "Parent columns, finest first",
+            [column for column in columns if column not in used],
+            saved.tracking_parents,
+            "Higher levels the units roll up to, such as district then region. "
+            "A parent's target is the sum of its units' targets.",
+        )
+        if not target_column:
+            display = _setting_multiselect(
+                settings_file,
+                "tracking_display",
+                "Extra columns for respondent lists",
+                [column for column in columns if column != tracking_id],
+                saved.tracking_display,
+                "Master-list columns shown and exported with each respondent "
+                "list, such as a landmark",
+            )
+        strip = st.toggle(
+            "Ignore leading zeros in IDs and units",
+            value=saved.strip_leading_zeros,
+            help="Match 0123 to 123. IDs and units are always matched as text "
+            "with spaces trimmed, and case matters.",
+            key="strip_leading_zeros_progress",
+            on_change=trigger_save,
+            kwargs={"state_name": f"{TAB_NAME}_strip_leading_zeros"},
+        )
+        save_check_settings(settings_file, TAB_NAME, {"strip_leading_zeros": strip})
+    return TrackingSettings(
+        tracking_target=target_column,
+        tracking_unit=unit,
+        survey_unit=survey_unit,
+        tracking_id=tracking_id,
+        tracking_parents=parents,
+        strip_leading_zeros=strip,
+        tracking_display=display,
     )
 
 
@@ -1223,8 +1528,39 @@ def describe_condition(settings: ProgressSettings) -> str:
     return " and ".join(parts) if parts else "none (every ID counts)"
 
 
+def describe_target(result: ProgressResult, tracking_name: str | None) -> str:
+    """Name the target's source and size for the header strip."""
+    target = result.counts.target
+    if result.mode == "fixed":
+        return f"fixed number, {target:,}" if target else "fixed number, not set"
+    if not result.unit_levels:
+        return f"{result.mode} **{tracking_name}**, not usable yet"
+    if not target:
+        return f"{result.mode} **{tracking_name}**, every target is 0"
+    if result.mode == "tracking file":
+        units = sum(r.target is not None for r in result.unit_levels[0].rows)
+        return f"tracking file **{tracking_name}**, {target:,} across {units:,} units"
+    return f"master list **{tracking_name}**, {target:,} respondents"
+
+
+def attention_text(result: ProgressResult) -> str | None:
+    """The header's pill linking to the to-do cards; None when there are none."""
+    count = len(result.todos)
+    if not count:
+        return None
+    things = "thing needs" if count == 1 else "things need"
+    return (
+        f"[:orange-badge[:material/warning: {count} {things} attention]]"
+        f"(#{OVERVIEW_ANCHOR})"
+    )
+
+
 @demo_output_onboarding(TAB_NAME)
-def display_progress_header(result: ProgressResult, settings: ProgressSettings) -> None:
+def display_progress_header(
+    result: ProgressResult,
+    settings: ProgressSettings,
+    tracking_name: str | None = None,
+) -> None:
     """Draw the header at the top of the Progress page.
 
     Parameters
@@ -1233,13 +1569,18 @@ def display_progress_header(result: ProgressResult, settings: ProgressSettings) 
         The computed progress.
     settings : ProgressSettings
         The settings the progress was computed with.
+    tracking_name : str | None
+        The tracking dataset's alias, named in the target-source strip.
     """
+    display_issues(result.issues)
     counts = result.counts
-    target_text = f"{counts.target:,}" if counts.target else "not set"
     st.caption(
-        f"**Target:** fixed number, {target_text} · "
+        f"**Target:** {describe_target(result, tracking_name)} · "
         f"**Completion condition:** {describe_condition(settings)}"
     )
+    pill = attention_text(result)
+    if pill:
+        st.markdown(pill)
     completed_help = (
         "Distinct IDs with a submission that meets the completion condition"
     )
@@ -1251,6 +1592,10 @@ def display_progress_header(result: ProgressResult, settings: ProgressSettings) 
         st.info(
             "Target number of interviews is not set. Set it in the "
             ":material/settings: settings section above."
+            if result.mode == "fixed"
+            else "There is no target until the tracking dataset can be used. "
+            "Finish the target source in the :material/settings: settings "
+            "section above."
         )
         metrics.append(("Completed", f"{counts.completed:,}", completed_help))
     else:
@@ -1789,12 +2134,15 @@ def progress_report(
     setting_file: str,
     config: dict,
     survey_columns: ColumnByType,
+    tracking: TrackingSource | None = None,
 ) -> None:
-    """Display the Progress page: settings, header, then Overview and Follow-up.
+    """Display the Progress page: settings, header, then the sections.
 
     The settings expander sits at the top, as on Summary, with "Reset
     filters" beside it. `compute_progress` then counts the progress once and
-    the header and both sections draw from its result.
+    the header and the sections draw from its result: Overview and
+    Follow-up, then By unit with a tracking dataset and Respondents with a
+    master list.
 
     Parameters
     ----------
@@ -1806,7 +2154,10 @@ def progress_report(
         Default configuration dictionary to initialize ProgressSettings.
     survey_columns : ColumnByType
         Column names categorized by data type.
+    tracking : TrackingSource | None
+        The page's tracking dataset; None when the page config has none.
     """
+    tracking = tracking or TrackingSource()
     st.title("Progress Tracking")
     saved_view = check_view(setting_file)
     with reset_filters_beside(saved_view):
@@ -1816,6 +2167,7 @@ def progress_report(
             ProgressSettings(**config),
             survey_columns.categorical_columns,
             survey_columns.datetime_columns,
+            tracking,
         )
 
     saved = load_default_settings(setting_file, ProgressSettings(**config))
@@ -1830,13 +2182,15 @@ def progress_report(
 
     # The header sits above the chart controls but needs the period they hold
     header = st.container()
-    section_header("Overview", icon=":material/insights:")
+    section_header("Overview", icon=":material/insights:", anchor=OVERVIEW_ANCHOR)
     chart_view, period = render_chart_controls(setting_file)
 
-    result = compute_progress(data, settings, date.today(), period)
+    result = compute_progress(
+        data, settings, date.today(), period, tracking=tracking.data
+    )
 
     with header:
-        display_progress_header(result, settings)
+        display_progress_header(result, settings, tracking.name)
     display_overview(result, settings, chart_view)
 
     st.divider()
@@ -1847,9 +2201,80 @@ def progress_report(
     )
     display_follow_up(result, settings, setting_file)
 
+    if "By unit" in result.sections:
+        st.divider()
+        section_header(
+            "By unit",
+            icon=":material/holiday_village:",
+            anchor=SECTION_ANCHORS["By unit"],
+        )
+        display_by_unit(result.unit_levels, saved_view)
+    if "Respondents" in result.sections:
+        st.divider()
+        section_header(
+            "Respondents",
+            icon=":material/groups:",
+            anchor=SECTION_ANCHORS["Respondents"],
+        )
+        display_respondents(
+            result.respondents, result.unit_levels, settings.tracking_display
+        )
+
+
+class ProgressResolution(BaseModel):
+    """Progress as other pages read it, through `resolve_progress`."""
+
+    mode: ProgressMode = Field(description="Where the target comes from")
+    target: int | None = Field(None, ge=0, description="None when not set")
+    achieved: int = Field(
+        ge=0, description="Completed IDs; every ID without a completion condition"
+    )
+    basis: Literal["completed interviews", "unique IDs"] = Field(
+        description="What `achieved` counts"
+    )
+    unit_levels: list[UnitLevel] = Field(
+        default_factory=list,
+        description="Unit and parent targets and counts, as on By unit",
+    )
+
+
+def resolve_progress(ctx: CheckContext) -> ProgressResolution:
+    """Return the target and the count against it, as the Progress check has them.
+
+    The contract for other pages, such as Project Overview: the target from
+    the fixed setting or the tracking dataset, the Completed count (Unique
+    when no completion condition is set) and the unit and parent targets.
+    A tracking dataset with no rows, or not yet imported, counts as none.
+
+    Parameters
+    ----------
+    ctx : CheckContext
+        The check page's configuration and data.
+    """
+    data = ctx.data.page_data
+    tracking = ctx.data.tracking_data_with_rows
+    settings = load_default_settings(
+        ctx.config.setting_file, ProgressSettings(**progress_config(ctx))
+    )
+    rows, reference = _rows_and_reference(data, settings, tracking)
+    counts = _counts(rows, _target(settings, reference))
+    levels = []
+    if reference is not None and reference.usable:
+        levels = unit_levels(assign_units(rows, data, reference, settings), reference)
+    return ProgressResolution(
+        mode=detect_mode(tracking is not None, settings),
+        target=counts.target,
+        achieved=counts.completed,
+        basis="completed interviews" if settings.has_condition else "unique IDs",
+        unit_levels=levels,
+    )
+
 
 def progress_headline(
-    data: pl.DataFrame, setting_file: str, config: dict
+    data: pl.DataFrame,
+    setting_file: str,
+    config: dict,
+    tracking: pl.DataFrame | None = None,
 ) -> CheckHeadline:
     """Return the progress headline for Summary's check health row.
 
@@ -1865,10 +2290,12 @@ def progress_headline(
         Path to the page's settings file.
     config : dict
         The page configuration the check starts from.
+    tracking : pl.DataFrame | None
+        The tracking dataset, when it has rows; its total is the target.
     """
     try:
         settings = load_default_settings(setting_file, ProgressSettings(**config))
-        counts = compute_counts(data, settings)
+        counts = compute_counts(data, settings, tracking)
     except (pl.exceptions.PolarsError, ValidationError) as exc:
         raise settings_no_longer_fit("Progress", exc) from exc
     if counts.target is None:

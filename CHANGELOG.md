@@ -9,6 +9,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Progress tracking-file and master-list modes**: new pure module
+  `checks/progress_tracking.py`. `TrackingSettings` (mixed into
+  `ProgressSettings`) adds `tracking_target`, `tracking_unit`,
+  `survey_unit`, `tracking_id`, `tracking_parents`, `strip_leading_zeros`
+  and `tracking_display`. `detect_mode` works the mode out from the
+  settings (never stored): no tracking dataset → `fixed`, a target column →
+  `tracking file`, none → `master list`. `normalize_keys` casts IDs and
+  units to text, trims spaces, treats blanks as missing, reads whole-number
+  floats as integers and, with the toggle, strips leading zeros; no case
+  folding. `read_tracking` returns a `TrackingReference` with
+  `TrackingIssue`s: a repeated unit or ID, a setting not chosen or a column
+  no longer there is a blocking error; a missing key drops the row with a
+  warning and count; a missing, non-numeric or negative target counts as 0
+  with a warning listing the units. `assign_units` takes units from the
+  survey's unit column (tracking file) or through the ID (master list);
+  `unit_levels` rolls parents up as sums and puts rows of units not in the
+  dataset or with a target of 0, and unexpected IDs, in an `Untracked`
+  group; `respondents` gives each master-list ID its status (Completed,
+  Attempted not completed, Pending) and lists Unexpected IDs with their
+  last submission date — #410
+- **Progress result**: `compute_progress` uses its `tracking` argument.
+  `ProgressResult` gains `issues`, `unit_levels`, `untracked_units` and
+  `respondents`; `mode` and `sections` follow the mode (By unit with a
+  tracking dataset, Respondents with a master list). In file modes the
+  target is the dataset's total and the fixed target is kept but unused; a
+  usable master list normalizes survey IDs the same way. New to-do cards:
+  Unexpected IDs, Units below 50% of target and Untracked units.
+  `compute_counts` and `progress_headline` take the tracking dataset, so
+  Summary's Progress row and its delta agree with the page — #410
+- **`resolve_progress(ctx)`**: returns a `ProgressResolution` (mode,
+  target, achieved, basis "completed interviews" or "unique IDs", and the
+  unit and parent `unit_levels`) for Project Overview (#431, #435) — #410
+- **Progress UI**: `checks/progress_tracking_ui.py` draws By unit (level
+  and filter as per-page view state, furthest-behind chart, table, CSV
+  export) and Respondents (status counts, visit lists by unit lowest
+  progress first, Unexpected and Completed lists, extra master-list
+  columns, CSV exports), and the tracking issues. The settings expander
+  gains a Target source section; Total Expected Interviews is read-only in
+  file modes. The header strip names the mode and dataset, and an
+  attention pill links to the to-do cards. `progress_report` takes a
+  `TrackingSource` (alias and rows) — #410
+- **Tracking Dataset in the page config**: `render_tracking_dataset_selector`
+  in the add and edit forms (excludes the survey and backcheck datasets).
+  `CheckData` gains `tracking_data`, `tracking_state` and
+  `tracking_data_with_rows`; `load_check_data` loads it with the corrected
+  → prep → raw fallback — #410
+
 - **Progress compute layer**: `compute_progress(data, settings, as_of,
   period="Day", tracking=None)` in `checks/progress.py` is the single, pure
   function the Progress page and headline draw from. It returns a Pydantic
