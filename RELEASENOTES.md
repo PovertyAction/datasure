@@ -18,6 +18,20 @@ This document tracks user-facing changes and improvements to help data managers,
 
 ---
 
+## Version 1.2.1 — SurveyCTO Date Questions
+
+Released: November 2026
+
+This release fixes date and date-time questions from SurveyCTO forms, which imported as blank in every earlier version.
+
+### Bug Fixes
+
+- **Fixed**: Every `date` and `datetime` question in a form imported from SurveyCTO showed as blank, so these columns looked like skipped questions on the **Missing Values** tab. Refresh the form's data after you update to fill them in. Date questions now come in as dates without a time. If a value arrives in a format DataSure doesn't recognize, the column is kept as text instead of turning blank. Submission dates, start and end times, and local-file imports were not affected
+
+For problems still open in this release and their workarounds, see [KNOWN_ISSUES.md](KNOWN_ISSUES.md).
+
+---
+
 ## Version 1.2.0 — Review and Correct Where You Find the Problem
 
 Released: November 2026
