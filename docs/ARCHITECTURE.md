@@ -344,8 +344,9 @@ On a check page this is the page settings file
   Data" header.
 - **Not saved.** Pagination, search boxes and inputs inside dialogs or
   popovers are never bound, so they start fresh in a new session. Bound
-  today: Summary's "Progress by" column and time period; the Progress time
-  period and extra attempted-interview columns; the Missing Values
+  today: Summary's "Progress by" column and time period; the Progress open
+  tab, chart view, time period and extra attempted-interview columns; the
+  Missing Values
   threshold, date column, group-by and compare columns, all-columns toggle
   and correlation columns;
   the duplicates dataset switcher, card sort, column selector and extra
@@ -368,8 +369,9 @@ On a check page this is the page settings file
   `ViewState.adopt_legacy` when opened: a legacy value moves into the
   check's scope (unless one is already there) and leaves the settings
   section, so old files still load and the value then behaves as view
-  state. Configuration (Progress and Summary columns and targets, Progress
-  consent and outcome) stays with the check's settings. Progress targets
+  state. Configuration (Progress and Summary columns and targets, the
+  Progress field end date and completion condition) stays with the check's
+  settings. Progress targets
   saved under the old `target` and `target_per_period` keys are read as
   `survey_target` and `target_submissions_per_period`
   (`progress.LEGACY_TARGET_KEYS`), but only when the page config has no

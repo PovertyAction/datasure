@@ -311,20 +311,20 @@ class TestOutputOnboardingInfo:
             is None
         )
 
-    def test_get_onboarding_message_progress_display_summary(self):
-        """Test display_progress_summary entry."""
+    def test_get_onboarding_message_progress_header(self):
+        """Test display_progress_header entry."""
         message = OutputOnboardingInfo.get_onboarding_message(
-            "progress", "display_progress_summary"
+            "progress", "display_progress_header"
         )
-        assert message["title"] == "Progress Summary"
-        assert "Submission Progress" in message["content"]
+        assert message["title"] == "Progress Header"
+        assert "finish on time" in message["content"]
 
-    def test_get_onboarding_message_progress_display_overtime(self):
-        """Test display_progress_overtime entry."""
+    def test_get_onboarding_message_progress_overview(self):
+        """Test display_overview entry."""
         message = OutputOnboardingInfo.get_onboarding_message(
-            "progress", "display_progress_overtime"
+            "progress", "display_overview"
         )
-        assert message["title"] == "Progress Over Time"
+        assert message["title"] == "Overview"
         assert "green" in message["content"].lower()
 
     def test_get_onboarding_message_progress_attempted_interviews(self):
@@ -334,14 +334,6 @@ class TestOutputOnboardingInfo:
         )
         assert message["title"] == "Attempted Interviews"
         assert "Unique IDs" in message["content"]
-
-    def test_get_onboarding_message_progress_chart(self):
-        """Test display_progress_chart entry."""
-        message = OutputOnboardingInfo.get_onboarding_message(
-            "progress", "display_progress_chart"
-        )
-        assert message["title"] == "Consent and Completion Progress"
-        assert "Consent Rate" in message["content"]
 
     def test_get_onboarding_message_missing_columns(self):
         """Test missing_columns entry."""

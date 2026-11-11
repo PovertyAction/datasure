@@ -146,9 +146,7 @@ class TestProgress:
         _run(
             progress,
             st,
-            lambda: progress.render_time_period_selector(
-                str(settings_file), progress.TAB_NAME
-            ),
+            lambda: progress.render_time_period_selector(str(settings_file)),
         )
 
         assert st.session_state["time_period_progress_overtime"] == "Week"
@@ -161,7 +159,7 @@ class TestProgress:
     def test_a_new_time_period_is_view_state(self, settings_file):
         st = _st()
         render = lambda: progress.render_time_period_selector(  # noqa: E731
-            str(settings_file), progress.TAB_NAME
+            str(settings_file)
         )
         _run(progress, st, render)
 

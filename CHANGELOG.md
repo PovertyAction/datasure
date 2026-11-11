@@ -7,6 +7,75 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Progress compute layer**: `compute_progress(data, settings, as_of,
+  period="Day", tracking=None)` in `checks/progress.py` is the single, pure
+  function the Progress page and headline draw from. It returns a Pydantic
+  `ProgressResult` with `ProgressCounts` (Submissions, Unique, Completed,
+  Remaining, percentage), the over-time `series` (`SeriesPoint`: each ID
+  counted once, in the period of its first qualifying submission, with the
+  current period marked `partial`), the cumulative `target_path`, the
+  `CurrentPeriod` count against the per-period target, the `Pace`
+  (projected finish, counting today as the first day, as the days left
+  do, at the mean completions per day
+  over the 7 days up to the last submission, hidden with fewer than 3 days
+  of data or a zero pace; need-per-day
+  to the field end date), the `ProgressStatus` the header's status box
+  draws (on track, behind, no field end date, target reached, field end
+  date passed, too little data or no recent completions), the mode, the
+  visible tabs and the to-do items (none yet). `tracking` is unused until
+  tracking-file and master-list modes land — #408
+- **Progress settings**: `ProgressSettings` gains the completion condition
+  (`consent`, `consent_vals`, `outcome`, `outcome_vals`, read through
+  `condition()` and `has_condition`) and `field_end_date`. The consent and
+  outcome pickers list only categorical columns, since a date value can't be
+  saved as JSON and a failed save would leave the settings file truncated.
+  When the column changes, the saved values the new column has are saved
+  again, so `progress_headline` applies the same condition as the page.
+  With the same column, saved values missing from refreshed data stay
+  selected, so a refresh can't empty the condition. A selected null value
+  matches null rows. When a prep step removes a saved consent or outcome
+  column, the page warns that it counts without it
+  (`stale_condition_columns`) — #408
+
+### Changed
+
+- **Progress page**: Rebuilt as the settings expander
+  (`progress_report_settings`, with "Reset filters" beside it, as on
+  Summary), then a header shown on every tab (`display_progress_header`:
+  the percentage and completed count above an `st.progress` bar, capped at
+  full by `progress_fraction` when completions pass the target, a status box
+  saying whether fieldwork will finish on time, and a `metric_row` of
+  Submissions, Unique, the current period, Pace and Days left, replacing the
+  six-column row that cut off the projected finish date; the "Need N/day"
+  line under the chart moves into the status box) above Overview (`display_overview`, with the Cumulative / Per period chart
+  from `progress_figure`) and Follow-up (the unchanged attempted
+  interviews). The chart's series ends at the period of the last
+  submission, not today's. Submissions dated after today are left out of
+  the series, the current period and the pace (they still count as
+  Completed), so a wrong device clock can't stretch the chart past today.
+  `progress_headline` uses the new `compute_counts`, which skips the series
+  and pace, so a mis-keyed date can't slow Summary. The open tab (`progress_tab`) and chart view
+  (`progress_chart_view`) are saved view state with the time period — #408
+- **Progress headline and delta**: `progress_headline` now reports
+  Completed out of the target. The delta re-runs it on the rows dated on or
+  before the period start, so it counts IDs first completed in the period;
+  `DeltaKind.SUBMISSIONS` is renamed `DeltaKind.COMPLETIONS` ("▲ 3 new
+  completions since …") — #408
+
+### Removed
+
+- **Progress**: The Enumerator setting (dropped from `ProgressSettings` and
+  `progress_config`; saved values are ignored, so existing projects need no
+  migration), the never-shown consent and completion donut code
+  (`compute_progress_chart`, `display_progress_chart`, `ProgressChartMetrics`
+  and `utils/chart_utils.py`), and the code replaced by `compute_progress`
+  (`compute_progress_summary`, `display_progress_summary`,
+  `compute_progress_overtime`, `compute_average_interviews`,
+  `display_progress_overtime`, `ProgressSummary`,
+  `AttemptedInterviewsMetrics`) — #408
+
 ### Fixed
 
 - **Progress targets**: Targets entered on the Progress page did not load
