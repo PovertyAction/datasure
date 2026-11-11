@@ -1,9 +1,7 @@
 """Tests for the progress module with comprehensive coverage."""
 
 import datetime
-import importlib
 import json
-import sys
 from unittest.mock import MagicMock, patch
 
 import polars as pl
@@ -12,17 +10,9 @@ from pydantic import ValidationError
 
 from datasure.checks import progress as progress_module
 from datasure.checks.progress import (
-    AttemptedInterviewsResult,
     ProgressSettings,
     TimePeriodConfig,
-    _aggregate_attempts_by_survey_id,
-    _compute_summary_stats,
-    _display_chart_and_table,
-    _display_metrics,
-    _expand_attempt_dates,
     _get_unique_values,
-    _prepare_display_columns,
-    compute_attempted_interviews,
     compute_counts,
     compute_progress,
     display_overview,
@@ -101,33 +91,6 @@ def patched_progress():
         yield mock_st
 
 
-@pytest.fixture
-def prog_bc():
-    mock_st = _make_mock_st()
-    original_st = sys.modules.get("streamlit")
-    sys.modules["streamlit"] = mock_st
-    import datasure.checks.progress as prog_module
-
-    try:
-        importlib.reload(prog_module)
-        prog_module.load_check_settings = MagicMock(return_value={})
-        prog_module.save_check_settings = MagicMock()
-        prog_module.trigger_save = MagicMock()
-        prog_module.demo_callout = MagicMock()
-        prog_module.metric_row = MagicMock()
-        prog_module.section_header = MagicMock()
-        with patch(
-            "datasure.utils.onboarding_utils.is_demo_project", return_value=False
-        ):
-            yield prog_module
-    finally:
-        if original_st is not None:
-            sys.modules["streamlit"] = original_st
-        else:
-            sys.modules.pop("streamlit", None)
-        importlib.reload(prog_module)
-
-
 # ==============================================================================
 # New Tests for Pydantic Models and Helper Functions
 # ==============================================================================
@@ -165,19 +128,6 @@ class TestPydanticModels:
         with pytest.raises(ValidationError):
             TimePeriodConfig(time_period="Year")
 
-    def test_attempted_interviews_result_valid(self):
-        """Test creating valid AttemptedInterviewsResult."""
-        df = pl.DataFrame({"survey_id": ["ID1", "ID2"], "num_interviews": [1, 2]})
-        result = AttemptedInterviewsResult(
-            attempted_interviews=df,
-            total_submitted=10,
-            number_of_unique_ids=2,
-            min_attempts=1,
-            max_attempts=2,
-        )
-        assert result.total_submitted == 10
-        assert result.number_of_unique_ids == 2
-
 
 class TestHelperFunctions:
     """Test helper functions."""
@@ -191,179 +141,6 @@ class TestHelperFunctions:
         assert isinstance(unique_vals, list)
         assert set(unique_vals) == {"A", "B", "C"}
         assert len(unique_vals) == 3
-
-    def test_aggregate_attempts_by_survey_id(self):
-        """Test _aggregate_attempts_by_survey_id helper."""
-        import datetime
-
-        data = pl.DataFrame(
-            {
-                "survey_id": ["ID1", "ID1", "ID2", "ID3"],
-                "date": [
-                    datetime.datetime(2024, 1, 1),
-                    datetime.datetime(2024, 1, 2),
-                    datetime.datetime(2024, 1, 3),
-                    datetime.datetime(2024, 1, 4),
-                ],
-            }
-        )
-
-        result = _aggregate_attempts_by_survey_id(data, "survey_id", "date")
-
-        assert isinstance(result, pl.DataFrame)
-        assert "num_interviews" in result.columns
-        assert "last_attempt_date" in result.columns
-        assert "attempt_dates" in result.columns
-        assert result.height == 3  # 3 unique survey IDs
-
-    def test_expand_attempt_dates(self):
-        """Test _expand_attempt_dates helper."""
-        import datetime
-
-        data = pl.DataFrame(
-            {
-                "survey_id": ["ID1", "ID2"],
-                "num_interviews": [2, 3],
-                "attempt_dates": [
-                    [datetime.datetime(2024, 1, 1), datetime.datetime(2024, 1, 2)],
-                    [
-                        datetime.datetime(2024, 1, 3),
-                        datetime.datetime(2024, 1, 4),
-                        datetime.datetime(2024, 1, 5),
-                    ],
-                ],
-            }
-        )
-
-        result = _expand_attempt_dates(data)
-
-        assert isinstance(result, pl.DataFrame)
-        assert "Attempt Date 1" in result.columns
-        assert "Attempt Date 2" in result.columns
-        assert "Attempt Date 3" in result.columns
-        assert "attempt_dates" not in result.columns
-
-    def test_prepare_display_columns_empty(self):
-        """Test _prepare_display_columns with empty display_cols."""
-        data = pl.DataFrame(
-            {
-                "survey_id": ["ID1", "ID2", "ID3"],
-                "date": [1, 2, 3],
-                "col1": ["A", "B", "C"],
-            }
-        )
-
-        result = _prepare_display_columns(data, "survey_id", "date", [])
-
-        assert isinstance(result, pl.DataFrame)
-        assert "survey_id" in result.columns
-        assert result.height == 3
-
-    def test_prepare_display_columns_with_cols(self):
-        """Test _prepare_display_columns with display columns."""
-        data = pl.DataFrame(
-            {
-                "survey_id": ["ID1", "ID1", "ID2"],
-                "date": [1, 2, 3],
-                "enum": ["E1", None, "E2"],
-                "team": [None, "T1", "T2"],
-            }
-        )
-
-        result = _prepare_display_columns(data, "survey_id", "date", ["enum", "team"])
-
-        assert isinstance(result, pl.DataFrame)
-        assert "enum" in result.columns
-        assert "team" in result.columns
-        assert result.height == 2  # 2 unique survey IDs
-
-    def test_compute_summary_stats(self):
-        """Test _compute_summary_stats helper."""
-        data = pl.DataFrame(
-            {"survey_id": ["ID1", "ID2", "ID3"], "num_interviews": [1, 3, 2]}
-        )
-
-        num_unique, min_attempts, max_attempts = _compute_summary_stats(data)
-
-        assert num_unique == 3
-        assert min_attempts == 1
-        assert max_attempts == 3
-
-
-class TestComputeAttemptedInterviewsUpdated:
-    """Test compute_attempted_interviews with new Polars/Pydantic API."""
-
-    @patch("datasure.checks.progress.st.cache_data", lambda f: f)
-    def test_compute_attempted_interviews_basic(self):
-        """Test compute_attempted_interviews basic functionality."""
-        import datetime
-
-        data = pl.DataFrame(
-            {
-                "survey_id": ["ID1", "ID1", "ID2", "ID3", "ID3", "ID3"],
-                "date": [
-                    datetime.datetime(2024, 1, 1),
-                    datetime.datetime(2024, 1, 2),
-                    datetime.datetime(2024, 1, 3),
-                    datetime.datetime(2024, 1, 4),
-                    datetime.datetime(2024, 1, 5),
-                    datetime.datetime(2024, 1, 6),
-                ],
-            }
-        )
-
-        result = compute_attempted_interviews(data, "survey_id", "date", [])
-
-        assert isinstance(result, AttemptedInterviewsResult)
-        assert result.total_submitted == 6
-        assert result.number_of_unique_ids == 3
-        assert result.min_attempts == 1
-        assert result.max_attempts == 3
-
-    @patch("datasure.checks.progress.st.cache_data", lambda f: f)
-    def test_compute_attempted_interviews_with_display_cols(self):
-        """Test compute_attempted_interviews with display columns."""
-        import datetime
-
-        data = pl.DataFrame(
-            {
-                "survey_id": ["ID1", "ID1", "ID2"],
-                "date": [
-                    datetime.datetime(2024, 1, 1),
-                    datetime.datetime(2024, 1, 2),
-                    datetime.datetime(2024, 1, 3),
-                ],
-                "enumerator": ["E1", "E1", "E2"],
-                "team": ["T1", "T1", "T2"],
-            }
-        )
-
-        result = compute_attempted_interviews(
-            data, "survey_id", "date", ["enumerator", "team"]
-        )
-
-        assert isinstance(result, AttemptedInterviewsResult)
-        assert "enumerator" in result.attempted_interviews.columns
-        assert "team" in result.attempted_interviews.columns
-
-    @pytest.mark.parametrize("display_cols", [[], ["enumerator"]])
-    def test_compute_attempted_interviews_zero_rows(self, display_cols):
-        """Zero-row data gives an empty table and zero counts."""
-        data = pl.DataFrame(
-            schema={
-                "survey_id": pl.String,
-                "date": pl.Datetime,
-                "enumerator": pl.String,
-            }
-        )
-
-        result = compute_attempted_interviews(data, "survey_id", "date", display_cols)
-
-        assert result.attempted_interviews.is_empty()
-        assert result.total_submitted == 0
-        assert result.number_of_unique_ids == 0
-        assert result.min_attempts == 0
-        assert result.max_attempts == 0
 
 
 # ==============================================================================
@@ -569,8 +346,14 @@ def test_display_overview_without_dates_explains_the_chart(patched_progress):
     patched_progress.plotly_chart.assert_not_called()
 
 
-def test_progress_report_renders_settings_header_and_tabs(patched_progress, tmp_path):
-    """The page draws the settings, then Overview and Follow-up tabs."""
+def _section_titles() -> list[str]:
+    return [c.args[0] for c in progress_module.section_header.call_args_list]
+
+
+def test_progress_report_renders_settings_header_and_sections(
+    patched_progress, tmp_path
+):
+    """The page draws the settings, the header, then Overview and Follow-up."""
     survey_cols = ColumnByType(categorical_columns=["hhid"], datetime_columns=["when"])
     with (
         patch(
@@ -579,16 +362,15 @@ def test_progress_report_renders_settings_header_and_tabs(patched_progress, tmp_
         ) as settings,
         patch("datasure.checks.progress.display_progress_header") as header,
         patch("datasure.checks.progress.display_overview") as overview,
-        patch("datasure.checks.progress.display_attempted_interviews") as follow_up,
+        patch("datasure.checks.progress.display_follow_up") as follow_up,
     ):
         progress_report(
             SURVEY, str(tmp_path / "settings.json"), {"survey_id": "hhid"}, survey_cols
         )
 
-    names = patched_progress.tabs.call_args.args[0]
-    assert names == ["Overview", "Follow-up"]
+    assert _section_titles() == ["Overview", "Follow-up"]
+    patched_progress.tabs.assert_not_called()
     settings.assert_called_once()
-    assert patched_progress.tabs.call_args.kwargs["key"] == "progress_tab"
     header.assert_called_once()
     overview.assert_called_once()
     follow_up.assert_called_once()
@@ -620,93 +402,12 @@ def test_progress_report_warns_about_a_saved_column_no_longer_in_the_data(
         ),
         patch("datasure.checks.progress.display_progress_header"),
         patch("datasure.checks.progress.display_overview"),
-        patch("datasure.checks.progress.display_attempted_interviews"),
+        patch("datasure.checks.progress.display_follow_up"),
     ):
         progress_report(SURVEY, str(settings_file), {"survey_id": "hhid"}, survey_cols)
 
     patched_progress.warning.assert_called_once()
     assert "**old_outcome**" in patched_progress.warning.call_args.args[0]
-
-
-def test_display_attempted_interviews_missing_id(prog_bc):
-    """display_attempted_interviews shows info when survey_id is missing."""
-    data = pl.DataFrame({"value": [1, 2, 3]})
-    prog_bc.display_attempted_interviews(data, None, "date", "settings.json")
-    prog_bc.st.info.assert_called()
-
-
-def test_display_attempted_interviews_with_data(prog_bc):
-    """display_attempted_interviews renders full report."""
-    data = pl.DataFrame(
-        {
-            "survey_id": ["ID1", "ID2"],
-            "date": pl.Series(
-                [datetime.datetime(2024, 1, 1), datetime.datetime(2024, 1, 2)]
-            ),
-        }
-    )
-    mock_result = AttemptedInterviewsResult(
-        attempted_interviews=pl.DataFrame(
-            {
-                "survey_id": ["ID1", "ID2"],
-                "num_interviews": [1, 2],
-                "last_attempt_date": [
-                    datetime.date(2024, 1, 1),
-                    datetime.date(2024, 1, 2),
-                ],
-                "Attempt Date 1": [
-                    datetime.datetime(2024, 1, 1),
-                    datetime.datetime(2024, 1, 2),
-                ],
-            }
-        ),
-        total_submitted=2,
-        number_of_unique_ids=2,
-        min_attempts=1,
-        max_attempts=2,
-    )
-    prog_bc.compute_attempted_interviews = MagicMock(return_value=mock_result)
-    prog_bc.st.multiselect.return_value = []
-
-    prog_bc.display_attempted_interviews(data, "survey_id", "date", "settings.json")
-    prog_bc.st.columns.assert_called()
-
-
-def test_display_metrics_renders(patched_progress):
-    """_display_metrics renders four metric columns."""
-    result = AttemptedInterviewsResult(
-        attempted_interviews=pl.DataFrame(
-            {"survey_id": ["ID1"], "num_interviews": [1]}
-        ),
-        total_submitted=5,
-        number_of_unique_ids=1,
-        min_attempts=1,
-        max_attempts=1,
-    )
-    _display_metrics(result)
-    patched_progress.columns.assert_called()
-
-
-def test_display_chart_and_table_renders(patched_progress):
-    """_display_chart_and_table renders frequency chart and data table."""
-    data = pl.DataFrame(
-        {
-            "survey_id": ["ID1", "ID2"],
-            "num_interviews": [1, 2],
-            "last_attempt_date": [
-                datetime.date(2024, 1, 1),
-                datetime.date(2024, 1, 2),
-            ],
-            "Attempt Date 1": [
-                datetime.datetime(2024, 1, 1),
-                datetime.datetime(2024, 1, 2),
-            ],
-            "Attempt Date 2": [None, datetime.datetime(2024, 1, 3)],
-        }
-    )
-    _display_chart_and_table(data, "survey_id")
-    patched_progress.plotly_chart.assert_called()
-    patched_progress.dataframe.assert_called()
 
 
 # ==============================================================================
@@ -1420,5 +1121,367 @@ class TestPageShape:
         result = compute_progress(SURVEY, _settings(survey_target=10), AS_OF)
 
         assert result.mode == "fixed"
-        assert result.tabs == ["Overview", "Follow-up"]
+        assert result.sections == ["Overview", "Follow-up"]
         assert result.todos == []
+
+
+# ==============================================================================
+# Follow-up (#409)
+# ==============================================================================
+
+
+def _attempts(rows: list[tuple]) -> pl.DataFrame:
+    """Survey rows of (id, date, consent, outcome, enumerator)."""
+    return pl.DataFrame(
+        rows,
+        schema={
+            "hhid": pl.String,
+            "when": pl.String,
+            "consent": pl.String,
+            "outcome": pl.String,
+            "enum": pl.String,
+        },
+        orient="row",
+    )
+
+
+# h1 done on its 1st try; h2 done on its 3rd; h3 open after 3 tries;
+# h4 open after 1 try (a longer time ago than h5); h5 open after 1 try.
+ATTEMPTS = _attempts(
+    [
+        ("h1", "2026-10-01", "yes", "complete", "ann"),
+        ("h2", "2026-10-01", "yes", "not home", "ann"),
+        ("h2", "2026-10-03", "yes", "not home", "bo"),
+        ("h2", "2026-10-05", "yes", "complete", "bo"),
+        ("h3", "2026-10-02", "yes", "not home", "ann"),
+        ("h3", "2026-10-06", "no", "refused", "bo"),
+        ("h3", "2026-10-04", "yes", "partial", "cy"),
+        ("h4", "2026-10-07", "yes", "partial", "cy"),
+        ("h5", "2026-10-10", "yes", "not home", "ann"),
+    ]
+)
+
+
+def _follow_up(data=ATTEMPTS, **overrides):
+    settings = _settings(enumerator="enum", **{**CONDITION, **overrides})
+    return compute_progress(data, settings, AS_OF)
+
+
+class TestFollowUpQueue:
+    def test_lists_open_ids_by_attempts_then_days_since_the_last(self):
+        queue = _follow_up().follow_up_queue
+
+        assert [
+            (
+                row.id,
+                row.attempts,
+                row.last_outcome,
+                row.last_date,
+                row.days_since,
+                row.last_enumerator,
+            )
+            for row in queue
+        ] == [
+            ("h3", 3, "refused", datetime.date(2026, 10, 6), 8, "bo"),
+            ("h4", 1, "partial", datetime.date(2026, 10, 7), 7, "cy"),
+            ("h5", 1, "not home", datetime.date(2026, 10, 10), 4, "ann"),
+        ]
+
+    def test_each_row_carries_its_attempts_in_date_order(self):
+        h3 = _follow_up().follow_up_queue[0]
+
+        assert [(a.number, a.day, a.outcome, a.enumerator) for a in h3.history] == [
+            (1, datetime.date(2026, 10, 2), "not home", "ann"),
+            (2, datetime.date(2026, 10, 4), "partial", "cy"),
+            (3, datetime.date(2026, 10, 6), "refused", "bo"),
+        ]
+
+    def test_without_an_outcome_column_the_last_outcome_is_not_complete(self):
+        data = _attempts(
+            [
+                ("h1", "2026-10-01", "yes", "complete", None),
+                ("h2", "2026-10-01", "no", "refused", None),
+                ("h2", "2026-10-02", "no", "refused", None),
+            ]
+        )
+
+        queue = _follow_up(data, outcome=None, outcome_vals=None).follow_up_queue
+
+        assert [(row.id, row.last_outcome) for row in queue] == [("h2", "not complete")]
+        assert [a.outcome for a in queue[0].history] == ["not complete"] * 2
+
+    def test_without_a_completion_condition_there_is_no_queue(self):
+        settings = _settings(enumerator="enum")
+
+        assert compute_progress(ATTEMPTS, settings, AS_OF).follow_up_queue == []
+
+    def test_a_missing_outcome_reads_as_missing(self):
+        data = _attempts([("h1", "2026-10-01", "yes", None, None)])
+
+        (row,) = _follow_up(data).follow_up_queue
+
+        assert (row.last_outcome, row.last_enumerator) == ("missing", None)
+
+
+class TestFollowUpMetrics:
+    def test_with_a_completion_condition(self):
+        metrics = _follow_up().follow_up
+
+        # Completions: h1 at attempt 1, h2 at 3. Open: h3 (3 tries), h4, h5.
+        assert metrics.need_follow_up == 3
+        assert metrics.first_try_rate == 50.0
+        assert metrics.avg_attempts_per_completion == 2.0
+        assert metrics.open_3_plus == 1
+
+    def test_repeat_id_metrics_hold_with_or_without_a_condition(self):
+        for settings in (_settings(), _settings(**CONDITION)):
+            metrics = compute_progress(ATTEMPTS, settings, AS_OF).follow_up
+
+            # h2 and h3 were each submitted 3 times; 9 submissions, 5 IDs
+            assert (metrics.repeat_ids, metrics.avg_attempts, metrics.max_attempts) == (
+                2,
+                1.8,
+                3,
+            )
+
+    def test_without_a_condition_the_follow_up_metrics_are_unset(self):
+        metrics = compute_progress(ATTEMPTS, _settings(), AS_OF).follow_up
+
+        assert (
+            metrics.need_follow_up,
+            metrics.first_try_rate,
+            metrics.avg_attempts_per_completion,
+            metrics.open_3_plus,
+        ) == (None, None, None, None)
+
+    def test_no_completions_leave_the_rates_unset(self):
+        data = _attempts([("h1", "2026-10-01", "no", "refused", None)])
+
+        metrics = _follow_up(data).follow_up
+
+        assert (metrics.need_follow_up, metrics.first_try_rate) == (1, None)
+        assert metrics.avg_attempts_per_completion is None
+
+    def test_no_data_counts_nothing(self):
+        metrics = _follow_up(ATTEMPTS.clear()).follow_up
+
+        assert (metrics.repeat_ids, metrics.avg_attempts, metrics.max_attempts) == (
+            0,
+            None,
+            0,
+        )
+
+
+class TestAttemptsToOutcome:
+    def test_completed_and_still_open_at_each_attempt_number(self):
+        buckets = _follow_up().attempts_to_outcome
+
+        assert [(b.attempt, b.completed, b.open, b.submitted) for b in buckets] == [
+            ("1", 1, 2, 3),
+            ("2", 0, 0, 0),
+            ("3", 1, 1, 2),
+            ("4+", 0, 0, 0),
+        ]
+
+    def test_four_or_more_attempts_share_the_last_bucket(self):
+        data = _attempts(
+            [("h1", f"2026-10-0{day}", "no", "refused", None) for day in range(1, 6)]
+        )
+
+        last = _follow_up(data).attempts_to_outcome[-1]
+
+        assert (last.attempt, last.open, last.submitted) == ("4+", 1, 1)
+
+
+class TestFollowUpTodo:
+    def test_open_after_three_attempts_links_to_follow_up(self):
+        todos = _follow_up().todos
+
+        assert [(t.label, t.count, t.section) for t in todos] == [
+            ("Respondents open after 3+ attempts", 1, "Follow-up")
+        ]
+
+    def test_no_card_when_none_are_open_after_three_attempts(self):
+        data = ATTEMPTS.filter(pl.col("hhid") != "h3")
+
+        assert _follow_up(data).todos == []
+
+
+class TestQueueFilterAndExport:
+    def test_filters_by_last_outcome_and_minimum_attempts(self):
+        queue = _follow_up().follow_up_queue
+
+        ids = progress_module.filter_queue
+        assert [r.id for r in ids(queue, ["partial", "not home"], 1)] == ["h4", "h5"]
+        assert [r.id for r in ids(queue, [], 2)] == ["h3"]
+
+    def test_export_has_one_row_per_open_id_in_queue_order(self):
+        frame = progress_module.queue_frame(_follow_up().follow_up_queue)
+
+        assert frame.columns == [
+            "ID",
+            "Attempts",
+            "Last outcome",
+            "Last attempt",
+            "Days since",
+            "Last enumerator",
+        ]
+        assert frame.row(0) == (
+            "h3",
+            3,
+            "refused",
+            datetime.date(2026, 10, 6),
+            8,
+            "bo",
+        )
+        assert frame.height == 3
+
+    def test_an_empty_queue_exports_the_columns(self):
+        assert progress_module.queue_frame([]).columns[0] == "ID"
+
+
+def test_the_enumerator_comes_from_the_page_config_not_old_saved_settings():
+    with patch(
+        "datasure.checks.progress.load_check_settings",
+        return_value={"enumerator": "old_enum"},
+    ):
+        settings = load_default_settings("settings.json", _settings(enumerator="enum"))
+
+    assert settings.enumerator == "enum"
+
+
+# ==============================================================================
+# Follow-up UI (#409): smoke tests only, no counting is asserted here
+# ==============================================================================
+
+
+def _labels():
+    return [m[0] for m in progress_module.metric_row.call_args.args[0]]
+
+
+def test_display_follow_up_with_a_condition_draws_the_queue(patched_progress, tmp_path):
+    settings = _settings(enumerator="enum", **CONDITION)
+    result = compute_progress(ATTEMPTS, settings, AS_OF)
+    selected = MagicMock()
+    selected.selection.rows = [0]
+    patched_progress.dataframe.return_value = selected
+
+    progress_module.display_follow_up(result, settings, str(tmp_path / "s.json"))
+
+    assert _labels() == [
+        "Need follow-up",
+        "Done on 1st try",
+        "Avg attempts per completion",
+        "3+ attempts, still open",
+    ]
+    patched_progress.plotly_chart.assert_called_once()
+    patched_progress.download_button.assert_called_once()
+    # The queue, then the selected row's attempt history
+    assert patched_progress.dataframe.call_count == 2
+    history = patched_progress.dataframe.call_args_list[1].args[0]
+    assert history["Attempt"].to_list() == [1, 2, 3]
+
+
+def test_display_follow_up_without_a_condition_hides_the_queue(
+    patched_progress, tmp_path
+):
+    settings = _settings()
+    result = compute_progress(ATTEMPTS, settings, AS_OF)
+
+    progress_module.display_follow_up(result, settings, str(tmp_path / "s.json"))
+
+    assert _labels() == ["Repeat IDs", "Submissions per ID", "Most submissions"]
+    assert "completion condition" in patched_progress.info.call_args.args[0]
+    patched_progress.plotly_chart.assert_called_once()
+    patched_progress.dataframe.assert_not_called()
+
+
+def test_display_follow_up_without_an_id_column_explains(patched_progress, tmp_path):
+    settings = _settings(survey_id=None)
+
+    progress_module.display_follow_up(
+        compute_progress(ATTEMPTS, settings, AS_OF), settings, str(tmp_path / "s.json")
+    )
+
+    patched_progress.info.assert_called_once()
+    patched_progress.plotly_chart.assert_not_called()
+
+
+def test_a_todo_card_links_to_its_section(patched_progress):
+    settings = _settings(**CONDITION)
+    result = compute_progress(ATTEMPTS, settings, AS_OF)
+
+    display_overview(result, settings, "Cumulative")
+
+    card = patched_progress.markdown.call_args.args[0]
+    assert "Respondents open after 3+ attempts" in card
+    assert "(#follow-up)" in card
+
+
+def test_follow_up_title_has_a_badge_only_when_the_queue_has_rows():
+    with_queue = compute_progress(ATTEMPTS, _settings(**CONDITION), AS_OF)
+    without = compute_progress(ATTEMPTS, _settings(), AS_OF)
+
+    assert progress_module.follow_up_title(with_queue) == "Follow-up :orange-badge[3]"
+    assert progress_module.follow_up_title(without) == "Follow-up"
+
+
+def test_progress_report_puts_the_badge_on_the_follow_up_section(
+    patched_progress, tmp_path
+):
+    survey_cols = ColumnByType(categorical_columns=["hhid"], datetime_columns=["when"])
+    with (
+        patch(
+            "datasure.checks.progress.progress_report_settings",
+            return_value=_settings(**CONDITION),
+        ),
+        patch("datasure.checks.progress.display_progress_header"),
+        patch("datasure.checks.progress.display_overview"),
+        patch("datasure.checks.progress.display_follow_up") as follow_up,
+    ):
+        progress_report(
+            ATTEMPTS, str(tmp_path / "s.json"), {"survey_id": "hhid"}, survey_cols
+        )
+
+    assert _section_titles() == ["Overview", "Follow-up :orange-badge[3]"]
+    follow_up_header = progress_module.section_header.call_args_list[1]
+    assert follow_up_header.kwargs["anchor"] == "follow-up"
+    follow_up.assert_called_once()
+
+
+def test_without_a_condition_no_bucket_counts_completed_or_open():
+    buckets = compute_progress(ATTEMPTS, _settings(), AS_OF).attempts_to_outcome
+
+    assert {(b.completed, b.open) for b in buckets} == {(0, 0)}
+
+
+def test_the_last_date_outcome_and_enumerator_come_from_the_same_attempt():
+    data = _attempts(
+        [
+            ("h1", "2026-10-01", "yes", "not home", "ann"),
+            ("h1", None, "yes", "partial", "bo"),
+        ]
+    )
+
+    (row,) = _follow_up(data).follow_up_queue
+
+    assert (row.last_outcome, row.last_enumerator, row.last_date) == (
+        "partial",
+        "bo",
+        None,
+    )
+
+
+def test_without_an_id_column_there_is_no_follow_up():
+    """Each row would be its own ID, so the follow-up numbers would be made up."""
+    settings = _settings(survey_id=None, **CONDITION)
+
+    result = compute_progress(ATTEMPTS, settings, AS_OF)
+
+    assert result.follow_up_queue == []
+    assert result.attempts_to_outcome == []
+    assert result.follow_up.need_follow_up is None
+    assert result.todos == []
+    assert progress_module.follow_up_title(result) == "Follow-up"
+    # The headline counts keep their one-row-per-submission fallback
+    assert result.counts.submissions == 9

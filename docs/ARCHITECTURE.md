@@ -85,7 +85,17 @@ The `archived/` directory holds legacy code and is gitignored.
    dataset is read from the first of its `corrected`, `prep` and `raw` tables
    that exists (`load_data_with_fallback`). A table with no rows still counts,
    so a prep step or correction that removed every record shows an empty
-   dataset rather than older data
+   dataset rather than older data. `load_check_data` loads the survey data
+   and, when the page config names them, the backcheck and tracking datasets
+   this way into `CheckData`. The tracking dataset (a tracking file or a
+   master list) is used only by Progress: `CheckData.tracking_data_with_rows`
+   reaches `progress_report`, `progress_headline` and `resolve_progress`,
+   and an empty or unimported one leaves the fixed target in use.
+   `checks/progress_tracking.py` checks and keys it (`read_tracking`), gives
+   each submission its unit (`assign_units`) and computes the By unit
+   levels and the respondent statuses; `resolve_progress(ctx)` is the
+   contract other pages read the target, the achieved count and the unit
+   targets through
 6. **Corrections / replication**: apply corrections; export a replication
    package that reproduces the pipeline outside DataSure. Once an alias has a
    corrected table, any change to its prep data (a re-import, a prep step
@@ -344,8 +354,9 @@ On a check page this is the page settings file
   Data" header.
 - **Not saved.** Pagination, search boxes and inputs inside dialogs or
   popovers are never bound, so they start fresh in a new session. Bound
-  today: Summary's "Progress by" column and time period; the Progress open
-  tab, chart view, time period and extra attempted-interview columns; the
+  today: Summary's "Progress by" column and time period; the Progress
+  chart view, time period and follow-up queue filters (last outcome and
+  minimum attempts); the
   Missing Values
   threshold, date column, group-by and compare columns, all-columns toggle
   and correlation columns;

@@ -731,10 +731,10 @@ class OutputOnboardingInfo:
             "content": """
         ### Survey Progress Report
         This check shows how far data collection has come against its target.
-        The :material/settings: **settings** section sits at the top. Below it, a header stays on
-        every tab: the percentage complete, Submissions, Unique, Completed and Remaining, the
+        The :material/settings: **settings** section sits at the top. Below it, a header shows
+        the percentage complete, Submissions, Unique, Completed and Remaining, the
         current period against its target, and a projected finish date.
-        Below the header are two tabs: **Overview** and **Follow-up**.
+        Below the header are two sections: **Overview** and **Follow-up**.
         **Next**: Open the :material/settings: **settings** section to configure the Progress check.
         """,
         },
@@ -758,14 +758,14 @@ class OutputOnboardingInfo:
           "{DemoColumn.COMPLETION_STATUS}" outcome column with the value "complete".
           Refusals and partial interviews now no longer count as completed.
 
-        **Next**: Look at the header, then open the **Overview** tab.
+        **Next**: Look at the header, then scroll down to **Overview**.
         """,
         },
         "display_progress_header": {
             "title": "Progress Header",
             "content": """
         ##### Progress Header
-        The header shows on every tab:
+        The header shows at the top of the page:
         - The target and the completion condition the numbers are based on.
         - The percentage complete (completed IDs out of the target) above a progress bar.
         - A status box that says whether fieldwork will finish on time, from the
@@ -790,22 +790,22 @@ class OutputOnboardingInfo:
           red bars fell short.
         - Set a **Field End Date** in the settings section to see the completions needed per day.
 
-        **Next**: Open the **Follow-up** tab.
+        **Next**: Scroll down to **Follow-up**.
         """,
         },
-        "display_attempted_interviews": {
-            "title": "Attempted Interviews",
+        "display_follow_up": {
+            "title": "Follow-up",
             "content": """
-        ##### Attempted Interviews
-        This section provides insights into the number of attempted interviews in your survey data, including:
-        - Total Submitted Interviews: Total number of submissions received to date.
-        - Number of Unique IDs: Count of unique respondents based on the ID column.
-        - Min Attempts: Minimum number of attempts made by any respondent.
-        - Max Attempts: Maximum number of attempts made by any respondent.
+        ##### Follow-up
+        This section shows who needs another visit and how many tries a completion takes:
+        - Need follow-up: IDs attempted but never completed.
+        - Done on 1st try: completions at the first attempt, as a share of all completions.
+        - Avg attempts per completion, and IDs still open after 3+ attempts.
+        - An attempts-to-outcome chart: completed versus still open at attempts 1, 2, 3 and 4+.
+        - A follow-up queue of the open IDs, most attempts first. Filter it by last
+          outcome and minimum attempts, download it, and select a row to see each attempt.
 
-        It also includes the following visualizations:
-        - A horizontal bar chart showing the **distribution of attempt counts** — how many respondents had exactly 1 attempt, 2 attempts, 3 or more, etc.
-        - A data table summarizing attempted interviews by respondent ID (e.g., household ID), including the date of each attempt.
+        Without a completion condition the section shows repeat IDs instead, and no queue.
         """,
         },
     }

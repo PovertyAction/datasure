@@ -14,6 +14,7 @@ from datasure.utils.config_utils import (
     ConfigurationService,
     DatasetService,
     SurveyColumnSelections,
+    _build_config_data,
     _get_index_or_none,
     _handle_configuration_submission,
     _handle_edit_configuration_submission,
@@ -26,6 +27,7 @@ from datasure.utils.config_utils import (
     render_page_name_input,
     render_survey_column_selectors,
     render_survey_dataset_selector,
+    render_tracking_dataset_selector,
 )
 
 # ============================================================================
@@ -1338,6 +1340,44 @@ class TestRenderSurveyColumnSelectors:
         assert mock_st.selectbox.call_count == 7
         assert mock_st.number_input.call_count == 1
         assert isinstance(result, SurveyColumnSelections)
+
+
+class TestRenderTrackingDatasetSelector:
+    """The Tracking Dataset selector, following the backcheck selector."""
+
+    @patch("datasure.utils.config_utils.st")
+    def test_offers_datasets_other_than_survey_and_backcheck(self, mock_st):
+        mock_st.selectbox.return_value = "tracking_1"
+
+        result = render_tracking_dataset_selector(
+            ["survey_1", "backcheck_1", "tracking_1"],
+            ["survey_1", "backcheck_1"],
+            key="add_tracking_dataset",
+        )
+
+        assert result == "tracking_1"
+        kwargs = mock_st.selectbox.call_args.kwargs
+        assert kwargs["options"] == ["tracking_1"]
+        assert kwargs["index"] is None
+        assert kwargs["key"] == "add_tracking_dataset"
+
+    @patch("datasure.utils.config_utils.st")
+    def test_preselects_the_current_dataset(self, mock_st):
+        render_tracking_dataset_selector(
+            ["survey_1", "a", "tracking_1"],
+            ["survey_1", None],
+            current="tracking_1",
+            key="edit_tracking_dataset",
+        )
+
+        assert mock_st.selectbox.call_args.kwargs["index"] == 1
+
+    def test_build_config_data_keeps_the_tracking_dataset(self):
+        config = _build_config_data(
+            "Page", "survey_1", {"tracking_data_name": "tracking_1"}, None
+        )
+
+        assert config["tracking_data_name"] == "tracking_1"
 
 
 class TestRenderBackcheckDatasetSelector:
@@ -2933,8 +2973,8 @@ class TestEditCheckConfigurationFormWrapped:
         mock_ds.get_available_aliases_excluding.return_value = []
         mock_ds_class.return_value = mock_ds
 
-        # selectbox calls: page_select, survey_dataset, backcheck_dataset
-        mock_st.selectbox.side_effect = ["Page One", "survey_1", None]
+        # selectbox calls: page_select, survey, backcheck and tracking datasets
+        mock_st.selectbox.side_effect = ["Page One", "survey_1", None, None]
         mock_st.text_input.return_value = "Page One"
         mock_st.button.return_value = True  # Save clicked
         mock_st.divider = Mock()
@@ -3007,7 +3047,7 @@ class TestEditCheckConfigurationFormWrapped:
         mock_ds_class.return_value = mock_ds
 
         # page_select, survey_dataset, backcheck_dataset
-        mock_st.selectbox.side_effect = ["Page One", "survey_1", "bc_1"]
+        mock_st.selectbox.side_effect = ["Page One", "survey_1", "bc_1", None]
         mock_st.text_input.return_value = "Page One"
         mock_st.button.return_value = False
         mock_st.divider = Mock()
