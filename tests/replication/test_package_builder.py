@@ -275,13 +275,22 @@ class TestBuildReplicationPackage:
             )
         assert len(progress_messages) > 0
 
-    def test_untranslatable_prep_step_warns_and_still_builds(self):
+    @pytest.mark.parametrize(
+        ("action", "prep_args"),
+        [
+            # Emitter raises on a bad value
+            ("remove row(s)", '{"method": "by row index", "value": ["abc"]}'),
+            # Emitter has no Stata translation and raises no error
+            ("add new column", '{"column_names": "uid", "method": "uuid"}'),
+        ],
+    )
+    def test_untranslatable_prep_step_warns_and_still_builds(self, action, prep_args):
         warnings: list[str] = []
         bad_log = pl.DataFrame(
             {
-                "action": ["remove row(s)"],
-                "description": ["Remove rows"],
-                "prep_args": ['{"method": "by row index", "value": ["abc"]}'],
+                "action": [action],
+                "description": ["Bad step"],
+                "prep_args": [prep_args],
                 "action_index": [1],
             }
         )

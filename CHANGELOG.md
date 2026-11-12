@@ -38,9 +38,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     submissions. Saved rows take the position of the new row with the same
     KEY; rows found only in the saved .dta go last
   - `generate_prepare_data_script` and `build_replication_package` take an
-    `on_warning` callback. A step whose emitter raises gets a `NOTE` line in
-    `prepare_data.do` and a warning on the Replication page, which keeps it
-    beside the download button, instead of stopping the build
+    `on_warning` callback. A step that can't be translated gets a `NOTE` line
+    in `prepare_data.do` and a warning on the Replication page, which keeps it
+    beside the download button, instead of stopping the build. This covers
+    emitters that raise and the cases they don't support (`uuid` columns,
+    unsupported transform, add-column or remove-row methods and conditions,
+    unknown actions), which now raise `_UntranslatableStepError` instead of
+    returning a silent `NOTE`. A row-index step with no values stays a silent
+    no-op
   - The row-index help text on the Prep page now describes this syntax.
     `TestStataRemoveRows` expected the 0-based output and is corrected
 

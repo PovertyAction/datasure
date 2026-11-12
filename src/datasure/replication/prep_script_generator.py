@@ -23,6 +23,15 @@ from datasure.replication.script_generators import _C, _LOG_CLOSE, _header
 
 logger = logging.getLogger(__name__)
 
+
+class _UntranslatableStepError(Exception):
+    """A prep step DataSure ran but that has no Stata translation.
+
+    Raised by emitters for expected gaps (an unsupported method or condition),
+    so `_emit_prep_step` writes a NOTE and warns without logging a traceback.
+    """
+
+
 # ---------------------------------------------------------------------------
 # String constants mirroring enum values (avoids importing the full app stack)
 # ---------------------------------------------------------------------------
@@ -162,7 +171,7 @@ def _drop_by_condition(col: str, condition: str, values: list) -> list[str]:
         return [f"drop if !missing({col})"]
     expr = _remove_expr(col, condition, values)
     if expr is None:
-        return [f"{_C} NOTE: condition '{condition}' could not be translated"]
+        raise _UntranslatableStepError(f"condition '{condition}' is not supported")
     # A missing value makes the condition unknown, so the row is kept
     return [f"drop if {expr} & !missing({col})"]
 
@@ -177,7 +186,7 @@ def _stata_remove_rows(args: dict, _desc: str) -> list[str]:
         return _drop_by_index(values)
 
     if not cols or not condition:
-        return [f"{_C} NOTE: remove row step could not be translated"]
+        raise _UntranslatableStepError("no columns or condition recorded")
 
     # One drop per column: a row is removed if any selected column matches
     lines: list[str] = []
@@ -337,7 +346,7 @@ def _stata_transform_column(args: dict, _desc: str) -> list[str]:
     if method == "get dummies":
         return [f"tabulate {col}, gen({col}_)  // creates dummy columns"]
 
-    return [f"{_C} NOTE: transform '{method}' on '{col}' could not be translated"]
+    raise _UntranslatableStepError(f"transform '{method}' on '{col}' is not supported")
 
 
 # (min_cols, expr) — expr receives the source-column list.
@@ -413,14 +422,18 @@ def _stata_add_column(args: dict, _desc: str) -> list[str]:
         return _stata_concat(new_col, src_cols, args.get("value") or "")
 
     if method == "uuid":
-        return [f"{_C} NOTE: uuid column '{new_col}' — no direct Stata equivalent"]
+        raise _UntranslatableStepError(
+            f"uuid column '{new_col}' has no direct Stata equivalent"
+        )
 
     entry = _ADD_COL_EXPRS.get(method)
     if entry and len(src_cols) >= entry[0]:
         _, expr_fn = entry
         return [f"gen {new_col} = {expr_fn(src_cols)}"]
 
-    return [f"{_C} NOTE: add column '{new_col}' ({method}) could not be translated"]
+    raise _UntranslatableStepError(
+        f"add column '{new_col}' ({method}) is not supported"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -454,41 +467,59 @@ def _parse_prep_args(raw: object) -> dict:
     return {}
 
 
+def _unknown_action(action: str) -> Callable[[dict, str], list[str]]:
+    """Emitter for an action with no translation: always raises."""
+
+    def emit(_args: dict, _desc: str) -> list[str]:
+        raise _UntranslatableStepError(f"unknown action '{action}'")
+
+    return emit
+
+
 def _emit_prep_step(
     i: int, row: dict, on_warning: Callable[[str], None] | None = None
 ) -> list[str]:
     """Return the Stata lines for one prep-log row.
 
-    A step that raises while being translated gets a ``NOTE`` line, and
-    ``on_warning`` is told, so one bad step does not stop the whole script.
+    A step that cannot be translated, or raises while being translated, gets a
+    ``NOTE`` line, and ``on_warning`` is told, so one bad step does not stop
+    the whole script.
     """
     action = str(row.get("action") or "")
     description = str(row.get("description") or "")
     args = _parse_prep_args(row.get("prep_args") or "{}")
 
     comment = [f"{_C} Step {i}: {description or action}"]
-    emitter = _EMITTERS.get(action)
-    if emitter is None:
-        body = [f"{_C} NOTE: unknown action '{action}'"]
-    else:
-        try:
-            body = emitter(args, description)
-        # Per-step boundary: one untranslatable step must not stop the package.
-        # The error is shown as a NOTE in prepare_data.do and, through
-        # on_warning, as a warning on the Replication page.
-        except Exception as e:
-            logger.exception("Could not translate prep step %d (%s)", i, action)
-            body = [
-                f"{_C} NOTE: step {i} could not be translated ({e}). "
-                "Reproduce it by hand."
-            ]
-            if on_warning is not None:
-                on_warning(
-                    f"Step {i} ({description or action}) could not be "
-                    f"translated to Stata: {e}. `prepare_data.do` has a NOTE "
-                    "in its place."
-                )
+    try:
+        body = _EMITTERS.get(action, _unknown_action(action))(args, description)
+    # Per-step boundary: one untranslatable step must not stop the package.
+    # The reason is shown as a NOTE in prepare_data.do and, through
+    # on_warning, as a warning on the Replication page.
+    except _UntranslatableStepError as e:
+        body = _untranslated_step(i, action, description, e, on_warning)
+    except Exception as e:
+        logger.exception("Could not translate prep step %d (%s)", i, action)
+        body = _untranslated_step(i, action, description, e, on_warning)
     return comment + body + [""]
+
+
+def _untranslated_step(
+    i: int,
+    action: str,
+    description: str,
+    error: Exception,
+    on_warning: Callable[[str], None] | None,
+) -> list[str]:
+    """NOTE line for a step with no Stata translation; also tells on_warning."""
+    if on_warning is not None:
+        on_warning(
+            f"Step {i} ({description or action}) could not be "
+            f"translated to Stata: {error}. `prepare_data.do` has a NOTE "
+            "in its place."
+        )
+    return [
+        f"{_C} NOTE: step {i} could not be translated ({error}). Reproduce it by hand."
+    ]
 
 
 def generate_prepare_data_script(
