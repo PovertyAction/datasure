@@ -117,25 +117,14 @@ def _stata_pos(index: int) -> str:
     return "_N" if index == -1 else f"_N - {-index - 1}"
 
 
-def _stata_in(index: int) -> str:
-    """Stata ``in`` position for a DataSure row position.
-
-    Stata counts from 1, DataSure from 0. A negative position is the same in
-    both: ``-1`` is the last row.
-    """
-    return str(index + 1) if index >= 0 else str(index)
-
-
 def _drop_by_index(values: list) -> list[str]:
     spans = parse_row_indices(values)
     if not spans:
-        return [f"{_C} NOTE: no row indices provided for drop in"]
-    if len(spans) == 1:
-        span = spans[0]
-        if span.is_single:
-            return [f"drop in {_stata_in(span.start)}"]
-        return [f"drop in {_stata_in(span.start)}/{_stata_in(span.end)}"]
-    # One `drop if` so every value refers to positions before the step
+        return [f"{_C} NOTE: no row indices provided for drop by row index"]
+    # Always `drop if` over `_n`, never `drop in`: Stata's `in` stops with
+    # r(198) when a position falls outside 1.._N or a range is reversed, while
+    # resolve_row_positions ignores such positions. One condition also keeps
+    # every value referring to positions before the step.
     conditions = " | ".join(
         f"_n == {_stata_pos(span.start)}"
         if span.is_single

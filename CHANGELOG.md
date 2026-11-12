@@ -26,10 +26,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     prep engine and the generator. Values are a position, a negative position
     counting from the end, or an inclusive `a:b` range. Earlier prep logs'
     string values, `","` and `None` entries still parse; anything else raises
-    `ValueError`, which the engine reports as `ValidationError`. One value
-    emits `drop in i+1` or `drop in a+1/b+1` (negative ends unchanged); several
-    values emit one `drop if` over `_n`, with negative ends as `_N - k`, so all
-    refer to positions before the step
+    `ValueError`, which the engine reports as `ValidationError`. The generator
+    emits one `drop if` over `_n` (`_n == i+1`, `inrange(_n, a+1, b+1)`,
+    negative ends as `_N - k`), so all values refer to positions before the
+    step. It never emits `drop in`, which stops with r(198) on positions
+    outside 1.._N or reversed spans, where `resolve_row_positions` ignores them
+  - The SurveyCTO `2_import_data.do` (`scto_import_generator.py`) records
+    the .csv row order in `_ds_row` after `insheet` and restores it before
+    saving. On a rerun, appending the saved .dta and `sort KEY` had left the
+    rows in KEY order, so positional prep steps dropped different
+    submissions. Saved rows take the position of the new row with the same
+    KEY; rows found only in the saved .dta go last
   - `generate_prepare_data_script` and `build_replication_package` take an
     `on_warning` callback. A step whose emitter raises gets a `NOTE` line in
     `prepare_data.do` and a warning on the Replication page, which keeps it

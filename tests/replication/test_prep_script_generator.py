@@ -5,6 +5,7 @@ from __future__ import annotations
 import polars as pl
 import pytest
 
+from datasure.processing.row_index import parse_row_indices, resolve_row_positions
 from datasure.replication.prep_script_generator import (
     _col_list,
     _cols,
@@ -117,13 +118,14 @@ class TestStataRemoveRows:
         ("value", "expected"),
         [
             # DataSure counts rows from 0, Stata from 1
-            ([5], "drop in 6"),
-            (["0"], "drop in 1"),
-            (["0:30"], "drop in 1/31"),
-            # -1 is the last row in both systems
-            (["-5"], "drop in -5"),
-            (["5:-2"], "drop in 6/-2"),
-            (["-3:-2"], "drop in -3/-2"),
+            ([5], "drop if _n == 6"),
+            (["0"], "drop if _n == 1"),
+            (["0:30"], "drop if inrange(_n, 1, 31)"),
+            # Negative positions count back from _N
+            (["-1"], "drop if _n == _N"),
+            (["-5"], "drop if _n == _N - 4"),
+            (["5:-2"], "drop if inrange(_n, 6, _N - 1)"),
+            (["-3:-2"], "drop if inrange(_n, _N - 2, _N - 1)"),
             # Several values all refer to positions before the step
             ([1, 3], "drop if _n == 2 | _n == 4"),
             (["1", "-1"], "drop if _n == 2 | _n == _N"),
@@ -139,6 +141,41 @@ class TestStataRemoveRows:
     def test_by_index(self, value, expected):
         lines = _stata_remove_rows({"method": "by row index", "value": value}, "")
         assert lines == [expected]
+
+    @pytest.mark.parametrize(
+        ("value", "expected_drop"),
+        [
+            # Range past the end: DataSure keeps it to the rows it has
+            (["0:30"], set(range(10))),
+            (["100:99999"], set()),
+            # Mixed-sign span that resolves reversed: nothing
+            (["-3:5"], set()),
+            # Single value outside the data: nothing
+            (["-20"], set()),
+            (["20"], set()),
+            (["8:-1"], {8, 9}),
+        ],
+    )
+    def test_by_index_matches_datasure_out_of_range(self, value, expected_drop):
+        # Stata's `in` stops with r(198) on these; `drop if` must select the
+        # same rows DataSure does. Evaluate the emitted condition in Python.
+        n_rows = 10
+        assert resolve_row_positions(parse_row_indices(value), n_rows) == expected_drop
+        (line,) = _stata_remove_rows({"method": "by row index", "value": value}, "")
+        assert line.startswith("drop if ")
+        assert "drop in" not in line
+        expr = (
+            line.removeprefix("drop if ")
+            .replace("|", " or ")
+            .replace("_N", str(n_rows))
+            .replace("inrange", "_inrange")
+        )
+        dropped = {
+            n - 1
+            for n in range(1, n_rows + 1)
+            if eval(expr, {"_inrange": lambda x, a, b: a <= x <= b, "_n": n})
+        }
+        assert dropped == expected_drop
 
     def test_by_index_no_values_is_note(self):
         lines = _stata_remove_rows({"method": "by row index", "value": [","]}, "")
@@ -740,7 +777,7 @@ class TestGeneratePrepareDataScript:
             }
         )
         result = generate_prepare_data_script(log, "P", "S", "0.1")
-        assert "drop in 1/31" in result
+        assert "drop if inrange(_n, 1, 31)" in result
 
     def test_returns_string(self):
         log = pl.DataFrame(
