@@ -16,6 +16,14 @@ To check which version you have, run `datasure --version`. Versions with `a`, `b
 
 ## Open issues
 
+### KI-034: The replication package fails or removes the wrong rows for "remove rows by row index" steps
+
+- **Status:** 🟡 Planned for 1.2.2. Fixed in the 1.2.2a1 pre-release
+- **Affected versions:** 1.0.0 – 1.2.1
+- **Symptom:** If a Prep step removes rows **by row index** with a range such as `0:30`, **Build Replication Package** fails with `ValueError: invalid literal for int() with base 10: '0:30'`. With single row numbers, the package builds, but `prepare_data.do` removes different rows from the ones DataSure removed. Negative row numbers such as `-5` remove nothing, or the wrong rows, on the Prep page.
+- **Workaround:** Install the 1.2.2a1 pre-release from [Test PyPI](https://test.pypi.org/project/datasure/) and rebuild the package. On earlier versions, list row numbers one by one instead of as a range, use only row numbers of 0 or more, and check every `drop` line in `prepare_data.do` by hand before you use it.
+- **Issue:** [#442](https://github.com/PovertyAction/datasure/issues/442)
+
 ### KI-033: Date and datetime questions from SurveyCTO import as blank
 
 - **Status:** 🟡 Planned for 1.2.1

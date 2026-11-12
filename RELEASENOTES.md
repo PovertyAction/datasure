@@ -18,6 +18,16 @@ This document tracks user-facing changes and improvements to help data managers,
 
 ---
 
+## Unreleased
+
+Testers can try these changes in the 1.2.2a1 pre-release on [Test PyPI](https://test.pypi.org/project/datasure/).
+
+### Bug Fixes
+
+- **Fixed**: Building the replication package failed with `invalid literal for int() with base 10` when a prep step removed rows by row index using a range such as `0:30`. Even without a range, the exported `prepare_data.do` removed the wrong rows, one row above the one DataSure removed. Rebuild your replication package after you update. Negative row indices now count from the end, as the help text says: `-1` is the last row, and `5:-2` removes everything from row 5 to the second-to-last row. If a prep step can't be written as Stata, the package still builds, with a note in `prepare_data.do` and a warning on the Replication page
+
+---
+
 ## Version 1.2.1 — SurveyCTO Date Questions
 
 Released: November 2026

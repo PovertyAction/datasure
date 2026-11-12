@@ -113,13 +113,36 @@ class TestStataRemoveColumns:
 
 
 class TestStataRemoveRows:
-    def test_by_index_single(self):
-        lines = _stata_remove_rows({"method": "by row index", "value": [5]}, "")
-        assert lines == ["drop in 5"]
+    @pytest.mark.parametrize(
+        ("value", "expected"),
+        [
+            # DataSure counts rows from 0, Stata from 1
+            ([5], "drop in 6"),
+            (["0"], "drop in 1"),
+            (["0:30"], "drop in 1/31"),
+            # -1 is the last row in both systems
+            (["-5"], "drop in -5"),
+            (["5:-2"], "drop in 6/-2"),
+            (["-3:-2"], "drop in -3/-2"),
+            # Several values all refer to positions before the step
+            ([1, 3], "drop if _n == 2 | _n == 4"),
+            (["1", "-1"], "drop if _n == 2 | _n == _N"),
+            (
+                ["2:4", "-3:-2"],
+                "drop if inrange(_n, 3, 5) | inrange(_n, _N - 2, _N - 1)",
+            ),
+            ([1, "7:-1"], "drop if _n == 2 | inrange(_n, 8, _N)"),
+            # Prep logs from earlier versions
+            (["0", ",", None, "2"], "drop if _n == 1 | _n == 3"),
+        ],
+    )
+    def test_by_index(self, value, expected):
+        lines = _stata_remove_rows({"method": "by row index", "value": value}, "")
+        assert lines == [expected]
 
-    def test_by_index_multiple(self):
-        lines = _stata_remove_rows({"method": "by row index", "value": [1, 3]}, "")
-        assert lines == ["drop if _n == 1 | _n == 3"]
+    def test_by_index_no_values_is_note(self):
+        lines = _stata_remove_rows({"method": "by row index", "value": [","]}, "")
+        assert lines[0].startswith("* NOTE")
 
     def test_missing_condition(self):
         lines = _stata_remove_rows(
@@ -685,6 +708,39 @@ class TestGeneratePrepareDataScript:
         )
         result = generate_prepare_data_script(log, "P", "S", "0.1")
         assert "Removes old column" in result
+
+    def test_untranslatable_step_is_note_and_warning(self):
+        log = pl.DataFrame(
+            {
+                "action": ["remove row(s)", "remove column(s)"],
+                "description": ["Remove rows", "Drop col"],
+                "prep_args": [
+                    '{"method": "by row index", "value": ["abc"]}',
+                    '{"source_columns": ["x"]}',
+                ],
+                "action_index": [1, 2],
+            }
+        )
+        warnings: list[str] = []
+        result = generate_prepare_data_script(
+            log, "P", "S", "0.1", on_warning=warnings.append
+        )
+        assert "* NOTE: step 1 could not be translated" in result
+        assert "drop x" in result
+        assert len(warnings) == 1
+        assert "Step 1" in warnings[0]
+
+    def test_range_step_end_to_end(self):
+        log = pl.DataFrame(
+            {
+                "action": ["remove row(s)"],
+                "description": ["Remove rows"],
+                "prep_args": ['{"method": "by row index", "value": ["0:30"]}'],
+                "action_index": [1],
+            }
+        )
+        result = generate_prepare_data_script(log, "P", "S", "0.1")
+        assert "drop in 1/31" in result
 
     def test_returns_string(self):
         log = pl.DataFrame(

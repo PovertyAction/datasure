@@ -317,6 +317,7 @@ build_settings = (selected_page, exclude_reviewer_names)
 if st.session_state.get("_replication_build_settings") != build_settings:
     st.session_state.pop("_replication_zip", None)
     st.session_state.pop("_replication_filename", None)
+    st.session_state.pop("_replication_warnings", None)
     st.session_state["_replication_build_settings"] = build_settings
 
 if selected_page:
@@ -344,6 +345,7 @@ if st.button(
     type="primary",
     disabled=not selected_page or not alias,
 ):
+    build_warnings: list[str] = []
     with st.status("Building replication package…", expanded=True) as build_status:
         st.write("Fetching SurveyCTO questionnaire…")
         scto_xlsx, scto_form_def, scto_form_id, scto_error = _fetch_scto_assets(
@@ -365,8 +367,11 @@ if st.button(
             form_id=scto_form_id,
             on_progress=_on_progress,
             exclude_reviewer_names=exclude_reviewer_names,
+            on_warning=build_warnings.append,
         )
         build_status.update(label="Package ready!", state="complete", expanded=False)
+
+    st.session_state["_replication_warnings"] = build_warnings
 
     st.session_state["_replication_zip"] = zip_bytes
     st.session_state["_replication_filename"] = _zip_filename(
@@ -377,6 +382,8 @@ if st.button(
 
 if "_replication_zip" in st.session_state:
     st.success("Package ready — confirm the PII notice above, then download.")
+    for warning in st.session_state.get("_replication_warnings", []):
+        st.warning(warning, icon=":material/warning:")
     pii_confirmed = st.checkbox(
         "I confirm I am downloading this package to an encrypted, "
         "access-controlled storage location.",

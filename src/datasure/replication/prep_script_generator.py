@@ -12,12 +12,16 @@ from __future__ import annotations
 
 import ast
 import json
+import logging
 from collections.abc import Callable
 from typing import Any
 
 import polars as pl
 
+from datasure.processing.row_index import parse_row_indices
 from datasure.replication.script_generators import _C, _LOG_CLOSE, _header
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # String constants mirroring enum values (avoids importing the full app stack)
@@ -106,13 +110,38 @@ def _stata_remove_columns(args: dict, _desc: str) -> list[str]:
     return [f"drop {_col_list(cols)}"]
 
 
+def _stata_pos(index: int) -> str:
+    """Stata expression for a DataSure row position, for use with ``_n``."""
+    if index >= 0:
+        return str(index + 1)
+    return "_N" if index == -1 else f"_N - {-index - 1}"
+
+
+def _stata_in(index: int) -> str:
+    """Stata ``in`` position for a DataSure row position.
+
+    Stata counts from 1, DataSure from 0. A negative position is the same in
+    both: ``-1`` is the last row.
+    """
+    return str(index + 1) if index >= 0 else str(index)
+
+
 def _drop_by_index(values: list) -> list[str]:
-    idx_vals = [str(int(v)) for v in values if str(v).strip() not in (",", "")]
-    if not idx_vals:
+    spans = parse_row_indices(values)
+    if not spans:
         return [f"{_C} NOTE: no row indices provided for drop in"]
-    if len(idx_vals) == 1:
-        return [f"drop in {idx_vals[0]}"]
-    conditions = " | ".join(f"_n == {v}" for v in idx_vals)
+    if len(spans) == 1:
+        span = spans[0]
+        if span.is_single:
+            return [f"drop in {_stata_in(span.start)}"]
+        return [f"drop in {_stata_in(span.start)}/{_stata_in(span.end)}"]
+    # One `drop if` so every value refers to positions before the step
+    conditions = " | ".join(
+        f"_n == {_stata_pos(span.start)}"
+        if span.is_single
+        else f"inrange(_n, {_stata_pos(span.start)}, {_stata_pos(span.end)})"
+        for span in spans
+    )
     return [f"drop if {conditions}"]
 
 
@@ -436,19 +465,40 @@ def _parse_prep_args(raw: object) -> dict:
     return {}
 
 
-def _emit_prep_step(i: int, row: dict) -> list[str]:
-    """Return the Stata lines for one prep-log row."""
+def _emit_prep_step(
+    i: int, row: dict, on_warning: Callable[[str], None] | None = None
+) -> list[str]:
+    """Return the Stata lines for one prep-log row.
+
+    A step that raises while being translated gets a ``NOTE`` line, and
+    ``on_warning`` is told, so one bad step does not stop the whole script.
+    """
     action = str(row.get("action") or "")
     description = str(row.get("description") or "")
     args = _parse_prep_args(row.get("prep_args") or "{}")
 
     comment = [f"{_C} Step {i}: {description or action}"]
     emitter = _EMITTERS.get(action)
-    body = (
-        emitter(args, description)
-        if emitter
-        else [f"{_C} NOTE: unknown action '{action}'"]
-    )
+    if emitter is None:
+        body = [f"{_C} NOTE: unknown action '{action}'"]
+    else:
+        try:
+            body = emitter(args, description)
+        # Per-step boundary: one untranslatable step must not stop the package.
+        # The error is shown as a NOTE in prepare_data.do and, through
+        # on_warning, as a warning on the Replication page.
+        except Exception as e:
+            logger.exception("Could not translate prep step %d (%s)", i, action)
+            body = [
+                f"{_C} NOTE: step {i} could not be translated ({e}). "
+                "Reproduce it by hand."
+            ]
+            if on_warning is not None:
+                on_warning(
+                    f"Step {i} ({description or action}) could not be "
+                    f"translated to Stata: {e}. `prepare_data.do` has a NOTE "
+                    "in its place."
+                )
     return comment + body + [""]
 
 
@@ -457,6 +507,7 @@ def generate_prepare_data_script(
     project_name: str,
     survey_name: str,
     datasure_version: str,
+    on_warning: Callable[[str], None] | None = None,
 ) -> str:
     """Generate a Stata prepare_data do-file from the prep log.
 
@@ -470,6 +521,8 @@ def generate_prepare_data_script(
         Human-readable survey name.
     datasure_version : str
         Version of DataSure.
+    on_warning : Callable[[str], None] | None
+        Called with a message for each step that could not be translated.
 
     Returns
     -------
@@ -498,7 +551,7 @@ def generate_prepare_data_script(
     ]
 
     for i, row in enumerate(prep_log.iter_rows(named=True), start=1):
-        lines.extend(_emit_prep_step(i, row))
+        lines.extend(_emit_prep_step(i, row, on_warning))
 
     lines.append(_LOG_CLOSE)
     return "\n".join(lines) + "\n"

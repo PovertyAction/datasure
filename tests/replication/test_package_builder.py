@@ -275,6 +275,42 @@ class TestBuildReplicationPackage:
             )
         assert len(progress_messages) > 0
 
+    def test_untranslatable_prep_step_warns_and_still_builds(self):
+        warnings: list[str] = []
+        bad_log = pl.DataFrame(
+            {
+                "action": ["remove row(s)"],
+                "description": ["Remove rows"],
+                "prep_args": ['{"method": "by row index", "value": ["abc"]}'],
+                "action_index": [1],
+            }
+        )
+
+        def _duckdb_get(project_id, table, db_name):
+            if "prep_log" in table:
+                return bad_log
+            if "corr_log" in table:
+                return _CORR_LOG
+            return _mock_loader(project_id, table, db_name)
+
+        with patch(
+            "datasure.replication.package_builder.duckdb_get_table",
+            side_effect=_duckdb_get,
+        ):
+            zip_bytes = build_replication_package(
+                project_id="p",
+                project_name="P",
+                survey_name="S",
+                alias="s",
+                key_col="key",
+                on_warning=warnings.append,
+            )
+        with zipfile.ZipFile(BytesIO(zip_bytes)) as zf:
+            name = next(n for n in zf.namelist() if n.endswith("prepare_data.do"))
+            prepare_do = zf.read(name).decode()
+        assert "* NOTE: step 1 could not be translated" in prepare_do
+        assert len(warnings) == 1
+
 
 class TestPackageKeepsAcceptancesInAuditLog:
     def test_correction_log_csv_keeps_accept_rows(self):

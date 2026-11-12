@@ -76,7 +76,7 @@ class PrepDescriptions:
 
     # Row Deletion Methods
     DEL_METHODS: ClassVar[dict[str, str]] = {
-        PrepMethods.row_index.value: "Remove rows using their position numbers (e.g., rows 1, 5, 10)",
+        PrepMethods.row_index.value: "Remove rows by position, counting from 0 (e.g., 0, 5, 10:20, -1)",
         PrepMethods.condition.value: "Remove rows that meet specified criteria (e.g., where age > 65)",
     }
 

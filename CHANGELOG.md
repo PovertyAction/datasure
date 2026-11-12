@@ -7,6 +7,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Replication package crashed on row-index ranges, and Stata dropped the
+  wrong rows** (#442): building the package raised
+  `ValueError: invalid literal for int() with base 10: '0:30'` when a
+  **remove row(s) → by row index** step used a range. Even without a range,
+  `prepare_data.do` dropped the wrong rows, and negative indices removed
+  nothing or the wrong range in DataSure itself
+  - Root cause: `_drop_by_index` in
+    `src/datasure/replication/prep_script_generator.py` called `int()` on
+    every value and copied DataSure's 0-based positions into Stata's 1-based
+    `in` and `_n` unchanged. `RemoveRowsOperation._remove_by_index` matched
+    raw values against non-negative row numbers, so `-5` and `5:-2` did not
+    count from the end
+  - Solution: new Streamlit-free `src/datasure/processing/row_index.py`
+    (`parse_row_indices` → `RowSpan`, `resolve_row_positions`) is shared by the
+    prep engine and the generator. Values are a position, a negative position
+    counting from the end, or an inclusive `a:b` range. Earlier prep logs'
+    string values, `","` and `None` entries still parse; anything else raises
+    `ValueError`, which the engine reports as `ValidationError`. One value
+    emits `drop in i+1` or `drop in a+1/b+1` (negative ends unchanged); several
+    values emit one `drop if` over `_n`, with negative ends as `_N - k`, so all
+    refer to positions before the step
+  - `generate_prepare_data_script` and `build_replication_package` take an
+    `on_warning` callback. A step whose emitter raises gets a `NOTE` line in
+    `prepare_data.do` and a warning on the Replication page, which keeps it
+    beside the download button, instead of stopping the build
+  - The row-index help text on the Prep page now describes this syntax.
+    `TestStataRemoveRows` expected the 0-based output and is corrected
+
 ## [1.2.1] - 2026-11-06
 
 ### Fixed
