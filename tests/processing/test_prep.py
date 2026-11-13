@@ -2654,10 +2654,46 @@ class TestAddColumnNames:
             ("copy of column", ["a"], None),
         ],
     )
-    def test_existing_name_fails_without_overwriting(
-        self, method, source_columns, value
+    @pytest.mark.parametrize("name", ["b", "B"])
+    @patch("datasure.processing.prep.duckdb_get_table")
+    @patch("datasure.processing.prep.duckdb_save_table")
+    def test_new_step_with_existing_name_is_refused(
+        self, mock_save, mock_get, name, method, source_columns, value
     ):
-        """No add-column method may overwrite a column, in the app or on replay."""
+        """No add-column method may add a step that overwrites a column."""
+        mock_get.return_value = pl.DataFrame(
+            {"a": [1, 2], "b": [3, 4], "t": ["x", "y"], "u": ["p", "q"]}
+        )
+        empty_log = pl.DataFrame(
+            {"action": [], "description": [], "prep_args": [], "action_index": []}
+        )
+        step = PrepActionResult(
+            action="add new column",
+            column_names=name,
+            method=method,
+            source_columns=source_columns,
+            value=value,
+        )
+        with pytest.raises(ValidationError, match="already exists"):
+            _apply_single_action("proj", "alias", step, empty_log, PrepProcessor())
+        mock_save.assert_not_called()
+
+    @pytest.mark.parametrize(
+        ("method", "source_columns", "value", "expected"),
+        [
+            ("constant", None, "1", [1, 1]),
+            ("sum", ["a", "b"], None, [4, 6]),
+            ("concat", ["t", "u"], "_", ["x_p", "y_q"]),
+        ],
+    )
+    def test_saved_step_with_existing_name_still_replays(
+        self, method, source_columns, value, expected
+    ):
+        """Steps saved when adding could overwrite keep working after upgrade.
+
+        Otherwise the next refresh would drop the column and every step that
+        depends on it.
+        """
         data = pl.DataFrame(
             {"a": [1, 2], "b": [3, 4], "t": ["x", "y"], "u": ["p", "q"]}
         )
@@ -2669,6 +2705,13 @@ class TestAddColumnNames:
             value=value,
         )
         result, outcomes = _replay(data, [step])
+        assert outcomes[0].status == "Successful"
+        assert result["b"].to_list() == expected
+
+    def test_saved_copy_step_with_existing_name_fails_without_overwriting(self):
+        """Copy steps never overwrote, so a taken name fails the step."""
+        data = pl.DataFrame({"a": [1, 2], "b": [3, 4]})
+        result, outcomes = _replay(data, [_copy_step("a", "b")])
         assert outcomes[0].status == "Failed"
         assert "'b' already exists" in outcomes[0].error
         assert result.equals(data)

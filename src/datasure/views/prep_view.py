@@ -19,6 +19,7 @@ from datasure.models.enums import (
     PrepOperations,
     PrepRowConditions,
 )
+from datasure.processing.column_names import existing_name_error
 from datasure.processing.corrections import CorrectionProcessor
 from datasure.processing.prep import (
     OperationError,
@@ -242,15 +243,15 @@ def _new_column_name_error(
 ) -> str | None:
     """Return why Add Column's new name can't be used, or None.
 
-    A new name must not already exist: adding a column never overwrites one.
+    A new name must not already exist, ignoring case: adding a column never
+    overwrites one. The engine applies the same rule to new steps.
     An empty name has no error yet: the form is just incomplete.
     """
     name = prep_args.get("column_names")
     if not name:
         return None
-    if name in existing_columns:
-        return f"Column '{name}' already exists. Enter a new name."
-    return None
+    error = existing_name_error(name, existing_columns)
+    return f"{error} Enter a new name." if error else None
 
 
 def _is_add_column_incomplete(

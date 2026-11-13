@@ -280,6 +280,13 @@ class TestAddColumnNameRules:
         assert "already exists" in _new_column_name_error(args, ["hhid", "age"])
         assert _is_add_column_incomplete(args, ["hhid", "age"]) is True
 
+    def test_name_differing_only_by_case_is_blocked(self):
+        """DuckDB treats Age and age as one name, so the form blocks it."""
+        args = {"column_names": "Age", "method": PrepFunctions.constant.value}
+        error = _new_column_name_error(args, ["hhid", "age"])
+        assert "already exists as 'age'" in error
+        assert _is_add_column_incomplete(args, ["hhid", "age"]) is True
+
     def test_empty_name_shows_no_error_yet(self):
         args = {"column_names": "", "method": PrepFunctions.constant.value}
         assert _new_column_name_error(args, []) is None

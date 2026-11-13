@@ -339,11 +339,13 @@ Create new calculated or derived columns:
 6. Click "Add"
 
 **Column names**: a new column can have any name except one that is already
-a column in the dataset. Adding a column never overwrites one: the name box
-explains the clash and **Add** stays disabled until you change the name. A
-saved step whose name is now taken, for example after a re-import adds a
-column with that name, fails when your steps are re-applied and appears in
-the re-apply failure notice.
+a column in the dataset. Upper and lower case don't count as different, so
+`Age` is taken if the dataset has `age`. Adding a column never overwrites one:
+the name box explains the clash and **Add** stays disabled until you change
+the name. Steps you saved in earlier versions keep working when your steps are
+re-applied, even if they replaced a column. A **copy of column** step whose
+name is now taken, for example after a re-import adds a column with that name,
+fails and appears in the re-apply failure notice.
 
 If you build a Stata replication package, Stata has stricter rules: at most
 32 characters, starting with a letter or `_`, only letters, digits and `_`,

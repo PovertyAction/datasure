@@ -1,8 +1,10 @@
-"""Stata's rules for variable names.
+"""Rules for new column names.
 
-DataSure allows any column name, but the Stata replication package can only
-use names that follow these rules. The replication generator checks names
-here; mapping names to Stata-safe ones is tracked in #449.
+DataSure allows any column name that doesn't clash with an existing column
+(see ``existing_name_error``). The Stata replication package can only use
+names that follow Stata's rules (see ``stata_name_error``); the replication
+generator checks names there, and mapping names to Stata-safe ones is
+tracked in #449.
 
 This module has no third-party imports so the replication generator can use
 it without loading the app.
@@ -11,6 +13,7 @@ it without loading the app.
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable
 
 STATA_NAME_MAX_LENGTH = 32
 
@@ -60,6 +63,25 @@ STATA_RESERVED_NAMES = frozenset(
 
 # The reserved ``str#`` string types: str1, str80, ...
 _STATA_STR_TYPE = re.compile(r"str[0-9]+")
+
+
+def existing_name_error(name: str, columns: Iterable[str]) -> str | None:
+    """Return why ``name`` clashes with one of ``columns``, or None if it doesn't.
+
+    The comparison ignores case: DuckDB, which stores the prepared data,
+    treats ``Age`` and ``age`` as one name and would quietly rename the
+    second to ``Age_1``.
+    """
+    columns = list(columns)
+    if name in columns:
+        return f"Column '{name}' already exists."
+    for column in columns:
+        if column.lower() == name.lower():
+            return (
+                f"Column '{name}' already exists as '{column}'. Names that "
+                "differ only in upper or lower case can't both be used."
+            )
+    return None
 
 
 def stata_name_error(name: str) -> str | None:

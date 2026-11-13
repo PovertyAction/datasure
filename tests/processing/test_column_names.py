@@ -2,7 +2,28 @@
 
 import pytest
 
-from datasure.processing.column_names import stata_name_error
+from datasure.processing.column_names import existing_name_error, stata_name_error
+
+
+class TestExistingNameError:
+    """A new column name must not clash with an existing one, ignoring case."""
+
+    def test_new_name_has_no_error(self):
+        assert existing_name_error("age_copy", ["hhid", "age"]) is None
+
+    def test_exact_match_is_rejected(self):
+        assert existing_name_error("age", ["hhid", "age"]) == (
+            "Column 'age' already exists."
+        )
+
+    @pytest.mark.parametrize("name", ["Age", "AGE", "aGe"])
+    def test_case_variant_is_rejected_and_names_the_existing_column(self, name):
+        assert "already exists as 'age'" in existing_name_error(name, ["age"])
+
+    def test_exact_match_wins_over_an_earlier_case_variant(self):
+        assert existing_name_error("age", ["Age", "age"]) == (
+            "Column 'age' already exists."
+        )
 
 
 class TestStataNameError:
