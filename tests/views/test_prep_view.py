@@ -388,6 +388,15 @@ class TestRenameForm:
 
         assert _rename_pairs_from_rows(rows) == (("a", "x"), ("b", ""))
 
+    def test_old_name_with_stray_spaces_is_kept_so_it_can_be_renamed(self):
+        rows = [{"old": " age ", "new": " age_years "}, {"old": "  ", "new": "z"}]
+
+        assert _rename_pairs_from_rows(rows) == ((" age ", "age_years"),)
+
+        plan = plan_rename(["id", " age "], ByName(_rename_pairs_from_rows(rows)))
+        assert plan.can_apply
+        assert plan.pairs == ((" age ", "age_years"),)
+
     def test_preview_flags_the_row_that_collides(self):
         plan = plan_rename(self.columns, ByName((("a", "x"), ("b", "Q1"))))
         preview = _rename_preview(plan)

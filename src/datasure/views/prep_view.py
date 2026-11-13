@@ -362,17 +362,20 @@ def _rename_pairs_from_rows(rows: list[dict]) -> tuple[tuple[str, str], ...]:
     """Turn the by-name table's rows into (old, new) pairs.
 
     Rows with neither name are dropped. A row with an old name but no new
-    one becomes a pair with an empty new name, which the plan flags.
+    one becomes a pair with an empty new name, which the plan flags. The old
+    name is picked from the dataset's columns, so it is kept exactly as is:
+    trimming it would lose a column whose name has stray spaces. Only the
+    typed new name is trimmed.
     """
     pairs = []
     for row in rows:
         # The data editor gives NaN or None for an empty cell.
         old, new = (
-            value.strip() if isinstance(value, str) else ""
+            value if isinstance(value, str) else ""
             for value in (row.get("old"), row.get("new"))
         )
-        if old:
-            pairs.append((old, new))
+        if old.strip():
+            pairs.append((old, new.strip()))
     return tuple(pairs)
 
 
