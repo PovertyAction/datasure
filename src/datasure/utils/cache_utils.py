@@ -93,3 +93,30 @@ def ensure_cache_dir(*path_parts: str | Path) -> Path:
     cache_path = get_cache_path(*path_parts)
     cache_path.mkdir(parents=True, exist_ok=True)
     return cache_path
+
+
+# Marker a host (e.g. a multi-user deployment) drops into a project's
+# settings folder when the project is opened read-only, for example because
+# another user holds its write lock. DataSure never writes it.
+READ_ONLY_MARKER = ".readonly"
+_READ_ONLY_DEFAULT = "This project is open read-only. Changes will not be saved."
+_READ_ONLY_MAX_CHARS = 300
+
+
+def read_only_reason(project_id: str) -> str | None:
+    """Return why a project is read-only, or None if it is writable.
+
+    The reason is the marker file's text (trimmed); an empty marker gives a
+    generic message. An unreadable marker counts as not read-only so a stray
+    file can never block the app.
+    """
+    if not project_id:
+        return None
+    marker = get_cache_path(project_id, "settings", READ_ONLY_MARKER)
+    try:
+        if not marker.is_file():
+            return None
+        text = marker.read_text(encoding="utf-8").strip()
+    except (OSError, UnicodeDecodeError):
+        return None
+    return text[:_READ_ONLY_MAX_CHARS] or _READ_ONLY_DEFAULT
