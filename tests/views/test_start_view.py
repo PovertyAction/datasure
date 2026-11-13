@@ -10,6 +10,7 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
+from datasure.utils.demo_lifecycle import DEMO_RESET_FAILED_MESSAGE
 from datasure.utils.onboarding_utils import DEMO_PROJECT_ID
 
 # --- Module import setup ---
@@ -795,44 +796,43 @@ class TestShowUpdateFromConfigOption:
 class TestLaunchFreshDemo:
     """Test _launch_fresh_demo."""
 
-    def test_success_path_activates_demo_and_advances_onboarding(self, monkeypatch):
-        monkeypatch.setitem(_st.session_state, "st_project_id", None)
+    def test_success_path_resets_demo_and_opens_import(self, monkeypatch):
         mock_switch_page = MagicMock()
         monkeypatch.setattr(_st, "switch_page", mock_switch_page)
 
-        with (
-            patch(
-                "datasure.views.start_view.create_demo_project",
-                return_value="demoid",
-            ),
-            patch("datasure.views.start_view.load_demo_data", return_value=True),
-            patch("datasure.views.start_view.set_onboarding_step") as mock_step,
-        ):
+        with patch(
+            "datasure.views.start_view.reset_demo_project", return_value=True
+        ) as mock_reset:
             start_view._launch_fresh_demo()
 
-        assert _st.session_state["st_project_id"] == "demoid"
+        mock_reset.assert_called_once_with()
         mock_switch_page.assert_called_once()
-        mock_step.assert_any_call(1)
-        mock_step.assert_any_call(2)
 
-    def test_failure_path_shows_error(self, monkeypatch):
+    def test_failure_shows_error_after_the_dialog_reruns(self, monkeypatch):
+        """The error survives the rerun that closes the Restart dialog."""
         mock_error = MagicMock()
         monkeypatch.setattr(_st, "error", mock_error)
         mock_switch_page = MagicMock()
         monkeypatch.setattr(_st, "switch_page", mock_switch_page)
+        monkeypatch.setattr(_st, "rerun", MagicMock())
+        monkeypatch.setattr(_st, "button", MagicMock(return_value=False))
 
-        with (
-            patch(
-                "datasure.views.start_view.create_demo_project",
-                return_value="demoid",
-            ),
-            patch("datasure.views.start_view.load_demo_data", return_value=False),
-            patch("datasure.views.start_view.set_onboarding_step"),
-        ):
+        with patch("datasure.views.start_view.reset_demo_project", return_value=False):
             start_view._launch_fresh_demo()
-
-        mock_error.assert_called_once()
         mock_switch_page.assert_not_called()
+
+        # The dialog's st.rerun() clears whatever this run rendered.
+        mock_error.reset_mock()
+        with (
+            patch("datasure.views.start_view.show_demo_intro"),
+            patch(
+                "datasure.views.start_view.load_projects",
+                return_value={DEMO_PROJECT_ID: {}},
+            ),
+        ):
+            start_view._render_demo_row()
+
+        mock_error.assert_called_once_with(DEMO_RESET_FAILED_MESSAGE)
 
 
 class TestRenderDemoRow:
@@ -876,6 +876,81 @@ class TestRenderDemoRow:
             start_view._render_demo_row()
 
         mock_confirm.assert_called_once()
+        assert mock_confirm.call_args.kwargs["on_confirm"] is (
+            start_view._launch_fresh_demo
+        )
+
+    def test_restart_dialog_describes_what_is_deleted(self, monkeypatch):
+        monkeypatch.setattr(
+            _st,
+            "button",
+            MagicMock(side_effect=lambda *a, key=None, **k: key == "demo_restart"),
+        )
+
+        with (
+            patch("datasure.views.start_view.show_demo_intro"),
+            patch(
+                "datasure.views.start_view.load_projects",
+                return_value={DEMO_PROJECT_ID: {}},
+            ),
+            patch("datasure.views.start_view.confirm_dialog") as mock_confirm,
+        ):
+            start_view._render_demo_row()
+
+        message = mock_confirm.call_args.args[1].lower()
+        for deleted in ("corrections", "check pages", "settings", "data preparation"):
+            assert deleted in message
+
+    def test_export_opens_the_export_dialog_for_the_demo(self, monkeypatch):
+        """The demo can be exported, using the same dialog as other projects."""
+        monkeypatch.setattr(
+            _st,
+            "button",
+            MagicMock(side_effect=lambda *a, key=None, **k: key == "demo_export"),
+        )
+
+        with (
+            patch("datasure.views.start_view.show_demo_intro"),
+            patch(
+                "datasure.views.start_view.load_projects",
+                return_value={DEMO_PROJECT_ID: {}},
+            ),
+            patch("datasure.views.start_view._export_config_dialog") as mock_dialog,
+        ):
+            start_view._render_demo_row()
+
+        mock_dialog.assert_called_once_with("DataSure Demo", DEMO_PROJECT_ID)
+
+    def test_rendering_demo_row_builds_no_export_bundle(self, monkeypatch):
+        """Showing the Export button must not export the demo on every rerun."""
+        monkeypatch.setattr(_st, "button", MagicMock(return_value=False))
+
+        with (
+            patch("datasure.views.start_view.show_demo_intro"),
+            patch(
+                "datasure.views.start_view.load_projects",
+                return_value={DEMO_PROJECT_ID: {}},
+            ),
+            patch("datasure.views.start_view.export_project_config") as mock_export,
+            patch("datasure.views.start_view._export_config_dialog") as mock_dialog,
+        ):
+            start_view._render_demo_row()
+
+        mock_export.assert_not_called()
+        mock_dialog.assert_not_called()
+
+    def test_no_export_before_the_demo_exists(self, monkeypatch):
+        mock_button = MagicMock(return_value=False)
+        monkeypatch.setattr(_st, "button", mock_button)
+
+        with (
+            patch("datasure.views.start_view.show_demo_intro"),
+            patch("datasure.views.start_view.load_projects", return_value={}),
+        ):
+            start_view._render_demo_row()
+
+        keys = [c.kwargs.get("key") for c in mock_button.call_args_list]
+        assert "demo_export" not in keys
 
     def test_start_demo_when_no_demo_exists(self, monkeypatch):
         monkeypatch.setattr(_st, "button", MagicMock(return_value=True))

@@ -7,6 +7,7 @@ import streamlit as st
 
 from datasure.utils.config_utils import ConfigurationService
 from datasure.utils.reviewer import render_reviewer_setting
+from datasure.utils.session_defaults import init_app_session_state
 
 
 @st.cache_data
@@ -43,29 +44,7 @@ st.set_page_config(
 )
 
 # initialize session states
-if "st_project_id" not in st.session_state:
-    st.session_state.st_project_id = ""
-
-if "st_import_data_page" not in st.session_state:
-    st.session_state.st_import_data_page = None
-
-if "st_prep_data_page" not in st.session_state:
-    st.session_state.st_prep_data_page = None
-
-if "st_output_page1" not in st.session_state:
-    st.session_state.st_output_page1 = None
-
-if "st_config_checks_page" not in st.session_state:
-    st.session_state.st_config_checks_page = None
-
-if "st_output_pages" not in st.session_state:
-    st.session_state.st_output_pages = []
-
-if "st_corr_page" not in st.session_state:
-    st.session_state.st_corr_page = None
-
-if "st_replication_page" not in st.session_state:
-    st.session_state.st_replication_page = None
+init_app_session_state()
 
 # start page
 start_page = st.Page(

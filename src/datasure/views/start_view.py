@@ -12,12 +12,16 @@ from pydantic import ValidationError
 from datasure.models.schemas import ProjectConfigBundle
 from datasure.utils.cache_utils import get_cache_path
 from datasure.utils.config_utils import ConfigurationService
+from datasure.utils.demo_lifecycle import (
+    DEMO_NOTICE_SCOPE,
+    DEMO_RESET_FAILED_MESSAGE,
+    RESTART_DEMO_MESSAGE,
+    reset_demo_project,
+)
 from datasure.utils.duckdb_utils import duckdb_get_aliases
 from datasure.utils.onboarding_utils import (
     DEMO_PROJECT_ID,
-    create_demo_project,
-    load_demo_data,
-    set_onboarding_step,
+    DEMO_PROJECT_NAME,
     show_demo_intro,
 )
 from datasure.utils.project_config import (
@@ -26,7 +30,7 @@ from datasure.utils.project_config import (
     render_config_resolution_and_apply,
     render_project_config_wizard,
 )
-from datasure.utils.ui_utils import confirm_dialog
+from datasure.utils.ui_utils import confirm_dialog, queue_notice, show_queued_notices
 
 logger = logging.getLogger(__name__)
 
@@ -204,21 +208,23 @@ def _activate_project(project_id: str) -> None:
 
 
 def _launch_fresh_demo():
-    """Create a clean demo project and navigate to the import page."""
-    demo_project_id = create_demo_project()
-    st.session_state.st_project_id = demo_project_id
-    set_onboarding_step(1)
+    """Rebuild the demo project from scratch and navigate to the import page.
+
+    On failure the error is queued and the page reruns, so it shows on the
+    demo row whether this ran from the Start button or the Restart dialog.
+    """
     with st.spinner("Loading demo data..."):
-        if load_demo_data():
-            st.session_state.st_project_id = demo_project_id
-            set_onboarding_step(2)
-            st.switch_page(st.session_state.st_import_data_page)
-        else:
-            st.error("Failed to load demo data. Please try again.")
+        reset = reset_demo_project()
+    if reset:
+        st.switch_page(st.session_state.st_import_data_page)
+        return
+    queue_notice(DEMO_NOTICE_SCOPE, "error", DEMO_RESET_FAILED_MESSAGE)
+    st.rerun()
 
 
 def _render_demo_row() -> None:
     """Render the pinned DataSure Demo row."""
+    show_queued_notices(DEMO_NOTICE_SCOPE)
     demo_exists = DEMO_PROJECT_ID in load_projects()
 
     if not demo_exists:
@@ -227,11 +233,11 @@ def _render_demo_row() -> None:
     with st.container(border=True):
         name_col, action_col = st.columns([0.7, 0.3])
         with name_col:
-            st.markdown(":material/school: **DataSure Demo**")
+            st.markdown(f":material/school: **{DEMO_PROJECT_NAME}**")
             st.caption("A pre-loaded sample project for exploring DataSure.")
         with action_col:
             if demo_exists:
-                resume_col, restart_col = st.columns(2)
+                resume_col, restart_col, export_col = st.columns(3)
                 with resume_col:
                     if st.button(
                         "Resume", type="primary", width="stretch", key="demo_resume"
@@ -241,13 +247,18 @@ def _render_demo_row() -> None:
                     if st.button("Restart", width="stretch", key="demo_restart"):
                         confirm_dialog(
                             "Restart demo",
-                            "Restarting will permanently delete all your demo "
-                            "progress, including any corrections and data "
-                            "preparation steps you have made. This cannot be "
-                            "undone.",
+                            RESTART_DEMO_MESSAGE,
                             confirm_label="Restart demo",
                             on_confirm=_launch_fresh_demo,
                         )
+                with export_col:
+                    if st.button(
+                        "Export",
+                        width="stretch",
+                        key="demo_export",
+                        help="Export the demo's configuration to a file.",
+                    ):
+                        _export_config_dialog(DEMO_PROJECT_NAME, DEMO_PROJECT_ID)
             else:
                 if st.button(
                     "Start Demo", type="primary", width="stretch", key="demo_start"

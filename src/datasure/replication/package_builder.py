@@ -161,6 +161,7 @@ def build_replication_package(
     form_id: str = "",
     on_progress: Callable[[str], None] | None = None,
     exclude_reviewer_names: bool = False,
+    on_warning: Callable[[str], None] | None = None,
 ) -> bytes:
     """Build the Stata replication package and return it as zip bytes.
 
@@ -193,6 +194,10 @@ def build_replication_package(
         When ``True``, blank the ``user`` column in the exported
         ``correction_log.csv``. The column is kept, and the project's stored
         correction log is not modified.
+    on_warning : Callable[[str], None] | None
+        Optional callback invoked with a message for each problem that does
+        not stop the build, such as a prep step that could not be translated
+        to Stata. Callers can pass ``st.warning``.
 
     Returns
     -------
@@ -251,6 +256,7 @@ def build_replication_package(
         project_name=project_name,
         survey_name=survey_name,
         datasure_version=datasure_version,
+        on_warning=on_warning,
     )
     _step("`prepare_data.do` generated")
 

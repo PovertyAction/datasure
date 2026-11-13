@@ -2,18 +2,31 @@
 
 import streamlit as st
 
+from datasure.utils.demo_lifecycle import (
+    DEMO_NOTICE_SCOPE,
+    DEMO_RESET_FAILED_MESSAGE,
+    RESTART_DEMO_MESSAGE,
+    exit_demo,
+    reset_demo_project,
+)
 from datasure.utils.onboarding_utils import (
     OnboardingSteps,
     get_onboarding_step,
+    is_demo_complete,
     is_demo_project,
-    load_demo_data,
     set_onboarding_step,
     show_demo_banner,
     show_next_steps,
     show_progress_indicator,
 )
+from datasure.utils.ui_utils import confirm_dialog, queue_notice
 
 ONBOARDING_STEPS = OnboardingSteps.get_all_steps()  # List of onboarding steps
+
+# Set once the completion message has shown its balloons, so reruns of the
+# Replication page do not repeat them. Restart and Exit clear it with the rest
+# of the demo's session state.
+DEMO_CELEBRATED_KEY = "demo_completion_celebrated"
 
 
 def page_navigation(prev=None, next=None):
@@ -105,6 +118,64 @@ def demo_callout(message: str, type: str = "info"):
     render.get(type, st.info)(message)
 
 
+def _restart_demo() -> None:
+    """Reset the demo and open the import page.
+
+    Shared by the sidebar and the completion message's Restart actions.
+
+    A failed reset has left the demo, so the error is queued for the Start
+    page's demo row and the Start page is opened.
+    """
+    if reset_demo_project():
+        st.switch_page(st.session_state.st_import_data_page)
+        return
+    queue_notice(DEMO_NOTICE_SCOPE, "error", DEMO_RESET_FAILED_MESSAGE)
+    st.switch_page(st.session_state.st_start_page)
+
+
+def _confirm_restart_demo() -> None:
+    """Open the Restart confirm dialog; confirming resets the whole demo."""
+    confirm_dialog(
+        "Restart demo",
+        RESTART_DEMO_MESSAGE,
+        confirm_label="Restart demo",
+        on_confirm=_restart_demo,
+    )
+
+
+def show_demo_completion_message() -> None:
+    """Show the demo's completion message and what to do next.
+
+    This is the demo's only completion message, shown after the last step
+    (Replication). Balloons show once per demo run; the message stays on
+    reruns. Restart resets the whole demo, as the sidebar Restart does;
+    Create Real Project leaves the demo for the Start page.
+    """
+    if not is_demo_project() or not is_demo_complete():
+        return
+
+    if not st.session_state.get(DEMO_CELEBRATED_KEY):
+        st.session_state[DEMO_CELEBRATED_KEY] = True
+        st.balloons()
+
+    st.success("""
+    **Demo Complete!**
+
+    You've successfully learned how to use DataSure for survey data quality management!
+    """)
+
+    col1, col2 = st.columns(2)
+
+    with col1:
+        if st.button("Restart Demo", width="stretch"):
+            _confirm_restart_demo()
+
+    with col2:
+        if st.button("Create Real Project", type="primary", width="stretch"):
+            exit_demo()
+            st.switch_page(st.session_state.st_start_page)
+
+
 def demo_sidebar_help():
     """Add demo-specific help to the sidebar."""
     if not is_demo_project():
@@ -127,25 +198,8 @@ def demo_sidebar_help():
         st.markdown("---")
 
         if st.button("Restart Demo", width="stretch"):
-            st.session_state["_sidebar_confirm_restart"] = True
-
-        if st.session_state.get("_sidebar_confirm_restart"):
-            st.warning(
-                "This will reset all demo progress and data.",
-                icon=":material/warning:",
-            )
-            if st.button(
-                "Confirm restart", type="primary", key="_sidebar_restart_confirm"
-            ):
-                st.session_state.pop("_sidebar_confirm_restart", None)
-                load_demo_data()
-                set_onboarding_step(2)
-                st.switch_page(st.session_state.st_import_data_page)
-            if st.button("Cancel", key="_sidebar_restart_cancel"):
-                st.session_state.pop("_sidebar_confirm_restart", None)
-                st.rerun()
+            _confirm_restart_demo()
 
         if st.button("Exit Demo", width="stretch"):
-            st.session_state.st_project_id = ""
-            st.session_state.pop("onboarding_step", None)
+            exit_demo()
             st.switch_page(st.session_state.st_start_page)
