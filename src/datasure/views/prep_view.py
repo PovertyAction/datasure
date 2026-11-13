@@ -865,20 +865,32 @@ class PrepStepHandler:
                 else []
             )
 
-            return {
-                "action": PrepActions.add_column.value,
-                "column_names": dp_prep_add_col,
-                "affected_count": None,
-                "remaining_count": self.prep_data.shape[1] + 1,
-                "value": value,
-                "method": dp_prep_add_col_med,
-                "source_columns": source_columns,
-                "condition": None,
-                "failed_count": None,
-                "additional_info": None,
-            }
+            return self._add_column_args(
+                dp_prep_add_col, dp_prep_add_col_med, source_columns, value
+            )
 
         return None
+
+    def _add_column_args(
+        self,
+        name: str,
+        method: str,
+        source_columns: list[str],
+        value: str | None = None,
+    ) -> dict:
+        """Build the args an Add new column step is saved with."""
+        return {
+            "action": PrepActions.add_column.value,
+            "column_names": name,
+            "affected_count": None,
+            "remaining_count": self.prep_data.shape[1] + 1,
+            "value": value,
+            "method": method,
+            "source_columns": source_columns,
+            "condition": None,
+            "failed_count": None,
+            "additional_info": None,
+        }
 
     def _show_name_error(self, prep_args: dict) -> None:
         """Show why the new column name can't be used, under its input."""
@@ -909,18 +921,7 @@ class PrepStepHandler:
             help=NEW_NAME_HELP,
             key=f"st_sb_add_col_copy_name{self.step_index}_{source}",
         )
-        prep_args = {
-            "action": PrepActions.add_column.value,
-            "column_names": new_name,
-            "affected_count": None,
-            "remaining_count": self.prep_data.shape[1] + 1,
-            "value": None,
-            "method": PrepFunctions.copy.value,
-            "source_columns": [source],
-            "condition": None,
-            "failed_count": None,
-            "additional_info": None,
-        }
+        prep_args = self._add_column_args(new_name, PrepFunctions.copy.value, [source])
         self._show_name_error(prep_args)
         return prep_args if new_name else None
 

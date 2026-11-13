@@ -25,8 +25,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   under the name input and keeps **Add** disabled
   (`prep_view._new_column_name_error`). `AddNewColumnOperation` checks every
   method's name on apply and replay, so a logged step with an invalid name
-  now fails and shows in the re-apply failure notice. The Add new column form
-  now asks for the method before the name
+  now fails and shows in the re-apply failure notice
 
 - **Headless keyring guidance**: `secure_credentials.keyring_backend_problem`
   detects a keyring backend that can't hold credentials safely: keyring's
@@ -54,6 +53,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   in use, so its age doesn't show whether a project is still open. A
   registry that can't be written is logged and doesn't block opening the
   project
+
+### Changed
+
+- **Add new column form order** (#445): `PrepStepHandler.add_column_handler`
+  now asks for the method before the column name, so **copy of column** can
+  prefill the name from the chosen source
 
 ### Fixed
 

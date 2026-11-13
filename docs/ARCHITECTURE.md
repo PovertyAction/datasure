@@ -51,6 +51,7 @@ src/datasure/
 │   ├── prep.py             # Data preparation operations (Polars)
 │   ├── corrections.py      # Corrections and accept entries (CorrectionProcessor)
 │   ├── correction_log.py   # Correction log schema/backfill, Action enum (no Streamlit)
+│   ├── column_names.py     # Stata variable-name rules for new columns (no Streamlit)
 │   └── row_index.py        # Row-index parsing shared by prep and replication (no Streamlit)
 ├── replication/            # Stata/Python replication package export
 ├── models/

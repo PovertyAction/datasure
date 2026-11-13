@@ -2594,15 +2594,26 @@ class TestDuplicateColumn:
         assert "start with a letter" in outcomes[0].error
         assert result.equals(survey)
 
-    def test_replay_without_a_removed_step_keeps_the_rest(self, survey):
-        """Removing a duplicate step replays the remaining steps correctly."""
-        kept = [
+    def test_removing_a_duplicate_step_replays_the_rest(self, survey):
+        """Without the copy step, a step on the copy fails; the others run."""
+        log = [
+            _copy_step("hhid", "hhid_raw"),
+            PrepActionResult(
+                action="transform column(s)",
+                source_columns=["hhid_raw"],
+                method="lowercase",
+            ),
             _copy_step("income", "income_copy"),
-            PrepActionResult(action="remove column(s)", source_columns=["hhid"]),
+            PrepActionResult(action="remove column(s)", source_columns=["age"]),
         ]
-        result, outcomes = _replay(survey, kept)
-        assert all(o.status == "Successful" for o in outcomes)
-        assert result.columns == ["age", "income", "income_copy", "visited"]
+        result, outcomes = _replay(survey, log[1:])
+        assert [o.status for o in outcomes] == [
+            "Failed",
+            "Successful",
+            "Successful",
+        ]
+        assert result.columns == ["hhid", "income", "income_copy", "visited"]
+        assert result["hhid"].to_list() == ["H1", "H2", "H3"]
 
 
 class TestAddColumnStataNames:
