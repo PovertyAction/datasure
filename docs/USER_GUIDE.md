@@ -407,13 +407,13 @@ Delete unnecessary or problematic data:
 
 ##### Rename Columns
 
-Rename one or many columns in a single step, either **by name** or **by
-pattern**. Every rename form shows a live preview of each old → new name
-before you add the step. A renamed column keeps its place in the dataset.
+Rename columns either **by name** (the default) or **by pattern**. Every
+rename form shows a live preview of each old → new name before you add the
+step. A renamed column keeps its place in the dataset.
 
-**By name**: list each column to rename and its new name, one row per
-column. All the renames apply at once, so you can swap two names (`a` → `b`
-and `b` → `a`) in one step.
+**By name**: pick one column to rename. The **New name** box starts with the
+column's current name, so you can edit it rather than retype it. To rename
+several columns, add one step for each, or use a pattern.
 
 **By pattern** has three types:
 

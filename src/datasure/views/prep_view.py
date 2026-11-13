@@ -358,25 +358,16 @@ def _is_rename_incomplete(prep_args: dict, existing_columns: Sequence[str]) -> b
     return spec is None or not plan_rename(existing_columns, spec).can_apply
 
 
-def _rename_pairs_from_rows(rows: list[dict]) -> tuple[tuple[str, str], ...]:
-    """Turn the by-name table's rows into (old, new) pairs.
+def _by_name_spec(old: str | None, new: str | None) -> ByName | None:
+    """Return the by-name rename of one column, or None until one is picked.
 
-    Rows with neither name are dropped. A row with an old name but no new
-    one becomes a pair with an empty new name, which the plan flags. The old
-    name is picked from the dataset's columns, so it is kept exactly as is:
-    trimming it would lose a column whose name has stray spaces. Only the
-    typed new name is trimmed.
+    The old name is picked from the dataset's columns, so it is kept exactly
+    as is: trimming it would lose a column whose name has stray spaces. Only
+    the typed new name is trimmed; an empty one is flagged by the plan.
     """
-    pairs = []
-    for row in rows:
-        # The data editor gives NaN or None for an empty cell.
-        old, new = (
-            value if isinstance(value, str) else ""
-            for value in (row.get("old"), row.get("new"))
-        )
-        if old.strip():
-            pairs.append((old, new.strip()))
-    return tuple(pairs)
+    if not old:
+        return None
+    return ByName(((old, (new or "").strip()),))
 
 
 def _rename_preview(plan: RenamePlan) -> pl.DataFrame:
@@ -1090,8 +1081,9 @@ class PrepStepHandler:
         method = st.selectbox(
             label="Select Method",
             options=config.DP_RENAME_METHODS,
+            index=config.DP_RENAME_METHODS.index(PrepMethods.by_name.value),
             key=f"st_sb_rename_method{self.step_index}",
-            help="By name: list each column and its new name. By pattern: "
+            help="By name: pick a column and give it a new name. By pattern: "
             "rename every column matching a pattern.",
         )
         if method == PrepMethods.by_name.value:
@@ -1118,25 +1110,24 @@ class PrepStepHandler:
         }
 
     def _rename_by_name_inputs(self) -> ByName | None:
-        """Render the old → new table; None until a row has an old name."""
-        empty = pd.DataFrame(
-            {"old": pd.Series(dtype="object"), "new": pd.Series(dtype="object")}
+        """Pick one column and edit its name; None until a column is picked."""
+        old = st.selectbox(
+            "Column to rename",
+            options=list(self.all_cols),
+            index=None,
+            placeholder="Choose a column",
+            key=f"st_sb_rename_old{self.step_index}",
         )
-        edited = st.data_editor(
-            empty,
-            column_config={
-                "old": st.column_config.SelectboxColumn(
-                    "Column to rename", options=list(self.all_cols)
-                ),
-                "new": st.column_config.TextColumn("New name"),
-            },
-            num_rows="dynamic",
-            hide_index=True,
-            width="stretch",
-            key=f"st_de_rename_pairs{self.step_index}",
+        if old is None:
+            return None
+        # Keyed by the picked column so the field starts from that column's
+        # name each time a different column is picked.
+        new = st.text_input(
+            "New name",
+            value=old,
+            key=f"st_ti_rename_new_name{self.step_index}_{old}",
         )
-        pairs = _rename_pairs_from_rows(edited.to_dict("records"))
-        return ByName(pairs) if pairs else None
+        return _by_name_spec(old, new)
 
     def _rename_by_pattern_inputs(self) -> RenameSpec | None:
         """Render the chosen pattern mode's inputs; None until they're filled."""

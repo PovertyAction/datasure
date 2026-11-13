@@ -76,7 +76,7 @@ _render_range_value_inputs = pv._render_range_value_inputs
 _render_string_function_inputs = pv._render_string_function_inputs
 _render_substring_inputs = pv._render_substring_inputs
 _is_rename_incomplete = pv._is_rename_incomplete
-_rename_pairs_from_rows = pv._rename_pairs_from_rows
+_by_name_spec = pv._by_name_spec
 _rename_preview = pv._rename_preview
 _validate_column_types_for_range = pv._validate_column_types_for_range
 prep_add_step = pv.prep_add_step
@@ -378,22 +378,26 @@ class TestRenameForm:
     def test_case_change_with_no_names_changing_is_incomplete(self):
         assert self._incomplete("by pattern", ["change case", "lower", "a"]) is True
 
-    def test_rows_become_pairs_and_fully_blank_rows_are_dropped(self):
-        rows = [
-            {"old": "a", "new": "x"},
-            {"old": None, "new": None},
-            {"old": "b", "new": None},
-            {"old": None, "new": "y"},
-        ]
+    def test_no_spec_until_a_column_is_picked(self):
+        assert _by_name_spec(None, "x") is None
+        assert _by_name_spec("", "x") is None
 
-        assert _rename_pairs_from_rows(rows) == (("a", "x"), ("b", ""))
+    def test_picked_column_and_new_name_become_one_pair(self):
+        assert _by_name_spec("a", "x") == ByName((("a", "x"),))
+        assert _by_name_spec("b", None) == ByName((("b", ""),))
+
+    def test_unchanged_preloaded_name_renames_nothing(self):
+        plan = plan_rename(self.columns, _by_name_spec("a", "a"))
+
+        assert not plan.pairs
+        assert not plan.can_apply
 
     def test_old_name_with_stray_spaces_is_kept_so_it_can_be_renamed(self):
-        rows = [{"old": " age ", "new": " age_years "}, {"old": "  ", "new": "z"}]
+        spec = _by_name_spec(" age ", " age_years ")
 
-        assert _rename_pairs_from_rows(rows) == ((" age ", "age_years"),)
+        assert spec == ByName(((" age ", "age_years"),))
 
-        plan = plan_rename(["id", " age "], ByName(_rename_pairs_from_rows(rows)))
+        plan = plan_rename(["id", " age "], spec)
         assert plan.can_apply
         assert plan.pairs == ((" age ", "age_years"),)
 

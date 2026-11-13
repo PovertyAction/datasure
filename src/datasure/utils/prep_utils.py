@@ -65,7 +65,7 @@ class PrepDescriptions:
 
     # Rename Methods
     RENAME_METHODS: ClassVar[dict[str, str]] = {
-        PrepMethods.by_name.value: "List each column to rename and its new name. All renames apply at once, so you can swap two names",
+        PrepMethods.by_name.value: "Pick one column and edit its name",
         PrepMethods.by_pattern.value: "Rename every column matching a pattern. The pattern is matched again each time your steps are re-applied, so columns added by a later import are renamed too",
     }
 
