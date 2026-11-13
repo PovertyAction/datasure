@@ -138,11 +138,15 @@ class TestNowStr:
 # === PROJECT REGISTRY PERSISTENCE TESTS === #
 
 
-class TestSaveProjects:
-    """Test _save_projects."""
+class TestUpdateProjects:
+    """Test _update_projects (registry I/O itself is covered in
+    tests/utils/test_project_registry.py).
+    """
 
     def test_writes_json(self, tmp_path):
-        start_view._save_projects({"abcd1234": {"name": "X"}})
+        start_view._update_projects(
+            lambda p: p.update({"abcd1234": {"name": "X"}}) or True
+        )
         written = json.loads((tmp_path / "projects.json").read_text())
         assert written == {"abcd1234": {"name": "X"}}
 
@@ -158,6 +162,10 @@ class TestLoadProjects:
             json.dumps({"abcd1234": {"name": "Test"}})
         )
         assert start_view.load_projects() == {"abcd1234": {"name": "Test"}}
+
+    def test_corrupt_file_returns_empty_dict(self, tmp_path):
+        (tmp_path / "projects.json").write_text('{"abcd1234": {"na')
+        assert start_view.load_projects() == {}
 
 
 class TestSaveProject:
@@ -348,15 +356,17 @@ class TestRecordLastUsed:
         self._open(monkeypatch, "zzzz9999")
         assert json.loads((tmp_path / "projects.json").read_text()) == registry
 
-    def test_unwritable_registry_still_opens_project(self, monkeypatch):
+    def test_unwritable_registry_still_opens_project(self, tmp_path, monkeypatch):
+        registry = {"abcd1234": {"name": "P", "last_used": "2025-01-01 00:00:00"}}
+        (tmp_path / "projects.json").write_text(json.dumps(registry))
         monkeypatch.setattr(
-            start_view, "load_projects", MagicMock(return_value={"abcd1234": {}})
-        )
-        monkeypatch.setattr(
-            start_view, "_save_projects", MagicMock(side_effect=OSError("read-only"))
+            "datasure.utils.project_registry.os.replace",
+            MagicMock(side_effect=OSError("read-only")),
         )
         self._open(monkeypatch, "abcd1234")
         assert _st.session_state["st_project_id"] == "abcd1234"
+        # The failed write left the previous registry intact.
+        assert json.loads((tmp_path / "projects.json").read_text()) == registry
 
 
 class TestCreateAndLoadProject:

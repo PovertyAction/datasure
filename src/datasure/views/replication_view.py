@@ -4,8 +4,6 @@ Exports a self-contained Stata replication package (raw CSV, do-files,
 audit logs, README) as a zip file for download to the local drive.
 """
 
-import json
-
 import polars as pl
 import streamlit as st
 
@@ -18,6 +16,7 @@ from datasure.utils.navigations_utils import (
     demo_sidebar_help,
     show_demo_completion_message,
 )
+from datasure.utils.project_registry import read_registry
 from datasure.utils.scto_api import (
     SurveyCTOAPIClient,
     SurveyCTOAPIConfig,
@@ -35,12 +34,8 @@ _PROJECTS_FILE = "projects.json"
 @st.cache_data(ttl=60)
 def _get_project_name(project_id: str) -> str:
     """Return the human-readable project name, falling back to project_id."""
-    projects_file = get_cache_path(_PROJECTS_FILE)
-    if projects_file.exists():
-        with open(projects_file) as f:
-            projects = json.load(f)
-        return projects.get(project_id, {}).get("name", project_id)
-    return project_id
+    projects = read_registry(get_cache_path(_PROJECTS_FILE))
+    return projects.get(project_id, {}).get("name", project_id)
 
 
 def _get_import_log_row(project_id: str, alias: str) -> dict | None:

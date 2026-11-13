@@ -30,6 +30,7 @@ from datasure.utils.project_config import (
     render_config_resolution_and_apply,
     render_project_config_wizard,
 )
+from datasure.utils.project_registry import read_registry, update_registry
 from datasure.utils.ui_utils import confirm_dialog, queue_notice, show_queued_notices
 
 logger = logging.getLogger(__name__)
@@ -105,13 +106,8 @@ def valid_project_name(project_name: str) -> bool:
 
 
 def load_projects() -> dict:
-    """Load available projects from the local directory."""
-    projects_file = get_cache_path(PROJECTS_FILE)
-    if projects_file.exists():
-        with open(projects_file) as f:
-            projects = json.load(f)
-        return projects
-    return {}
+    """Load available projects from the registry (``{}`` if missing or corrupt)."""
+    return read_registry(get_cache_path(PROJECTS_FILE))
 
 
 def _now_str() -> str:
@@ -119,11 +115,9 @@ def _now_str() -> str:
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
 
-def _save_projects(projects: dict) -> None:
-    """Write the full projects registry back to disk."""
-    projects_file = get_cache_path(PROJECTS_FILE)
-    with open(projects_file, "w") as f:
-        json.dump(projects, f, indent=4)
+def _update_projects(mutate) -> bool:
+    """Read-modify-write the registry under its lock; see ``update_registry``."""
+    return update_registry(get_cache_path(PROJECTS_FILE), mutate)
 
 
 def save_project(project_name: str, project_id: str):
@@ -150,15 +144,17 @@ def save_project(project_name: str, project_id: str):
             created_at = _now_str()
             with open(project_info_path, "w") as f:
                 json.dump({"created_at": created_at}, f, indent=4)
-    last_used = _now_str()
-    projects = load_projects() or {}
     new_project = {
         "name": project_name,
         "created_at": created_at,
-        "last_used": last_used,
+        "last_used": _now_str(),
     }
-    projects[project_id] = new_project
-    _save_projects(projects)
+
+    def _register(projects: dict) -> bool:
+        projects[project_id] = new_project
+        return True
+
+    _update_projects(_register)
 
 
 def delete_project(project_id: str):
@@ -167,11 +163,7 @@ def delete_project(project_id: str):
         st.error(f"Invalid project ID: {project_id}")
         return
 
-    projects = load_projects()
-    if project_id in projects:
-        projects.pop(project_id)
-        _save_projects(projects)
-
+    if _update_projects(lambda projects: projects.pop(project_id, None) is not None):
         project_path = get_cache_path(project_id)
 
         if project_path.exists():
@@ -185,16 +177,27 @@ def _record_last_used(project_id: str) -> None:
     """Stamp ``last_used`` on a project in the registry.
 
     Keeps the home page's "Last used" caption and sort truthful, and gives
-    tools that manage the cache (e.g. a hosted deployment's per-project write
-    lock) an on-disk signal of which project was opened. A registry that
-    can't be written is logged, never fatal: opening the project matters more.
+    tools that manage the cache an on-disk record of which project was opened
+    most recently. ``last_used`` changes when a project is opened, not while
+    it is in use, so its age says nothing about whether someone is still
+    working in it: DataSure has no "close project" action (going back to the
+    home page keeps the project in the session), and Streamlit has no event
+    for a session ending. A host should treat a change in ``last_used`` as
+    that project being opened, and judge whether a project is still in use
+    from its own signals. See docs/ARCHITECTURE.md.
+
+    A registry that can't be written is logged, never fatal: opening the
+    project matters more.
     """
-    try:
-        projects = load_projects()
+
+    def _stamp(projects: dict) -> bool:
         if project_id not in projects:
-            return
+            return False
         projects[project_id]["last_used"] = _now_str()
-        _save_projects(projects)
+        return True
+
+    try:
+        _update_projects(_stamp)
     except (OSError, ValueError):
         logger.warning("Could not record last_used for project %s", project_id)
 

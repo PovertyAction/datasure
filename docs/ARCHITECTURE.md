@@ -446,7 +446,19 @@ Per project (UUID-keyed):
   each check page's, Prepare Data's and Corrections'
   [view state](#view-state)), and credential metadata
 - `cache/projects.json` — the project registry: `name`, `created_at`, and
-  `last_used` (updated whenever a project is opened from the home page)
+  `last_used`. All reads and writes go through `utils/project_registry.py`:
+  updates hold an OS lock on `projects.json.lock` so sessions sharing one
+  cache can't overwrite each other's changes, and each write replaces the
+  file in one step so a failed write leaves the previous registry intact. A
+  corrupt registry reads as empty, and the next write keeps it as
+  `projects.json.corrupt`. `last_used` is stamped whenever a project is
+  opened from the home page. It changes when a project is opened, not while
+  it is in use, so its age says nothing about whether the project is still
+  open: DataSure has no "close project" action (the home page keeps the
+  project in the session) and Streamlit has no session-end event. A host
+  that locks projects per user should treat a change in `last_used` as that
+  project being opened, and judge whether a project is still in use from
+  its own signals, such as session shutdown or recent file changes.
 - `cache/user_settings.json` — per-user preferences, currently the
   "Reviewer name" recorded as `user` in correction logs
   (`utils/reviewer.py`). Display names only, never credentials.
