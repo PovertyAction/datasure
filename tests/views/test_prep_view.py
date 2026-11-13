@@ -58,6 +58,7 @@ _build_remove_rows_value = pv._build_remove_rows_value
 _build_transform_result = pv._build_transform_result
 _build_transform_value = pv._build_transform_value
 _concat_separator = pv._concat_separator
+_copy_default_name = pv._copy_default_name
 _get_column_options_for_condition = pv._get_column_options_for_condition
 _get_unique_values_from_columns = pv._get_unique_values_from_columns
 _has_none_values = pv._has_none_values
@@ -65,6 +66,7 @@ _is_add_column_incomplete = pv._is_add_column_incomplete
 _is_prep_form_incomplete = pv._is_prep_form_incomplete
 _is_remove_row_incomplete = pv._is_remove_row_incomplete
 _is_transform_column_incomplete = pv._is_transform_column_incomplete
+_new_column_name_error = pv._new_column_name_error
 _render_datetime_function_inputs = pv._render_datetime_function_inputs
 _render_equality_value_inputs = pv._render_equality_value_inputs
 _render_numeric_function_inputs = pv._render_numeric_function_inputs
@@ -251,6 +253,83 @@ class TestIsAddColumnIncomplete:
 
     def test_missing_column_names_key(self):
         assert _is_add_column_incomplete({}) is True
+
+
+class TestAddColumnNameRules:
+    """Add Column's name input: any new name, but never an existing column."""
+
+    @pytest.mark.parametrize(
+        "name", ["x" * 40, "1st_visit", "visit date", "née", "in", "_visit"]
+    )
+    def test_any_new_name_is_complete(self, name):
+        args = {"column_names": name, "method": PrepFunctions.constant.value}
+        assert _is_add_column_incomplete(args) is False
+        assert _new_column_name_error(args, []) is None
+
+    @pytest.mark.parametrize(
+        "method",
+        [
+            PrepFunctions.constant.value,
+            PrepFunctions.sum.value,
+            PrepFunctions.concat.value,
+            PrepFunctions.index.value,
+        ],
+    )
+    def test_existing_name_is_blocked_for_every_method(self, method):
+        args = {"column_names": "age", "method": method}
+        assert "already exists" in _new_column_name_error(args, ["hhid", "age"])
+        assert _is_add_column_incomplete(args, ["hhid", "age"]) is True
+
+    def test_name_differing_only_by_case_is_blocked(self):
+        """DuckDB treats Age and age as one name, so the form blocks it."""
+        args = {"column_names": "Age", "method": PrepFunctions.constant.value}
+        error = _new_column_name_error(args, ["hhid", "age"])
+        assert "already exists as 'age'" in error
+        assert _is_add_column_incomplete(args, ["hhid", "age"]) is True
+
+    def test_empty_name_shows_no_error_yet(self):
+        args = {"column_names": "", "method": PrepFunctions.constant.value}
+        assert _new_column_name_error(args, []) is None
+        assert _is_add_column_incomplete(args) is True
+
+
+def _copy_args(source: str | None, name: str) -> dict:
+    """Build copy-of-column step args the way the Add Column form does."""
+    return {
+        "column_names": name,
+        "method": PrepFunctions.copy.value,
+        "source_columns": [source] if source else [],
+    }
+
+
+class TestCopyColumnForm:
+    """When Add Column's "copy of column" form is complete."""
+
+    columns = ("hhid", "age", "income")
+
+    def test_default_name_is_source_with_copy_suffix(self):
+        assert _copy_default_name("age") == "age_copy"
+
+    def test_complete_with_source_and_new_name(self):
+        args = _copy_args("age", "age_copy")
+        assert _is_add_column_incomplete(args, self.columns) is False
+        assert _new_column_name_error(args, self.columns) is None
+
+    def test_incomplete_without_source(self):
+        args = _copy_args(None, "age_copy")
+        assert _is_add_column_incomplete(args, self.columns) is True
+
+    def test_existing_name_is_blocked_and_explained(self):
+        args = _copy_args("age", "income")
+        assert _is_add_column_incomplete(args, self.columns) is True
+        assert "already exists" in _new_column_name_error(args, self.columns)
+
+    def test_dispatcher_checks_existing_names(self):
+        args = _copy_args("age", "hhid")
+        assert (
+            _is_prep_form_incomplete(PrepActions.add_column.value, args, self.columns)
+            is True
+        )
 
 
 def _concat_args(columns: list[str], choice: str, custom: str = "") -> dict:
@@ -1208,9 +1287,24 @@ class TestPrepStepHandler:
 
     def test_add_column_handler_no_input(self, sample_polars_df):
         _st.text_input = MagicMock(return_value="")
+        _st.selectbox = MagicMock(return_value=PrepFunctions.constant.value)
         handler = PrepStepHandler(sample_polars_df, 0)
         result = handler.add_column_handler()
         assert result is None
+
+    def test_copy_handler_without_source(self, sample_polars_df):
+        _st.selectbox = MagicMock(side_effect=[PrepFunctions.copy.value, None])
+        handler = PrepStepHandler(sample_polars_df, 0)
+        assert handler.add_column_handler() is None
+
+    def test_copy_handler_prefills_name_and_records_source(self, sample_polars_df):
+        _st.selectbox = MagicMock(side_effect=[PrepFunctions.copy.value, "age"])
+        _st.text_input = MagicMock(side_effect=lambda **kw: kw["value"])
+        handler = PrepStepHandler(sample_polars_df, 0)
+        result = handler.add_column_handler()
+        assert result["method"] == PrepFunctions.copy.value
+        assert result["column_names"] == "age_copy"
+        assert result["source_columns"] == ["age"]
 
     def test_add_column_handler_constant(self, sample_polars_df):
         _st.text_input = MagicMock(side_effect=["new_col", "constant_val"])

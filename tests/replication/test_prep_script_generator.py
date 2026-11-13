@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 import polars as pl
 import pytest
 
@@ -849,3 +851,90 @@ class TestGeneratePrepareDataScript:
             }
         )
         assert isinstance(generate_prepare_data_script(log, "P", "S", "1.0"), str)
+
+
+def _log(*steps: tuple[str, dict]) -> pl.DataFrame:
+    """A prep log of (action, prep_args) steps, as the Prep page saves it."""
+    return pl.DataFrame(
+        {
+            "action": [action for action, _ in steps],
+            "description": [f"step {i}" for i, _ in enumerate(steps, 1)],
+            "prep_args": [json.dumps(args) for _, args in steps],
+            "action_index": list(range(1, len(steps) + 1)),
+        }
+    )
+
+
+def _copy_args(source: str, new_name: str) -> dict:
+    return {
+        "action": "add new column",
+        "column_names": new_name,
+        "method": "copy of column",
+        "source_columns": [source],
+    }
+
+
+class TestDuplicateColumnScript:
+    """A duplicate step becomes clonevar + order in prepare_data.do."""
+
+    def test_duplicate_uses_clonevar_then_order_after_source(self):
+        warnings: list[str] = []
+        script = generate_prepare_data_script(
+            _log(("add new column", _copy_args("age", "age_copy"))),
+            "P",
+            "S",
+            "0.1",
+            on_warning=warnings.append,
+        )
+        lines = [line.strip() for line in script.splitlines()]
+        clone = lines.index("clonevar age_copy = age")
+        assert lines[clone + 1] == "order age_copy, after(age)"
+        assert warnings == []
+        assert "NOTE" not in script
+
+    def test_each_duplicate_step_is_translated(self):
+        script = generate_prepare_data_script(
+            _log(
+                ("add new column", _copy_args("age", "age_copy")),
+                ("add new column", _copy_args("hhid", "hhid_raw")),
+            ),
+            "P",
+            "S",
+            "0.1",
+        )
+        assert "clonevar hhid_raw = hhid" in script
+        assert "order hhid_raw, after(hhid)" in script
+
+    def test_duplicate_without_a_source_is_a_warning(self):
+        warnings: list[str] = []
+        args = _copy_args("age", "age_copy") | {"source_columns": []}
+        script = generate_prepare_data_script(
+            _log(("add new column", args)), "P", "S", "0.1", on_warning=warnings.append
+        )
+        assert "clonevar" not in script
+        assert len(warnings) == 1
+
+    @pytest.mark.parametrize("name", ["age copy", "1age", "in", "x" * 33])
+    def test_name_stata_cannot_use_is_a_note_and_warning(self, name):
+        """Until the package maps names, an unusable name is flagged, not emitted."""
+        warnings: list[str] = []
+        script = generate_prepare_data_script(
+            _log(("add new column", _copy_args("age", name))),
+            "P",
+            "S",
+            "0.1",
+            on_warning=warnings.append,
+        )
+        assert "clonevar" not in script
+        assert "NOTE" in script
+        assert len(warnings) == 1
+        assert "Stata" in warnings[0]
+
+    def test_other_add_column_methods_flag_names_stata_cannot_use(self):
+        warnings: list[str] = []
+        args = {"column_names": "visit date", "method": "constant", "value": "1"}
+        script = generate_prepare_data_script(
+            _log(("add new column", args)), "P", "S", "0.1", on_warning=warnings.append
+        )
+        assert "gen visit date" not in script
+        assert len(warnings) == 1

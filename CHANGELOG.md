@@ -9,6 +9,26 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Duplicate a column** (#445): Add new column has a new **copy of column**
+  method (`PrepFunctions.copy`). `AddNewColumnOperation._add_copy_column`
+  inserts a copy of one source column right after it, keeping its dtype and
+  nulls. It raises `ValidationError` when the source is missing or the new
+  name already exists, including on replay. The step is
+  logged with the new name in `column_names` and the source in
+  `source_columns`. `prep_script_generator._stata_add_column` translates it
+  to `clonevar <new> = <old>` plus `order <new>, after(<old>)`. The Prep form
+  picks the source first and prefills the name as `<source>_copy`
+- **Stata name rules for the replication package** (#445): new
+  `processing/column_names.stata_name_error` (Streamlit-free) reports names
+  Stata can't use: over 32 characters, not starting with a letter or `_`,
+  characters outside `[A-Za-z0-9_]`, or a reserved name
+  (`STATA_RESERVED_NAMES`, from [U] 11.3, plus `str#` types; matched
+  case-sensitively). Prep doesn't apply these rules, since not every user
+  exports to Stata. `prep_script_generator._stata_add_column` uses them to
+  write an add-column step whose new name Stata can't use as a NOTE with a
+  Replication page warning, instead of a line that fails in Stata. Mapping
+  names to Stata-safe ones when the package is built is tracked in #449
+
 - **Headless keyring guidance**: `secure_credentials.keyring_backend_problem`
   detects a keyring backend that can't hold credentials safely: keyring's
   "fail" backend (headless Linux with no Secret Service) and plaintext file
@@ -35,6 +55,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   in use, so its age doesn't show whether a project is still open. A
   registry that can't be written is logged and doesn't block opening the
   project
+
+### Changed
+
+- **Add new column never overwrites a column** (#445): every Add new column
+  method now refuses a new step whose name already exists, ignoring case
+  (DuckDB would otherwise store `Age` beside `age` as `Age_1`). The form and
+  `_apply_single_action` share `column_names.existing_name_error`. Before, a
+  constant, calculated, concat, index, uuid or random column with an existing
+  name replaced that column. Replays don't run the check, so steps saved
+  before this change still replay as they did; a copy step whose name is
+  taken on replay fails instead
+- **Add new column form order** (#445): `PrepStepHandler.add_column_handler`
+  now asks for the method before the column name, so **copy of column** can
+  prefill the name from the chosen source
 
 ### Fixed
 

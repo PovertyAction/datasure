@@ -18,6 +18,7 @@ from typing import Any
 
 import polars as pl
 
+from datasure.processing.column_names import stata_name_error
 from datasure.processing.row_index import parse_row_indices
 from datasure.replication.script_generators import _C, _LOG_CLOSE, _header
 
@@ -42,6 +43,7 @@ _ACT_TRANSFORM = "transform column(s)"
 _ACT_ADD_COL = "add new column"
 
 _METH_BY_INDEX = "by row index"
+_METH_COPY = "copy of column"
 
 _COND_MISSING = "value is missing"
 _COND_NOT_MISSING = "value is not missing"
@@ -414,9 +416,23 @@ def _stata_add_column(args: dict, _desc: str) -> list[str]:
     src_cols = _cols(args)
     values = _val_list(args)
 
+    # DataSure allows any new name; Stata doesn't. Until the package maps
+    # names to Stata-safe ones, flag the step rather than emit a broken line.
+    name_error = stata_name_error(new_col)
+    if name_error:
+        raise _UntranslatableStepError(
+            f"the new column name can't be used in Stata: {name_error}"
+        )
+
     if method == "constant":
         raw = values[0] if values else (args.get("value") or "")
         return [f"gen {new_col} = {_fmt_val(raw)}"]
+
+    if method == _METH_COPY and src_cols:
+        source = src_cols[0]
+        # clonevar keeps the storage type, labels and missing values, and
+        # order puts the copy right after its source, as DataSure does.
+        return [f"clonevar {new_col} = {source}", f"order {new_col}, after({source})"]
 
     if method == "concat" and len(src_cols) >= 2:
         return _stata_concat(new_col, src_cols, args.get("value") or "")

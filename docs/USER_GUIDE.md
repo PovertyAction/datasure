@@ -326,14 +326,46 @@ Create new calculated or derived columns:
 - Generate summary statistics
 - Create categorical groupings
 - Build a composite ID or full name by joining text columns (**concat**)
+- Keep a column's original values next to a transformed version
+  (**copy of column**)
 
 **Steps**:
 
 1. Click "Add data prep step"
 2. Choose "Add Column"
-3. Enter new column name
-4. Define calculation or value
-5. Click "Add"
+3. Choose a method
+4. Enter new column name
+5. Define calculation or value
+6. Click "Add"
+
+**Column names**: a new column can have any name except one that is already
+a column in the dataset. Upper and lower case don't count as different, so
+`Age` is taken if the dataset has `age`. Adding a column never overwrites one:
+the name box explains the clash and **Add** stays disabled until you change
+the name. Steps you saved in earlier versions keep working when your steps are
+re-applied, even if they replaced a column. A **copy of column** step whose
+name is now taken, for example after a re-import adds a column with that name,
+fails and appears in the re-apply failure notice.
+
+If you build a Stata replication package, Stata has stricter rules: at most
+32 characters, starting with a letter or `_`, only letters, digits and `_`,
+and not a name Stata reserves such as `in` or `byte`. For now, a step whose
+new name breaks these rules is written to `prepare_data.do` as a NOTE, and
+the Replication page warns you. Choose a Stata-friendly name, such as
+`visit_date` rather than `visit date`, if you plan to export to Stata.
+
+**Copying a column (copy of column)**:
+
+1. Choose the **copy of column** method.
+2. Select the column to copy.
+3. Keep the suggested name, `<column>_copy`, or type another one.
+
+The copy is placed right after the column it copies. It has the same values,
+data type and missing values. To keep the original values next to a
+transformed version, copy the column, then transform the copy. In the
+replication package the step becomes `clonevar` followed by
+`order ..., after(...)`. If a re-import removes the copied column, the step
+fails with a message naming it, and the rest of your steps still run.
 
 **Joining text columns (concat)**:
 

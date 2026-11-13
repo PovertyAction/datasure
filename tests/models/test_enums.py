@@ -96,8 +96,8 @@ class TestPrepFunctions:
     """Tests for the PrepFunctions enum."""
 
     def test_member_count(self):
-        """Verify PrepFunctions has exactly 20 members."""
-        assert len(PrepFunctions) == 20
+        """Verify PrepFunctions has exactly 21 members."""
+        assert len(PrepFunctions) == 21
 
     @pytest.mark.parametrize(
         ("member_name", "expected_value"),
@@ -122,6 +122,7 @@ class TestPrepFunctions:
             ("uuid", "uuid"),
             ("random", "random"),
             ("constant", "constant"),
+            ("copy", "copy of column"),
         ],
     )
     def test_member_values(self, member_name, expected_value):
@@ -512,10 +513,11 @@ class TestConstantConsistency:
         """Verify COL_FUNC_WITH_VALUES and COL_METHODS_WITHOUT_VALUES are disjoint."""
         assert not set(COL_FUNC_WITH_VALUES) & set(COL_METHODS_WITHOUT_VALUES)
 
-    def test_col_func_and_methods_cover_all_except_constant(self):
+    def test_col_func_and_methods_cover_all_except_constant_and_copy(self):
         """Verify COL_FUNC_WITH_VALUES + COL_METHODS_WITHOUT_VALUES cover all
-        PrepFunctions except 'constant'.
+        PrepFunctions except 'constant' and 'copy of column', which have their
+        own inputs.
         """
         combined = set(COL_FUNC_WITH_VALUES) | set(COL_METHODS_WITHOUT_VALUES)
         all_values = {m.value for m in PrepFunctions}
-        assert all_values - combined == {"constant"}
+        assert all_values - combined == {"constant", "copy of column"}
