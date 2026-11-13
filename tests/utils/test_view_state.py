@@ -176,6 +176,9 @@ class TestReset:
 class TestResetFiltersBeside:
     @pytest.fixture
     def st(self, monkeypatch):
+        # Import before the swap so the module binds the real Streamlit.
+        import datasure.utils.onboarding_utils  # noqa: F401
+
         st = MagicMock(session_state={})
         monkeypatch.setitem(sys.modules, "streamlit", st)
         return st
@@ -209,6 +212,34 @@ class TestResetFiltersBeside:
 
         keys = [call.kwargs["key"] for call in st.button.call_args_list]
         assert len(set(keys)) == 2
+
+    @pytest.mark.parametrize("demo", [False, True])
+    def test_demo_guidance_comes_above_the_row(self, settings_file, demo):
+        from streamlit.testing.v1 import AppTest
+
+        at = AppTest.from_function(_guided_settings_app, args=(settings_file, demo))
+        at.run()
+
+        assert not at.exception
+        *above, row = at.main.children.values()
+        assert [e.type for e in row.children.values()] == ["expander", "button"]
+        assert row.children[0].label == "settings"
+        guidance = [e.label for block in above for e in block.children.values()]
+        assert guidance == (["**Learn More: Guide**"] if demo else [])
+
+
+def _guided_settings_app(settings_file: str, demo: bool) -> None:
+    import streamlit as st
+
+    from datasure.utils.onboarding_utils import DEMO_PROJECT_ID, demo_expander
+    from datasure.utils.view_state import ViewState, reset_filters_beside
+
+    if demo:
+        st.session_state["st_project_id"] = DEMO_PROJECT_ID
+    with reset_filters_beside(ViewState(settings_file, "duplicates")):
+        # What @demo_output_onboarding draws before a settings function.
+        demo_expander("Guide", "How to use the settings.")
+        st.expander("settings")
 
 
 @pytest.fixture

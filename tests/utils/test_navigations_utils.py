@@ -1,14 +1,23 @@
 """Tests for the navigation utilities module."""
 
+import re
+from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pytest
 
+from datasure.utils.demo_lifecycle import (
+    DEMO_NOTICE_SCOPE,
+    DEMO_RESET_FAILED_MESSAGE,
+    RESTART_DEMO_MESSAGE,
+)
 from datasure.utils.navigations_utils import (
     add_demo_navigation,
     demo_callout,
     demo_sidebar_help,
     page_navigation,
+    show_demo_completion_message,
     show_demo_next_action,
 )
 
@@ -535,13 +544,13 @@ class TestDemoSidebarHelp:
 
         mock_st.sidebar.__enter__.assert_not_called()
 
-    @patch("datasure.utils.navigations_utils.load_demo_data")
+    @patch("datasure.utils.navigations_utils.reset_demo_project")
     @patch("datasure.utils.navigations_utils.get_onboarding_step", return_value=99)
     @patch("datasure.utils.navigations_utils.ONBOARDING_STEPS", FAKE_STEPS)
     @patch("datasure.utils.navigations_utils.is_demo_project", return_value=True)
     @patch("datasure.utils.navigations_utils.st")
     def test_step_info_not_found_skips_step_details(
-        self, mock_st, _is_demo, _get_step, _load_demo
+        self, mock_st, _is_demo, _get_step, _reset_demo
     ):
         """When current_step doesn't match any step, step details are skipped."""
         mock_st.button.return_value = False
@@ -550,13 +559,13 @@ class TestDemoSidebarHelp:
         calls = [str(c) for c in mock_st.markdown.call_args_list]
         assert not any("title" in c.lower() for c in calls)
 
-    @patch("datasure.utils.navigations_utils.load_demo_data")
+    @patch("datasure.utils.navigations_utils.reset_demo_project")
     @patch("datasure.utils.navigations_utils.get_onboarding_step", return_value=1)
     @patch("datasure.utils.navigations_utils.ONBOARDING_STEPS", FAKE_STEPS)
     @patch("datasure.utils.navigations_utils.is_demo_project", return_value=True)
     @patch("datasure.utils.navigations_utils.st")
     def test_step_info_found_renders_title_and_description(
-        self, mock_st, _is_demo, _get_step, _load_demo
+        self, mock_st, _is_demo, _get_step, _reset_demo
     ):
         """When current_step matches a step, title and description are shown."""
         mock_st.button.return_value = False
@@ -566,42 +575,239 @@ class TestDemoSidebarHelp:
         assert "Import Data" in all_markdown
         assert "Load your dataset." in all_markdown
 
-    @patch("datasure.utils.navigations_utils.load_demo_data")
+    @staticmethod
+    def _click_restart(mock_st):
+        """Render the sidebar with "Restart Demo" clicked; return the dialog."""
+        # Buttons rendered: Restart Demo, Exit Demo
+        mock_st.button.side_effect = [True, False]
+        with patch("datasure.utils.navigations_utils.confirm_dialog") as dialog:
+            demo_sidebar_help()
+        dialog.assert_called_once()
+        return dialog
+
+    @patch("datasure.utils.navigations_utils.reset_demo_project")
     @patch("datasure.utils.navigations_utils.get_onboarding_step", return_value=1)
     @patch("datasure.utils.navigations_utils.ONBOARDING_STEPS", FAKE_STEPS)
     @patch("datasure.utils.navigations_utils.is_demo_project", return_value=True)
     @patch("datasure.utils.navigations_utils.st")
-    def test_restart_demo_button_switches_page_and_loads_demo(
-        self, mock_st, _is_demo, _get_step, mock_load
+    def test_restart_demo_asks_for_confirmation_first(
+        self, mock_st, _is_demo, _get_step, mock_reset_demo
     ):
-        """Confirming restart loads demo data and switches to import page."""
-        # Simulate confirmation state already set (user previously clicked
-        # "Restart Demo")
-        mock_st.session_state.get.return_value = True
-        # Buttons rendered: Restart Demo, Confirm restart, Cancel, Exit Demo
-        mock_st.button.side_effect = [False, True, False, False]
+        """Restart Demo opens the confirm dialog without resetting anything."""
+        dialog = self._click_restart(mock_st)
+
+        assert dialog.call_args.args[1] == RESTART_DEMO_MESSAGE
+        mock_reset_demo.assert_not_called()
+        mock_st.switch_page.assert_not_called()
+
+    @patch("datasure.utils.navigations_utils.reset_demo_project")
+    @patch("datasure.utils.navigations_utils.get_onboarding_step", return_value=1)
+    @patch("datasure.utils.navigations_utils.ONBOARDING_STEPS", FAKE_STEPS)
+    @patch("datasure.utils.navigations_utils.is_demo_project", return_value=True)
+    @patch("datasure.utils.navigations_utils.st")
+    def test_confirming_restart_resets_demo_and_opens_import_page(
+        self, mock_st, _is_demo, _get_step, mock_reset_demo
+    ):
+        """Confirming the dialog resets the demo and opens the import page."""
         mock_st.session_state.st_import_data_page = "views/import.py"
+        dialog = self._click_restart(mock_st)
 
-        demo_sidebar_help()
+        dialog.call_args.kwargs["on_confirm"]()
 
+        mock_reset_demo.assert_called_once_with()
         mock_st.switch_page.assert_called_once_with("views/import.py")
-        mock_load.assert_called_once()
 
-    @patch("datasure.utils.navigations_utils.load_demo_data")
+    @patch("datasure.utils.navigations_utils.reset_demo_project", return_value=False)
+    @patch("datasure.utils.navigations_utils.get_onboarding_step", return_value=1)
+    @patch("datasure.utils.navigations_utils.ONBOARDING_STEPS", FAKE_STEPS)
+    @patch("datasure.utils.navigations_utils.is_demo_project", return_value=True)
+    @patch("datasure.utils.navigations_utils.st")
+    def test_failed_restart_opens_start_page_with_the_error(
+        self, mock_st, _is_demo, _get_step, _reset
+    ):
+        """A failed reset has left the demo, so its error shows on the Start page."""
+        mock_st.session_state.st_start_page = "views/start.py"
+        dialog = self._click_restart(mock_st)
+        with patch("datasure.utils.navigations_utils.queue_notice") as queue:
+            dialog.call_args.kwargs["on_confirm"]()
+
+        queue.assert_called_once_with(
+            DEMO_NOTICE_SCOPE, "error", DEMO_RESET_FAILED_MESSAGE
+        )
+        mock_st.switch_page.assert_called_once_with("views/start.py")
+
+    @patch("datasure.utils.navigations_utils.reset_demo_project")
     @patch("datasure.utils.navigations_utils.get_onboarding_step", return_value=1)
     @patch("datasure.utils.navigations_utils.ONBOARDING_STEPS", FAKE_STEPS)
     @patch("datasure.utils.navigations_utils.is_demo_project", return_value=True)
     @patch("datasure.utils.navigations_utils.st")
     def test_exit_demo_button_clears_project_and_switches_page(
-        self, mock_st, _is_demo, _get_step, _load_demo
+        self, mock_st, _is_demo, _get_step, _reset_demo
     ):
         """Clicking 'Exit Demo' clears project id and switches to start page."""
-        # No confirmation dialog active
-        mock_st.session_state.get.return_value = False
         # Buttons rendered: Restart Demo, Exit Demo
         mock_st.button.side_effect = [False, True]
         mock_st.session_state.st_start_page = "views/start.py"
 
-        demo_sidebar_help()
+        with patch("datasure.utils.navigations_utils.exit_demo") as mock_exit:
+            demo_sidebar_help()
 
+        mock_exit.assert_called_once_with()
         mock_st.switch_page.assert_called_once_with("views/start.py")
+
+
+class _SessionState(dict):
+    """Session state stand-in with dict and attribute access."""
+
+    def __getattr__(self, name):
+        try:
+            return self[name]
+        except KeyError as e:
+            raise AttributeError(name) from e
+
+    def __setattr__(self, name, value):
+        self[name] = value
+
+
+class TestShowDemoCompletionMessage:
+    """The demo's single completion message, shown after the Replication step."""
+
+    @pytest.fixture
+    def page(self):
+        """Patch the message's collaborators; return them with a render helper.
+
+        The demo is active and complete unless a test changes
+        ``page.is_demo_project`` or ``page.is_demo_complete``.
+        """
+        module = "datasure.utils.navigations_utils"
+        with (
+            patch(f"{module}.st") as mock_st,
+            patch(f"{module}.is_demo_project", return_value=True) as is_demo,
+            patch(f"{module}.is_demo_complete", return_value=True) as complete,
+            patch(f"{module}.reset_demo_project") as reset_demo,
+            patch(f"{module}.confirm_dialog") as dialog,
+            patch(f"{module}.exit_demo") as exit_demo,
+            patch(f"{module}.queue_notice") as queue,
+        ):
+            mock_st.session_state = _SessionState(
+                st_start_page="views/start.py",
+                st_import_data_page="views/import.py",
+            )
+            mock_st.columns.return_value = [MagicMock(), MagicMock()]
+
+            def render(clicked=None):
+                """Render the message with button ``clicked`` pressed.
+
+                Buttons rendered: Restart Demo, Create Real Project.
+                """
+                assert clicked in (None, "Restart Demo", "Create Real Project")
+                mock_st.button.side_effect = lambda label, **_kw: label == clicked
+                show_demo_completion_message()
+
+            yield SimpleNamespace(
+                st=mock_st,
+                is_demo_project=is_demo,
+                is_demo_complete=complete,
+                reset_demo=reset_demo,
+                dialog=dialog,
+                exit_demo=exit_demo,
+                queue_notice=queue,
+                render=render,
+            )
+
+    def test_non_demo_renders_nothing(self, page):
+        """Outside the demo nothing is shown."""
+        page.is_demo_project.return_value = False
+
+        page.render()
+
+        page.st.balloons.assert_not_called()
+        page.st.success.assert_not_called()
+        page.st.button.assert_not_called()
+
+    def test_incomplete_demo_renders_nothing(self, page):
+        """Before the last step nothing is shown."""
+        page.is_demo_complete.return_value = False
+
+        page.render()
+
+        page.st.balloons.assert_not_called()
+        page.st.success.assert_not_called()
+        page.st.button.assert_not_called()
+
+    def test_complete_demo_celebrates_and_offers_next_steps(self, page):
+        """A completed demo shows balloons, the message and both actions."""
+        page.render()
+
+        page.st.balloons.assert_called_once()
+        page.st.success.assert_called_once()
+        labels = [c.args[0] for c in page.st.button.call_args_list]
+        assert labels == ["Restart Demo", "Create Real Project"]
+
+    def test_balloons_show_once_per_demo_run(self, page):
+        """Reruns keep the message and buttons but do not repeat the balloons."""
+        page.render()
+        page.render()
+        page.render()
+
+        page.st.balloons.assert_called_once()
+        assert page.st.success.call_count == 3
+
+    def test_restart_asks_for_confirmation_first(self, page):
+        """Restart opens the same confirm dialog as the sidebar Restart."""
+        page.render(clicked="Restart Demo")
+
+        page.dialog.assert_called_once()
+        assert page.dialog.call_args.args[1] == RESTART_DEMO_MESSAGE
+        page.reset_demo.assert_not_called()
+        page.st.switch_page.assert_not_called()
+
+    def test_confirming_restart_does_the_full_reset(self, page):
+        """Confirming Restart runs the full demo reset and opens the import page."""
+        page.render(clicked="Restart Demo")
+
+        page.dialog.call_args.kwargs["on_confirm"]()
+
+        page.reset_demo.assert_called_once_with()
+        page.st.switch_page.assert_called_once_with("views/import.py")
+
+    def test_failed_restart_opens_start_page_with_the_error(self, page):
+        """A failed reset shows its error on the Start page, as in the sidebar."""
+        page.reset_demo.return_value = False
+        page.render(clicked="Restart Demo")
+
+        page.dialog.call_args.kwargs["on_confirm"]()
+
+        page.queue_notice.assert_called_once_with(
+            DEMO_NOTICE_SCOPE, "error", DEMO_RESET_FAILED_MESSAGE
+        )
+        page.st.switch_page.assert_called_once_with("views/start.py")
+
+    def test_create_real_project_exits_demo_to_start_page(self, page):
+        """Create Real Project leaves the demo and opens the Start page."""
+        page.render(clicked="Create Real Project")
+
+        page.exit_demo.assert_called_once_with()
+        page.st.switch_page.assert_called_once_with("views/start.py")
+
+
+def test_completion_message_is_the_only_demo_complete_message(datasure_sources):
+    """Only show_demo_completion_message tells the user the demo is complete.
+
+    The demo used to end in three places at once (Backchecks, Correct Data and
+    Replication); this catches a second completion message coming back.
+    """
+    wording = re.compile(
+        r"(completed|end of|finished) (the )?(DataSure )?demo"
+        r"|demo complete|congratulations",
+        re.IGNORECASE,
+    )
+    found = [
+        f"{path}:{lineno}"
+        for path, text in datasure_sources
+        for lineno, line in enumerate(text.splitlines(), start=1)
+        if wording.search(line)
+    ]
+
+    assert len(found) == 1, found
+    assert found[0].startswith(str(Path("utils", "navigations_utils.py")))

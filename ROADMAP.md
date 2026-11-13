@@ -45,15 +45,9 @@ For feature requests and bug reports, see our [GitHub Issues](https://github.com
 | **Package Distribution** | Available via PyPI (`uv tool install datasure`) | Launched |
 | **Replication Package Export** | Bundle and export full analysis packages | Launched |
 
----
-
-## Near-Term (Q2-Q3 2026)
-
-Features currently in development or planned for the next release cycle.
-
 ### Check-Page Corrections ([#295](https://github.com/PovertyAction/datasure/issues/295))
 
-**Status:** In Development (v1.2.0)
+**Status:** Launched (v1.2.0)
 
 Correct flagged data, or accept it as valid, from the check pages that flag it.
 Check pages and the Correct Data page write to the same correction log.
@@ -65,6 +59,12 @@ Check pages and the Correct Data page write to the same correction log.
   respondent, with an adjusted error rate next to the regular one
 - Correction log audit trail: who made each entry, from which page, filterable
   by source and action
+
+---
+
+## Near-Term (Q4 2026 – Q1 2027)
+
+Features currently in development or planned for the next release cycle.
 
 ### Other Specify Check ([#155](https://github.com/PovertyAction/datasure/issues/155))
 

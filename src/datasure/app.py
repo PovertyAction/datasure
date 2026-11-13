@@ -5,8 +5,10 @@ from pathlib import Path
 
 import streamlit as st
 
+from datasure.utils.cache_utils import read_only_reason
 from datasure.utils.config_utils import ConfigurationService
 from datasure.utils.reviewer import render_reviewer_setting
+from datasure.utils.session_defaults import init_app_session_state
 
 
 @st.cache_data
@@ -43,29 +45,7 @@ st.set_page_config(
 )
 
 # initialize session states
-if "st_project_id" not in st.session_state:
-    st.session_state.st_project_id = ""
-
-if "st_import_data_page" not in st.session_state:
-    st.session_state.st_import_data_page = None
-
-if "st_prep_data_page" not in st.session_state:
-    st.session_state.st_prep_data_page = None
-
-if "st_output_page1" not in st.session_state:
-    st.session_state.st_output_page1 = None
-
-if "st_config_checks_page" not in st.session_state:
-    st.session_state.st_config_checks_page = None
-
-if "st_output_pages" not in st.session_state:
-    st.session_state.st_output_pages = []
-
-if "st_corr_page" not in st.session_state:
-    st.session_state.st_corr_page = None
-
-if "st_replication_page" not in st.session_state:
-    st.session_state.st_replication_page = None
+init_app_session_state()
 
 # start page
 start_page = st.Page(
@@ -206,6 +186,15 @@ with st.sidebar:
     st.caption(
         ":material/bug_report: [Report an issue](https://github.com/PovertyAction/datasure/issues)"
     )
+
+# --- READ-ONLY NOTICE --- #
+# Shown above every page of a project that the host opened read-only (see
+# cache_utils.READ_ONLY_MARKER), so viewers learn why edits won't stick
+# before they hit a write error.
+
+_read_only = read_only_reason(st.session_state.st_project_id)
+if _read_only:
+    st.warning(_read_only, icon=":material/lock:")
 
 # --- RUN NAVIGATION --- #
 

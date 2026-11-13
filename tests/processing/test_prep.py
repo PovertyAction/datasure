@@ -264,6 +264,51 @@ class TestRemoveRowsOperation:
         result, _ = op.execute(data, prep_args)
         assert result.shape[0] == 3
 
+    @pytest.mark.parametrize(
+        ("value", "removed"),
+        [
+            (["3"], [3]),
+            (["1", "3"], [1, 3]),
+            (["2:4"], [2, 3, 4]),
+            (["-5"], [5]),
+            (["5:-2"], [5, 6, 7, 8]),
+            (["-3:-2"], [7, 8]),
+            ([1, "7:-1"], [1, 7, 8, 9]),
+            (["0", ",", None, "2"], [0, 2]),
+            (["1, 4"], [1, 4]),
+            (["20", "-20"], []),
+        ],
+    )
+    def test_remove_by_index_forms(self, value, removed):
+        """Each row-index form removes the rows it names, counting from 0."""
+        data = pl.DataFrame({"a": list(range(10))})
+        prep_args = PrepActionResult(
+            action="remove row(s)", method="by row index", value=value
+        )
+        result, args = RemoveRowsOperation().execute(data, prep_args)
+        assert result["a"].to_list() == [i for i in range(10) if i not in removed]
+        assert args.affected_count == len(removed)
+
+    def test_remove_by_index_range_on_issue_442_dataset(self):
+        """A 0:30 range on 2,937 rows leaves 2,906 rows."""
+        data = pl.DataFrame({"a": list(range(2937))})
+        prep_args = PrepActionResult(
+            action="remove row(s)", method="by row index", value=["0:30"]
+        )
+        result, _ = RemoveRowsOperation().execute(data, prep_args)
+        assert result.height == 2906
+        assert result["a"][0] == 31
+
+    @pytest.mark.parametrize("bad", [["abc"], ["1:"], ["1:2:3"], ["1.5"]])
+    def test_remove_by_index_rejects_invalid_values(self, bad):
+        """Values that are not row indices raise a validation error."""
+        data = pl.DataFrame({"a": [1, 2, 3]})
+        prep_args = PrepActionResult(
+            action="remove row(s)", method="by row index", value=bad
+        )
+        with pytest.raises(ValidationError, match="row index"):
+            RemoveRowsOperation().execute(data, prep_args)
+
     def test_remove_by_unknown_method(self):
         """Test Remove by unknown method."""
         op = RemoveRowsOperation()
