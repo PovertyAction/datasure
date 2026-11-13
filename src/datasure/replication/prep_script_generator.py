@@ -13,15 +13,21 @@ from __future__ import annotations
 import ast
 import json
 import logging
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 from typing import Any
 
 import polars as pl
 
-from datasure.processing.column_names import stata_name_error
+from datasure.processing.column_names import stata_name_map
 from datasure.processing.rename_plan import describe_pattern, spec_from_args
 from datasure.processing.row_index import parse_row_indices
-from datasure.replication.script_generators import _C, _LOG_CLOSE, _header
+from datasure.replication.script_generators import (
+    _C,
+    _LOG_CLOSE,
+    _header,
+    _mapped_name_labels,
+    _stata_names,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -418,14 +424,6 @@ def _stata_add_column(args: dict, _desc: str) -> list[str]:
     src_cols = _cols(args)
     values = _val_list(args)
 
-    # DataSure allows any new name; Stata doesn't. Until the package maps
-    # names to Stata-safe ones, flag the step rather than emit a broken line.
-    name_error = stata_name_error(new_col)
-    if name_error:
-        raise _UntranslatableStepError(
-            f"the new column name can't be used in Stata: {name_error}"
-        )
-
     if method == "constant":
         raw = values[0] if values else (args.get("value") or "")
         return [f"gen {new_col} = {_fmt_val(raw)}"]
@@ -471,16 +469,6 @@ def _stata_rename_columns(args: dict, _desc: str) -> list[str]:
     if not old_names or len(old_names) != len(new_names):
         raise _UntranslatableStepError("the step has no recorded renames")
 
-    # DataSure allows any new name; Stata doesn't. Until the package maps
-    # names to Stata-safe ones (#449), flag the step rather than emit a
-    # broken line.
-    for name in new_names:
-        name_error = stata_name_error(name)
-        if name_error:
-            raise _UntranslatableStepError(
-                f"a new column name can't be used in Stata: {name_error}"
-            )
-
     lines = []
     try:
         pattern = describe_pattern(spec_from_args(args.get("method"), _val(args)))
@@ -521,6 +509,37 @@ def _parse_prep_args(raw: object) -> dict:
     return {}
 
 
+def _names(value: object) -> list[str]:
+    """A ``source_columns`` or ``column_names`` value as a list of names."""
+    if not value:
+        return []
+    return [value] if isinstance(value, str) else [str(v) for v in value]
+
+
+def prep_log_column_names(prep_log: pl.DataFrame) -> list[str]:
+    """Every column name the prep steps use or create, in step order."""
+    names: list[str] = []
+    if prep_log.is_empty():
+        return names
+    for row in prep_log.iter_rows(named=True):
+        args = _parse_prep_args(row.get("prep_args") or "{}")
+        names += _names(args.get("source_columns"))
+        names += _names(args.get("column_names"))
+    return list(dict.fromkeys(names))
+
+
+def _map_step_args(args: dict, name_map: Mapping[str, str]) -> dict:
+    """``args`` with its column names replaced by their Stata names."""
+    mapped = dict(args)
+    for key in ("source_columns", "column_names"):
+        value = args.get(key)
+        if isinstance(value, str):
+            mapped[key] = name_map.get(value, value)
+        elif value:
+            mapped[key] = _stata_names(_names(value), name_map)
+    return mapped
+
+
 def _unknown_action(action: str) -> Callable[[dict, str], list[str]]:
     """Emitter for an action with no translation: always raises."""
 
@@ -531,14 +550,20 @@ def _unknown_action(action: str) -> Callable[[dict, str], list[str]]:
 
 
 def _emit_prep_step(
-    i: int, row: dict, on_warning: Callable[[str], None] | None = None
+    i: int,
+    row: dict,
+    on_warning: Callable[[str], None] | None = None,
+    name_map: Mapping[str, str] | None = None,
 ) -> list[str]:
     """Return the Stata lines for one prep-log row.
 
-    A step that cannot be translated, or raises while being translated, gets a
-    ``NOTE`` line, and ``on_warning`` is told, so one bad step does not stop
-    the whole script.
+    Column names are written as their Stata names from ``name_map``, and a
+    column the step creates under a mapped name is labelled with its
+    DataSure name. A step that cannot be translated, or raises while being
+    translated, gets a ``NOTE`` line, and ``on_warning`` is told, so one bad
+    step does not stop the whole script.
     """
+    name_map = name_map or {}
     action = str(row.get("action") or "")
     description = str(row.get("description") or "")
     args = _parse_prep_args(row.get("prep_args") or "{}")
@@ -554,7 +579,10 @@ def _emit_prep_step(
             "",
         ]
     try:
-        body = _EMITTERS.get(action, _unknown_action(action))(args, description)
+        emit = _EMITTERS.get(action, _unknown_action(action))
+        body = emit(_map_step_args(args, name_map), description)
+        if action in (_ACT_ADD_COL, _ACT_RENAME):
+            body += _mapped_name_labels(_names(args.get("column_names")), name_map)
     # Per-step boundary: one untranslatable step must not stop the package.
     # The reason is shown as a NOTE in prepare_data.do and, through
     # on_warning, as a warning on the Replication page.
@@ -591,6 +619,7 @@ def generate_prepare_data_script(
     survey_name: str,
     datasure_version: str,
     on_warning: Callable[[str], None] | None = None,
+    name_map: Mapping[str, str] | None = None,
 ) -> str:
     """Generate a Stata prepare_data do-file from the prep log.
 
@@ -606,6 +635,10 @@ def generate_prepare_data_script(
         Version of DataSure.
     on_warning : Callable[[str], None] | None
         Called with a message for each step that could not be translated.
+    name_map : Mapping[str, str] | None
+        Stata names for the column names Stata can't use, from
+        ``column_names.stata_name_map``. Without one, the map is built from
+        the names in the prep log alone.
 
     Returns
     -------
@@ -633,8 +666,10 @@ def generate_prepare_data_script(
         "",
     ]
 
+    if name_map is None:
+        name_map = stata_name_map(prep_log_column_names(prep_log))
     for i, row in enumerate(prep_log.iter_rows(named=True), start=1):
-        lines.extend(_emit_prep_step(i, row, on_warning))
+        lines.extend(_emit_prep_step(i, row, on_warning, name_map))
 
     lines.append(_LOG_CLOSE)
     return "\n".join(lines) + "\n"

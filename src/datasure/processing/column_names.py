@@ -2,9 +2,9 @@
 
 DataSure allows any column name that doesn't clash with an existing column
 (see ``existing_name_error``). The Stata replication package can only use
-names that follow Stata's rules (see ``stata_name_error``); the replication
-generator checks names there, and mapping names to Stata-safe ones is
-tracked in #449.
+names that follow Stata's rules (see ``stata_name_error``), so when the
+package is built every other name is mapped to a Stata-safe one
+(``stata_name_map``).
 
 This module has no third-party imports so the replication generator can use
 it without loading the app.
@@ -13,7 +13,8 @@ it without loading the app.
 from __future__ import annotations
 
 import re
-from collections.abc import Iterable
+import unicodedata
+from collections.abc import Iterable, Mapping
 
 STATA_NAME_MAX_LENGTH = 32
 
@@ -105,6 +106,112 @@ def stata_name_error(name: str) -> str | None:
         )
     if name[0].isdigit():
         return f"'{name}' must start with a letter or _."
-    if name in STATA_RESERVED_NAMES or _STATA_STR_TYPE.fullmatch(name):
+    if _is_reserved(name):
         return f"'{name}' is reserved by Stata. Choose another name."
     return None
+
+
+def _is_reserved(name: str) -> bool:
+    return name in STATA_RESERVED_NAMES or bool(_STATA_STR_TYPE.fullmatch(name))
+
+
+_NOT_STATA_CHAR = re.compile(r"[^A-Za-z0-9_]")
+
+
+def _propose_stata_name(name: str) -> str:
+    """Stata-safe form of ``name``, before making it unique."""
+    # Accented letters become their plain letter: "âge" -> "age".
+    ascii_name = "".join(
+        ch
+        for ch in unicodedata.normalize("NFKD", name)
+        if not unicodedata.combining(ch)
+    )
+    proposal = _NOT_STATA_CHAR.sub("_", ascii_name) or "var"
+    if proposal[0].isdigit():
+        proposal = "_" + proposal
+    proposal = proposal[:STATA_NAME_MAX_LENGTH]
+    if _is_reserved(proposal):
+        proposal = proposal[: STATA_NAME_MAX_LENGTH - 1] + "_"
+    return proposal
+
+
+def _unique(proposal: str, taken: set[str]) -> str:
+    """``proposal``, or ``proposal_2``, ``_3`` ... cut to fit, if it is taken."""
+    candidate, n = proposal, 1
+    while candidate in taken:
+        n += 1
+        suffix = f"_{n}"
+        candidate = proposal[: STATA_NAME_MAX_LENGTH - len(suffix)] + suffix
+    return candidate
+
+
+def _split_names(
+    names: Iterable[str], edits: Mapping[str, str]
+) -> tuple[list[str], set[str], dict[str, str]]:
+    """``(names, kept, edited)``: the names once each, the names Stata can
+    use as they are, and the edits for the other names.
+    """
+    names = list(dict.fromkeys(names))
+    kept = {name for name in names if stata_name_error(name) is None}
+    edited = {name: edits[name] for name in names if name not in kept and name in edits}
+    return names, kept, edited
+
+
+def stata_name_edit_errors(
+    names: Iterable[str],
+    edits: Mapping[str, str],
+    reserved: Iterable[str] = (),
+) -> dict[str, str]:
+    """Return why each edited Stata name can't be used, keyed by DataSure name.
+
+    ``edits`` maps DataSure names to the Stata names people typed. An edit
+    must follow Stata's rules, must not be a name the package already uses
+    unchanged or one of ``reserved`` (variables the package's scripts
+    create), and must not be used by another edit. Edits for names that
+    need no mapping are ignored, as ``stata_name_map`` ignores them.
+    """
+    _names, kept, edited = _split_names(names, edits)
+    taken = kept | set(reserved)
+    errors: dict[str, str] = {}
+    for name, new in edited.items():
+        rule_error = stata_name_error(new)
+        if rule_error:
+            errors[name] = rule_error
+        elif new in taken:
+            errors[name] = f"'{new}' is already the name of another variable."
+        elif sum(other == new for other in edited.values()) > 1:
+            errors[name] = f"'{new}' is used for more than one column."
+    return errors
+
+
+def stata_name_map(
+    names: Iterable[str],
+    edits: Mapping[str, str] | None = None,
+    reserved: Iterable[str] = (),
+) -> dict[str, str]:
+    """Map each name Stata can't use to a unique Stata-safe name.
+
+    ``names`` is every column name the package uses, in order: the imported
+    columns, then the names prep steps create. Names Stata can already use
+    are never changed and are left out of the result, and no mapped name
+    takes one of them or one of ``reserved``. The rules: characters outside
+    ``[A-Za-z0-9_]`` become ``_`` (accented letters become their plain
+    letter), a leading digit gets ``_`` in front, a reserved name gets ``_``
+    after, names are cut to 32 characters, and a name already taken gets
+    ``_2``, ``_3`` ...
+
+    ``edits`` holds names people chose instead of the proposals. Edits
+    without an error from ``stata_name_edit_errors`` are used and claim
+    their names first; the rest fall back to the proposal.
+    """
+    reserved = set(reserved)
+    names, kept, edited = _split_names(names, edits or {})
+    errors = stata_name_edit_errors(names, edited, reserved)
+    mapping = {name: new for name, new in edited.items() if name not in errors}
+    taken = kept | reserved | set(mapping.values())
+    for name in names:
+        if name in kept or name in mapping:
+            continue
+        mapping[name] = _unique(_propose_stata_name(name), taken)
+        taken.add(mapping[name])
+    return {name: mapping[name] for name in names if name in mapping}

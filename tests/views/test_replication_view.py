@@ -58,6 +58,7 @@ with (
         _package_tree,
         _render_config_details,
         _render_package_preview,
+        _render_stata_names,
         _resolve_page_config,
         _zip_filename,
     )
@@ -647,3 +648,77 @@ class TestDemoCompletion(_ReloadHarness):
         completion = self._reload_with_package(pii_confirmed=False)
 
         completion.assert_not_called()
+
+
+class TestRenderStataNames:
+    """The Replication page lists names that change in Stata and saves edits."""
+
+    @pytest.fixture(autouse=True)
+    def _restore_data_editor(self):
+        orig = _st.data_editor
+        yield
+        _st.data_editor = orig
+
+    def _render(self, names, saved=None, typed=None):
+        save = MagicMock()
+
+        def _editor(df, **_kw):
+            if typed:
+                df["stata_name"] = [
+                    typed.get(n, v)
+                    for n, v in zip(df["datasure_name"], df["stata_name"], strict=True)
+                ]
+            return df
+
+        _st.data_editor = MagicMock(side_effect=_editor)
+        with (
+            patch.object(_rv_mod, "_get_package_column_names", return_value=names),
+            patch.object(_rv_mod, "load_stata_name_edits", return_value=saved or {}),
+            patch.object(_rv_mod, "save_stata_name_edits", save),
+        ):
+            blocked = _render_stata_names("p", "survey")
+        return blocked, save
+
+    def test_shows_nothing_when_every_name_works_in_stata(self):
+        blocked, save = self._render(["key", "age"])
+        assert blocked is False
+        _st.data_editor.assert_not_called()
+        save.assert_not_called()
+
+    def test_lists_only_the_names_that_change(self):
+        blocked, save = self._render(["key", "visit date", "in"])
+        shown = _st.data_editor.call_args.args[0]
+        assert shown["datasure_name"].tolist() == ["visit date", "in"]
+        assert shown["stata_name"].tolist() == ["visit_date", "in_"]
+        assert blocked is False
+        save.assert_not_called()
+
+    def test_a_valid_edit_is_saved(self):
+        blocked, save = self._render(["visit date"], typed={"visit date": "vdate"})
+        save.assert_called_once_with("p", "survey", {"visit date": "vdate"})
+        assert blocked is False
+
+    def test_an_edit_stata_cant_use_is_shown_blocks_the_build_and_isnt_saved(self):
+        blocked, save = self._render(["visit date", "age"], typed={"visit date": "age"})
+        assert blocked is True
+        _st.error.assert_called_once()
+        assert "visit date" in _st.error.call_args.args[0]
+        save.assert_not_called()
+
+    def test_a_saved_name_that_no_longer_works_is_reported(self):
+        blocked, save = self._render(
+            ["visit date", "vdate"], saved={"visit date": "vdate"}
+        )
+        _st.warning.assert_called_once()
+        assert "visit date" in _st.warning.call_args.args[0]
+        save.assert_called_once_with("p", "survey", {})
+        assert blocked is False
+
+    def test_an_unreadable_dataset_blocks_the_build(self):
+        _st.data_editor = MagicMock()
+        with patch.object(
+            _rv_mod, "_get_package_column_names", side_effect=RuntimeError("db")
+        ):
+            assert _render_stata_names("p", "survey") is True
+        _st.error.assert_called_once()
+        _st.data_editor.assert_not_called()

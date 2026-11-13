@@ -2,7 +2,12 @@
 
 import pytest
 
-from datasure.processing.column_names import existing_name_error, stata_name_error
+from datasure.processing.column_names import (
+    existing_name_error,
+    stata_name_edit_errors,
+    stata_name_error,
+    stata_name_map,
+)
 
 
 class TestExistingNameError:
@@ -103,3 +108,106 @@ class TestStataNameError:
     def test_names_that_only_resemble_reserved_names_are_allowed(self, name):
         """Stata names are case-sensitive, and only exact matches are reserved."""
         assert stata_name_error(name) is None
+
+
+class TestStataNameMap:
+    """Every name Stata can't use gets a unique Stata-safe name."""
+
+    def test_names_stata_accepts_are_never_changed(self):
+        assert stata_name_map(["key", "age", "_merge", "Q1"]) == {}
+
+    def test_issue_examples(self):
+        mapping = stata_name_map(["visit date", "2nd_visit", "âge", "in"])
+        assert mapping == {
+            "visit date": "visit_date",
+            "2nd_visit": "_2nd_visit",
+            "âge": "age",
+            "in": "in_",
+        }
+
+    def test_two_names_that_map_alike_get_numbered_suffixes(self):
+        mapping = stata_name_map(["visit date", "visit-date", "visit.date"])
+        assert mapping == {
+            "visit date": "visit_date",
+            "visit-date": "visit_date_2",
+            "visit.date": "visit_date_3",
+        }
+
+    def test_a_proposal_never_takes_a_name_already_used(self):
+        """``visit_date`` exists, even later in the list, so the proposal moves on."""
+        mapping = stata_name_map(["visit date", "age", "visit_date"])
+        assert mapping == {"visit date": "visit_date_2"}
+
+    def test_long_names_are_cut_to_32_characters_and_stay_unique(self):
+        first = "household_member_" + "a" * 20 + " one"
+        second = "household_member_" + "a" * 20 + " two"
+        mapping = stata_name_map([first, second])
+        assert mapping[first] == ("household_member_" + "a" * 20)[:32]
+        assert mapping[second] == ("household_member_" + "a" * 20)[:30] + "_2"
+        assert all(stata_name_error(new) is None for new in mapping.values())
+
+    def test_a_valid_but_too_long_name_is_shortened(self):
+        name = "x" * 40
+        assert stata_name_map([name]) == {name: "x" * 32}
+
+    @pytest.mark.parametrize(
+        ("name", "expected"),
+        [("str80", "str80_"), ("_n", "_n_"), ("using", "using_"), ("", "var")],
+    )
+    def test_reserved_and_empty_names(self, name, expected):
+        assert stata_name_map([name]) == {name: expected}
+
+    def test_letters_without_a_plain_ascii_form_become_underscores(self):
+        assert stata_name_map(["straße"]) == {"straße": "stra_e"}
+
+
+class TestStataNameEdits:
+    """People can edit a proposed name; good edits are used, bad ones reported."""
+
+    def test_a_valid_edit_replaces_the_proposal(self):
+        mapping = stata_name_map(["visit date"], edits={"visit date": "vdate"})
+        assert mapping == {"visit date": "vdate"}
+
+    def test_an_edit_wins_its_name_over_another_proposal(self):
+        mapping = stata_name_map(
+            ["visit date", "visit-date"], edits={"visit-date": "visit_date"}
+        )
+        assert mapping == {"visit date": "visit_date_2", "visit-date": "visit_date"}
+
+    def test_edits_for_names_stata_accepts_or_unknown_names_are_ignored(self):
+        mapping = stata_name_map(["age", "in"], edits={"age": "age2", "gone": "g"})
+        assert mapping == {"in": "in_"}
+
+    @pytest.mark.parametrize("bad", ["visit date", "1v", "in", "x" * 33, "age"])
+    def test_an_edit_stata_cant_use_or_already_used_falls_back(self, bad):
+        mapping = stata_name_map(["visit date", "age"], edits={"visit date": bad})
+        assert mapping == {"visit date": "visit_date"}
+
+    def test_edit_errors_name_the_problem(self):
+        errors = stata_name_edit_errors(
+            ["visit date", "age", "in", "2nd"],
+            {"visit date": "age", "in": "in", "2nd": "second"},
+        )
+        assert set(errors) == {"visit date", "in"}
+        assert "already" in errors["visit date"]
+        assert "reserved" in errors["in"]
+
+    def test_two_edits_with_the_same_name_are_both_errors(self):
+        errors = stata_name_edit_errors(["a b", "c d"], {"a b": "x", "c d": "x"})
+        assert set(errors) == {"a b", "c d"}
+
+
+class TestReservedVariables:
+    """Variables the package's scripts create are never given to a column."""
+
+    def test_a_proposal_skips_a_reserved_variable(self):
+        assert stata_name_map(["_ds row"], reserved=["_ds_row"]) == {
+            "_ds row": "_ds_row_2"
+        }
+
+    def test_an_edit_to_a_reserved_variable_is_an_error(self):
+        errors = stata_name_edit_errors(["a b"], {"a b": "_ds_row"}, ["_ds_row"])
+        assert "already" in errors["a b"]
+        assert stata_name_map(["a b"], {"a b": "_ds_row"}, ["_ds_row"]) == {
+            "a b": "a_b"
+        }
