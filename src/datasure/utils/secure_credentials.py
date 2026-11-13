@@ -28,6 +28,46 @@ class SecureCredentialError(Exception):
     """Exception raised when credential operations fail."""
 
 
+NO_KEYRING_HINT = (
+    "No secure credential store is available on this machine. On a headless "
+    "Linux server or container, install an encrypted keyring backend and "
+    "select it with the PYTHON_KEYRING_BACKEND environment variable; see "
+    "'Running on a server' in the README."
+)
+PLAINTEXT_KEYRING_HINT = (
+    "The active keyring backend stores passwords unencrypted on disk, which "
+    "DataSure does not support. Select an encrypted backend with "
+    "PYTHON_KEYRING_BACKEND; see 'Running on a server' in the README."
+)
+
+
+def keyring_backend_problem() -> str | None:
+    """Explain why the active keyring backend can't safely hold credentials.
+
+    Returns None for a usable backend. Detects keyring's "fail" backend (what
+    a headless Linux machine without a Secret Service gets) and plaintext
+    file backends, which would put passwords on disk unencrypted.
+    """
+    cls = type(keyring.get_keyring())
+    priority = getattr(cls, "priority", None)
+    no_backend = isinstance(priority, (int, float)) and priority <= 0
+    if cls.__module__ == "keyring.backends.fail" or no_backend:
+        return NO_KEYRING_HINT
+    if "plaintext" in cls.__name__.lower():
+        return PLAINTEXT_KEYRING_HINT
+    return None
+
+
+def _with_backend_hint(message: str) -> str:
+    """Append the backend explanation to a keyring error, when there is one."""
+    # A hint must never mask the real keyring error.
+    try:
+        problem = keyring_backend_problem()
+    except Exception:
+        problem = None
+    return f"{message} {problem}" if problem else message
+
+
 def _get_service_name(
     project_id: str, server: str = "", credential_type: str = "scto_login"
 ) -> str:
@@ -169,7 +209,9 @@ def store_scto_credentials(
             logger.info(f"Stored {type} credentials for project {project_id}")
 
     except KeyringError as e:
-        error_msg = f"Failed to store credentials in system keyring: {e}"
+        error_msg = _with_backend_hint(
+            f"Failed to store credentials in system keyring: {e}"
+        )
         logger.exception(error_msg)
         return {
             "success": False,
@@ -470,12 +512,17 @@ def test_keyring_availability() -> dict[str, Any]:
 
         if retrieved_password == test_password:
             backend_name = keyring.get_keyring().__class__.__name__
-            return {
+            result = {
                 "success": True,
                 "available": True,
                 "backend": backend_name,
                 "message": "Keyring is working correctly",
             }
+            # Works, but may not be safe (e.g. a plaintext file backend).
+            problem = keyring_backend_problem()
+            if problem:
+                result["warning"] = problem
+            return result
         else:
             return {
                 "success": False,
@@ -488,7 +535,7 @@ def test_keyring_availability() -> dict[str, Any]:
         return {
             "success": False,
             "available": False,
-            "error": f"Keyring error: {e}",
+            "error": _with_backend_hint(f"Keyring error: {e}"),
             "error_type": "keyring_error",
         }
 

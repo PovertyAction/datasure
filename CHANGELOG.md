@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Headless keyring guidance**: `secure_credentials.keyring_backend_problem`
+  detects a keyring backend that can't hold credentials safely: keyring's
+  "fail" backend (headless Linux with no Secret Service) and plaintext file
+  backends. Keyring errors from `store_scto_credentials` and
+  `test_keyring_availability` now append an explanation that points to the
+  README's new "Running on a server" section. A working plaintext backend
+  still reports success but carries a `warning` that **Keyring Diagnostics**
+  displays, and the diagnostics list a headless-server tip
 - **Read-only notice**: when a project's settings folder contains a
   `.readonly` marker (`cache_utils.READ_ONLY_MARKER`), `app.py` shows its
   text as a warning above every page (`cache_utils.read_only_reason`; an
