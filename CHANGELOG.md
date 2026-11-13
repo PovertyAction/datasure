@@ -7,8 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Record project activation**: opening a project from the home page
+  (`start_view._activate_project`) now stamps `last_used` in
+  `cache/projects.json` via `_record_last_used`. The "Last used" caption
+  and sort reflect when a project was last opened, not only when it was
+  created, and tools that manage the cache (such as a hosted deployment's
+  per-project write lock) can tell which project a user opened most
+  recently. `last_used` changes when a project is opened, not while it is
+  in use, so its age doesn't show whether a project is still open. A
+  registry that can't be written is logged and doesn't block opening the
+  project
+
 ### Fixed
 
+- **A failed write could empty the project registry, and sessions sharing
+  a cache could undo each other's changes**: every read and write of
+  `cache/projects.json` now goes through `utils/project_registry.py`, which
+  writes to a temp file and swaps it in with `os.replace`, and holds an OS
+  file lock across each read-modify-write. A corrupt registry no longer
+  crashes the home page; it reads as empty and is kept as
+  `projects.json.corrupt` on the next write
 - **Replication package crashed on row-index ranges, and Stata dropped the
   wrong rows** (#442): building the package raised
   `ValueError: invalid literal for int() with base 10: '0:30'` when a
