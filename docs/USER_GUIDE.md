@@ -463,8 +463,8 @@ The log entry shows the renames each run actually made.
 
 **Columns used by checks or corrections**: if a column you rename is used by
 a check page's settings (such as the survey ID, enumerator, duplicate or GPS
-columns) or by entries in the correction log, a dialog lists those uses
-before the step is added. Choose **Rename anyway** to go ahead or **Cancel**
+columns) or by entries in the correction log, clicking **Add** lists those
+uses in a warning in the same dialog before the step is added. Choose **Rename anyway** to go ahead or **Cancel**
 to stop. DataSure doesn't update those settings or corrections for you, so
 update them afterwards. Renames that touch no such columns add the step
 straight away.

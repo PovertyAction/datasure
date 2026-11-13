@@ -1392,55 +1392,91 @@ def prep_add_step(
     alias : str
         The dataset.
     """
-    with st.popover(":material/add: Add data prep step", width="stretch"):
-        st.info("Add a new data preparation step to the log.")
-        prep_handler = PrepStepHandler(prep_data, step_index)
+    if st.button(
+        ":material/add: Add data prep step",
+        key=f"st_bt_add_prep_step{step_index}",
+        width="stretch",
+    ):
+        # A rename warning left from an earlier, closed dialog shouldn't
+        # greet the user when it opens again.
+        st.session_state.pop(_pending_rename_key(step_index), None)
 
-        dp_prep_action = st.selectbox(
-            label="Select Action",
-            options=config.DP_ACTIONS,
-            key=f"st_sb_action{step_index}",
-            index=None,
-            help="Select the data preparation action you want to perform",
-        )
+        @st.dialog("Add data prep step", width="large")
+        def _dialog() -> None:
+            _render_add_step_form(prep_data, step_index, alias)
 
-        prep_args = None
+        _dialog()
 
-        if dp_prep_action == PrepActions.add_column.value:
-            prep_args = prep_handler.add_column_handler()
 
-        elif dp_prep_action == PrepActions.transform_column.value:
-            prep_args = prep_handler.transform_column_handler()
+def _pending_rename_key(step_index: int) -> str:
+    """Session key of a rename waiting for the user to confirm it."""
+    return f"prep_pending_rename{step_index}"
 
-        elif dp_prep_action == PrepActions.remove_column.value:
-            prep_args = prep_handler.remove_column_handler()
 
-        elif dp_prep_action == PrepActions.remove_row.value:
-            prep_args = prep_handler.remove_rows_handler()
+def _render_add_step_form(
+    prep_data: pl.DataFrame | pd.DataFrame, step_index: int, alias: str
+) -> None:
+    """Render the add-step form shown in the Add data prep step dialog."""
+    prep_handler = PrepStepHandler(prep_data, step_index)
 
-        elif dp_prep_action == PrepActions.rename_column.value:
-            prep_args = prep_handler.rename_column_handler()
+    dp_prep_action = st.selectbox(
+        label="Select Action",
+        options=config.DP_ACTIONS,
+        key=f"st_sb_action{step_index}",
+        index=None,
+        help="Select the data preparation action you want to perform",
+    )
 
-        if prep_args is None:
-            st.warning("Please complete the form to add a new preparation step.")
+    prep_args = None
+
+    if dp_prep_action == PrepActions.add_column.value:
+        prep_args = prep_handler.add_column_handler()
+
+    elif dp_prep_action == PrepActions.transform_column.value:
+        prep_args = prep_handler.transform_column_handler()
+
+    elif dp_prep_action == PrepActions.remove_column.value:
+        prep_args = prep_handler.remove_column_handler()
+
+    elif dp_prep_action == PrepActions.remove_row.value:
+        prep_args = prep_handler.remove_rows_handler()
+
+    elif dp_prep_action == PrepActions.rename_column.value:
+        prep_args = prep_handler.rename_column_handler()
+
+    if prep_args is None:
+        st.warning("Please complete the form to add a new preparation step.")
+        return
+
+    pending_key = _pending_rename_key(step_index)
+    pending = st.session_state.get(pending_key)
+    if pending is not None and pending["args"] == prep_args:
+        _confirm_rename_in_use(alias, prep_args, pending["body"], pending_key)
+        return
+    # The form changed since the warning, so it no longer applies.
+    st.session_state.pop(pending_key, None)
+
+    disable_add = _is_prep_form_incomplete(
+        dp_prep_action, prep_args, prep_handler.all_cols
+    )
+
+    if st.button(
+        label="Add",
+        key=f"st_sb_add_confirm{step_index}",
+        width="stretch",
+        type="primary",
+        help="Add the data preparation step to the log",
+        disabled=disable_add,
+    ):
+        if dp_prep_action != PrepActions.rename_column.value:
+            _add_step(alias, prep_args)
             return
-
-        disable_add = _is_prep_form_incomplete(
-            dp_prep_action, prep_args, prep_handler.all_cols
-        )
-
-        if st.button(
-            label="Add",
-            key=f"st_sb_add_confirm{step_index}",
-            width="stretch",
-            type="primary",
-            help="Add the data preparation step to the log",
-            disabled=disable_add,
-        ):
-            if dp_prep_action == PrepActions.rename_column.value:
-                _add_rename_step(alias, prep_args)
-            else:
-                _add_step(alias, prep_args)
+        body = _rename_in_use_warning(alias, prep_args)
+        if body is None:
+            _add_step(alias, prep_args)
+            return
+        st.session_state[pending_key] = {"args": prep_args, "body": body}
+        st.rerun(scope="fragment")
 
 
 def _add_step(alias: str, prep_args: dict) -> None:
@@ -1457,58 +1493,58 @@ def _add_step(alias: str, prep_args: dict) -> None:
         st.rerun()
 
 
-def _add_step_after_confirm(alias: str, prep_args: dict) -> None:
-    """Apply a new step from a confirm dialog, which reruns afterwards."""
-    try:
-        prep_apply_action(project_id, alias, PrepActionResult(**prep_args))
-    except (ValidationError, OperationError) as e:
-        queue_notice(
-            _notice_scope(alias), "error", f"Error adding preparation step: {e!s}"
-        )
-    else:
-        queue_notice(
-            _notice_scope(alias), "success", "Preparation step added successfully!"
-        )
-        _refresh_corrected_data(alias)
+def _rename_in_use_warning(alias: str, prep_args: dict) -> str | None:
+    """Return why a rename needs confirming, or None if nothing uses the columns.
 
-
-def _add_rename_step(alias: str, prep_args: dict) -> None:
-    """Add a rename step, first warning if checks or corrections use the columns.
-
-    Nothing is rewritten: the dialog lists what will stop matching and lets
-    the user rename anyway.
+    Nothing is rewritten: the warning lists what will stop matching and the
+    user can rename anyway.
     """
     renamed = list(prep_args.get("source_columns") or [])
     # UI boundary: the lookup only reads settings, so if it fails the user is
-    # told (in the dialog below) and can still decide whether to rename.
+    # told (in the warning) and can still decide whether to rename.
     try:
         references = find_column_references(project_id, alias, renamed)
-        lookup_error = None
     except Exception as e:
         logger.exception("Could not check where columns of %s are used", alias)
-        references, lookup_error = [], str(e)
-
-    if not references and not lookup_error:
-        _add_step(alias, prep_args)
-        return
-
-    if lookup_error:
-        body = (
+        return (
             "DataSure couldn't check whether check settings or corrections use "
-            f"these columns ({lookup_error}). Rename them anyway?"
+            f"these columns ({e}). Rename them anyway?"
         )
-    else:
-        body = (
-            "Check settings or corrections use these columns. After renaming, "
-            "they won't find them until you update them. Nothing is changed "
-            "for you.\n\n" + format_references(references)
-        )
-    confirm_dialog(
-        "Rename columns in use",
-        body,
-        confirm_label="Rename anyway",
-        on_confirm=lambda: _add_step_after_confirm(alias, prep_args),
+    if not references:
+        return None
+    return (
+        "Check settings or corrections use these columns. After renaming, "
+        "they won't find them until you update them. Nothing is changed "
+        "for you.\n\n" + format_references(references)
     )
+
+
+def _confirm_rename_in_use(
+    alias: str, prep_args: dict, body: str, pending_key: str
+) -> None:
+    """Show the columns-in-use warning in the add-step dialog.
+
+    Streamlit can't open a dialog from inside another, so the warning and
+    its buttons take the place of the Add button.
+    """
+    st.warning(f"**Rename columns in use**\n\n{body}", icon=":material/warning:")
+    cancel_col, confirm_col = st.columns(2)
+    with cancel_col:
+        st.button(
+            "Cancel",
+            key=f"{pending_key}_cancel",
+            width="stretch",
+            on_click=lambda: st.session_state.pop(pending_key, None),
+        )
+    with confirm_col:
+        if st.button(
+            "Rename anyway",
+            key=f"{pending_key}_confirm",
+            width="stretch",
+            type="primary",
+        ):
+            st.session_state.pop(pending_key, None)
+            _add_step(alias, prep_args)
 
 
 # --- Remove Preparation Step ---#

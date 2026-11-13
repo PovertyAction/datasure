@@ -80,6 +80,7 @@ _by_name_spec = pv._by_name_spec
 _rename_preview = pv._rename_preview
 _validate_column_types_for_range = pv._validate_column_types_for_range
 prep_add_step = pv.prep_add_step
+_render_add_step_form = pv._render_add_step_form
 prep_remove_step = pv.prep_remove_step
 
 # Restore original stop behavior
@@ -1735,69 +1736,49 @@ class TestPrepStepHandler:
 
 
 class TestPrepAddStep:
-    """Test prep_add_step function."""
+    """The add-step form shown in the Add data prep step dialog."""
 
     def test_no_action_selected(self, sample_polars_df):
         """When no action is selected, should show warning."""
-        mock_popover = MagicMock()
-        mock_popover.__enter__ = MagicMock(return_value=None)
-        mock_popover.__exit__ = MagicMock(return_value=False)
-        _st.popover = MagicMock(return_value=mock_popover)
         _st.selectbox = MagicMock(return_value=None)
         _st.info = MagicMock()
         _st.warning = MagicMock()
 
-        prep_add_step(sample_polars_df, step_index=0, alias="test_label")
+        _render_add_step_form(sample_polars_df, step_index=0, alias="test_label")
         _st.warning.assert_called()
 
     def test_add_column_action_no_input(self, sample_polars_df):
         """When add column selected but no column name entered."""
-        mock_popover = MagicMock()
-        mock_popover.__enter__ = MagicMock(return_value=None)
-        mock_popover.__exit__ = MagicMock(return_value=False)
-        _st.popover = MagicMock(return_value=mock_popover)
         _st.selectbox = MagicMock(return_value=PrepActions.add_column.value)
         _st.text_input = MagicMock(return_value="")
         _st.info = MagicMock()
         _st.warning = MagicMock()
 
-        prep_add_step(sample_polars_df, step_index=0, alias="test_label")
+        _render_add_step_form(sample_polars_df, step_index=0, alias="test_label")
         _st.warning.assert_called()
 
     def test_remove_column_action(self, sample_polars_df):
         """When remove column selected and columns chosen."""
-        mock_popover = MagicMock()
-        mock_popover.__enter__ = MagicMock(return_value=None)
-        mock_popover.__exit__ = MagicMock(return_value=False)
-        _st.popover = MagicMock(return_value=mock_popover)
         _st.selectbox = MagicMock(return_value=PrepActions.remove_column.value)
         _st.multiselect = MagicMock(return_value=["name"])
         _st.info = MagicMock()
         _st.button = MagicMock(return_value=False)
 
-        prep_add_step(sample_polars_df, step_index=0, alias="test_label")
+        _render_add_step_form(sample_polars_df, step_index=0, alias="test_label")
         _st.button.assert_called_once()
 
     def test_transform_column_action(self, sample_polars_df):
         """When transform column selected."""
-        mock_popover = MagicMock()
-        mock_popover.__enter__ = MagicMock(return_value=None)
-        mock_popover.__exit__ = MagicMock(return_value=False)
-        _st.popover = MagicMock(return_value=mock_popover)
         _st.selectbox = MagicMock(
             side_effect=[PrepActions.transform_column.value, "name", "trim"]
         )
         _st.info = MagicMock()
         _st.button = MagicMock(return_value=False)
 
-        prep_add_step(sample_polars_df, step_index=0, alias="test_label")
+        _render_add_step_form(sample_polars_df, step_index=0, alias="test_label")
 
     def test_remove_row_action(self, sample_polars_df):
         """When remove row selected."""
-        mock_popover = MagicMock()
-        mock_popover.__enter__ = MagicMock(return_value=None)
-        mock_popover.__exit__ = MagicMock(return_value=False)
-        _st.popover = MagicMock(return_value=mock_popover)
         _st.selectbox = MagicMock(
             side_effect=[
                 PrepActions.remove_row.value,
@@ -1808,7 +1789,7 @@ class TestPrepAddStep:
         _st.info = MagicMock()
         _st.button = MagicMock(return_value=False)
 
-        prep_add_step(sample_polars_df, step_index=0, alias="test_label")
+        _render_add_step_form(sample_polars_df, step_index=0, alias="test_label")
 
     @patch("datasure.views.prep_view.CorrectionProcessor")
     @patch("datasure.views.prep_view.prep_apply_action")
@@ -1816,13 +1797,8 @@ class TestPrepAddStep:
         self, mock_prep_apply, mock_processor_cls, sample_polars_df
     ):
         """When Add button is clicked with valid data."""
-        # Set module-level variables needed by prep_add_step
         pv.project_id = "test_project"
 
-        mock_popover = MagicMock()
-        mock_popover.__enter__ = MagicMock(return_value=None)
-        mock_popover.__exit__ = MagicMock(return_value=False)
-        _st.popover = MagicMock(return_value=mock_popover)
         _st.selectbox = MagicMock(return_value=PrepActions.remove_column.value)
         _st.multiselect = MagicMock(return_value=["name"])
         _st.info = MagicMock()
@@ -1830,7 +1806,7 @@ class TestPrepAddStep:
         _st.success = MagicMock()
         _st.rerun = MagicMock()
 
-        prep_add_step(sample_polars_df, step_index=0, alias="test_label")
+        _render_add_step_form(sample_polars_df, step_index=0, alias="test_label")
         mock_prep_apply.assert_called_once()
         _st.rerun.assert_called_once()
 
@@ -1845,10 +1821,6 @@ class TestPrepAddStep:
 
         mock_prep_apply.side_effect = ValidationError("Failed to parse datetime")
 
-        mock_popover = MagicMock()
-        mock_popover.__enter__ = MagicMock(return_value=None)
-        mock_popover.__exit__ = MagicMock(return_value=False)
-        _st.popover = MagicMock(return_value=mock_popover)
         _st.selectbox = MagicMock(return_value=PrepActions.remove_column.value)
         _st.multiselect = MagicMock(return_value=["name"])
         _st.info = MagicMock()
@@ -1857,13 +1829,181 @@ class TestPrepAddStep:
         _st.error = MagicMock()
         _st.rerun = MagicMock()
 
-        prep_add_step(sample_polars_df, step_index=0, alias="test_label")
+        _render_add_step_form(sample_polars_df, step_index=0, alias="test_label")
 
         mock_prep_apply.assert_called_once()
         _st.error.assert_called_once()
         assert "Failed to parse datetime" in _st.error.call_args[0][0]
         _st.success.assert_not_called()
         _st.rerun.assert_not_called()
+
+
+class TestAddStepDialog:
+    """The Add data prep step button opens the form in a dialog."""
+
+    @pytest.fixture
+    def dialog(self, monkeypatch):
+        dialog = MagicMock(side_effect=lambda *a, **k: lambda fn: fn)
+        monkeypatch.setattr(_st, "dialog", dialog)
+        return dialog
+
+    def test_form_stays_closed_until_the_button_is_clicked(
+        self, monkeypatch, dialog, sample_polars_df
+    ):
+        monkeypatch.setattr(_st, "button", MagicMock(return_value=False))
+
+        with patch.object(pv, "_render_add_step_form") as form:
+            prep_add_step(sample_polars_df, step_index=0, alias="test_label")
+
+        dialog.assert_not_called()
+        form.assert_not_called()
+
+    def test_clicking_the_button_opens_the_form_in_a_dialog(
+        self, monkeypatch, dialog, sample_polars_df
+    ):
+        button = MagicMock(return_value=True)
+        monkeypatch.setattr(_st, "button", button)
+
+        with patch.object(pv, "_render_add_step_form") as form:
+            prep_add_step(sample_polars_df, step_index=0, alias="test_label")
+
+        assert button.call_args.args[0] == ":material/add: Add data prep step"
+        assert dialog.call_args.args[0] == "Add data prep step"
+        form.assert_called_once_with(sample_polars_df, 0, "test_label")
+
+    def test_opening_the_dialog_drops_an_old_rename_warning(
+        self, monkeypatch, dialog, sample_polars_df
+    ):
+        monkeypatch.setattr(_st, "button", MagicMock(return_value=True))
+        _st.session_state[pv._pending_rename_key(0)] = {"args": {}, "body": "old"}
+
+        with patch.object(pv, "_render_add_step_form"):
+            prep_add_step(sample_polars_df, step_index=0, alias="test_label")
+
+        assert pv._pending_rename_key(0) not in _st.session_state
+
+
+_RENAME_ARGS = {
+    "action": PrepActions.rename_column.value,
+    "source_columns": ["name"],
+    "column_names": ["full_name"],
+}
+
+
+class TestRenameInUseInDialog:
+    """A rename of columns in use is confirmed inside the add-step dialog.
+
+    Streamlit can't open a dialog from inside another, so the warning
+    replaces the Add button instead of opening a confirm dialog.
+    """
+
+    @pytest.fixture(autouse=True)
+    def form(self, monkeypatch):
+        pv.project_id = "test_project"
+        _st.session_state.pop(pv._pending_rename_key(0), None)
+        monkeypatch.setattr(
+            _st, "selectbox", MagicMock(return_value=PrepActions.rename_column.value)
+        )
+        monkeypatch.setattr(_st, "warning", MagicMock())
+        monkeypatch.setattr(_st, "rerun", MagicMock())
+        monkeypatch.setattr(_st, "columns", MagicMock(return_value=[_mock_col] * 2))
+        monkeypatch.setattr(
+            pv.PrepStepHandler,
+            "rename_column_handler",
+            lambda _self: dict(_RENAME_ARGS),
+        )
+        monkeypatch.setattr(pv, "_is_prep_form_incomplete", lambda *a: False)
+        yield
+        _st.session_state.pop(pv._pending_rename_key(0), None)
+
+    @staticmethod
+    def _label(call):
+        return call.args[0] if call.args else call.kwargs.get("label")
+
+    def _click(self, monkeypatch, label):
+        """Mock st.button so only the button called `label` is clicked."""
+        button = MagicMock(
+            side_effect=lambda *a, **k: (a[0] if a else k.get("label")) == label
+        )
+        monkeypatch.setattr(_st, "button", button)
+        return button
+
+    @patch("datasure.views.prep_view.CorrectionProcessor")
+    @patch("datasure.views.prep_view.prep_apply_action")
+    @patch("datasure.views.prep_view.find_column_references", return_value=[])
+    def test_unused_columns_are_renamed_straight_away(
+        self, _refs, mock_apply, _proc, monkeypatch, sample_polars_df
+    ):
+        self._click(monkeypatch, "Add")
+
+        _render_add_step_form(sample_polars_df, step_index=0, alias="test_label")
+
+        mock_apply.assert_called_once()
+        _st.rerun.assert_called_once_with()
+
+    @patch("datasure.views.prep_view.prep_apply_action")
+    @patch("datasure.views.prep_view.format_references", return_value="Page A")
+    @patch("datasure.views.prep_view.find_column_references", return_value=["ref"])
+    def test_columns_in_use_hold_the_rename_for_confirmation(
+        self, _refs, _fmt, mock_apply, monkeypatch, sample_polars_df
+    ):
+        self._click(monkeypatch, "Add")
+
+        _render_add_step_form(sample_polars_df, step_index=0, alias="test_label")
+
+        mock_apply.assert_not_called()
+        pending = _st.session_state[pv._pending_rename_key(0)]
+        assert pending["args"] == _RENAME_ARGS
+        assert "Page A" in pending["body"]
+        _st.rerun.assert_called_once_with(scope="fragment")
+
+    @patch("datasure.views.prep_view.prep_apply_action")
+    def test_held_rename_shows_the_warning_instead_of_add(
+        self, mock_apply, monkeypatch, sample_polars_df
+    ):
+        _st.session_state[pv._pending_rename_key(0)] = {
+            "args": _RENAME_ARGS,
+            "body": "Used by Page A",
+        }
+        button = self._click(monkeypatch, None)
+
+        _render_add_step_form(sample_polars_df, step_index=0, alias="test_label")
+
+        assert "Used by Page A" in _st.warning.call_args.args[0]
+        labels = [self._label(c) for c in button.call_args_list]
+        assert labels == ["Cancel", "Rename anyway"]
+        mock_apply.assert_not_called()
+
+    @patch("datasure.views.prep_view.CorrectionProcessor")
+    @patch("datasure.views.prep_view.prep_apply_action")
+    def test_rename_anyway_adds_the_step(
+        self, mock_apply, _proc, monkeypatch, sample_polars_df
+    ):
+        _st.session_state[pv._pending_rename_key(0)] = {
+            "args": _RENAME_ARGS,
+            "body": "Used by Page A",
+        }
+        self._click(monkeypatch, "Rename anyway")
+
+        _render_add_step_form(sample_polars_df, step_index=0, alias="test_label")
+
+        mock_apply.assert_called_once()
+        assert pv._pending_rename_key(0) not in _st.session_state
+        _st.rerun.assert_called_once_with()
+
+    def test_changing_the_form_drops_the_held_rename(
+        self, monkeypatch, sample_polars_df
+    ):
+        _st.session_state[pv._pending_rename_key(0)] = {
+            "args": {**_RENAME_ARGS, "column_names": ["other"]},
+            "body": "Used by Page A",
+        }
+        button = self._click(monkeypatch, None)
+
+        _render_add_step_form(sample_polars_df, step_index=0, alias="test_label")
+
+        assert pv._pending_rename_key(0) not in _st.session_state
+        assert [self._label(c) for c in button.call_args_list] == ["Add"]
 
 
 def _open_popover():
@@ -1874,9 +2014,8 @@ def _open_popover():
 
 
 def _click_add_remove_column(pv):
-    """Drive prep_add_step through a valid "remove column" submission."""
+    """Drive the add-step form through a valid "remove column" submission."""
     pv.project_id = "test_project"
-    _open_popover()
     _st.selectbox = MagicMock(return_value=PrepActions.remove_column.value)
     _st.multiselect = MagicMock(return_value=["name"])
     _st.info = MagicMock()
@@ -1932,7 +2071,7 @@ class TestPrepChangeRefreshesCorrectedData:
         _click_add_remove_column(pv)
         processor = _processor(mock_processor_cls)
 
-        prep_add_step(sample_polars_df, step_index=0, alias="test_label")
+        _render_add_step_form(sample_polars_df, step_index=0, alias="test_label")
 
         mock_processor_cls.assert_called_once_with("test_project")
         processor.refresh_existing_corrected_data.assert_called_once_with("test_label")
@@ -1948,7 +2087,7 @@ class TestPrepChangeRefreshesCorrectedData:
         _click_add_remove_column(pv)
         mock_prep_apply.side_effect = ValidationError("bad step")
 
-        prep_add_step(sample_polars_df, step_index=0, alias="test_label")
+        _render_add_step_form(sample_polars_df, step_index=0, alias="test_label")
 
         mock_processor_cls.assert_not_called()
 
@@ -1964,7 +2103,7 @@ class TestPrepChangeRefreshesCorrectedData:
             [ReapplyFailure("modify value name for key1", "column 'name' not found")],
         )
 
-        prep_add_step(sample_polars_df, step_index=0, alias="test_label")
+        _render_add_step_form(sample_polars_df, step_index=0, alias="test_label")
         _show_next_run_notices(pv)
 
         _st.success.assert_called_once_with("Preparation step added successfully!")
@@ -1983,7 +2122,7 @@ class TestPrepChangeRefreshesCorrectedData:
         processor = _processor(mock_processor_cls)
         processor.refresh_existing_corrected_data.side_effect = OSError("disk full")
 
-        prep_add_step(sample_polars_df, step_index=0, alias="test_label")
+        _render_add_step_form(sample_polars_df, step_index=0, alias="test_label")
         _show_next_run_notices(pv)
 
         _st.rerun.assert_called_once()
