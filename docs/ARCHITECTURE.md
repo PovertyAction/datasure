@@ -51,7 +51,7 @@ src/datasure/
 │   ├── prep.py             # Data preparation operations (Polars)
 │   ├── corrections.py      # Corrections and accept entries (CorrectionProcessor)
 │   ├── correction_log.py   # Correction log schema/backfill, Action enum (no Streamlit)
-│   ├── column_names.py     # Stata variable-name rules for replication (no Streamlit)
+│   ├── column_names.py     # Stata name rules and mapping for replication (no Streamlit)
 │   ├── rename_plan.py      # Rename specs -> old/new pairs, collisions (no Streamlit)
 │   └── row_index.py        # Row-index parsing shared by prep and replication (no Streamlit)
 ├── replication/            # Stata/Python replication package export
@@ -444,8 +444,9 @@ Per project (UUID-keyed):
   correction logs `corr_log_{alias}`, the backcheck attribution logs
   `bc_attribution_{page_name_id}`, see [Correction log](#correction-log),
   each check page's check tables, such as the Descriptive Stats column
-  selection `descriptive_columns_{page_name_id}`, and the project's missing
-  codes `missing_codes_{project_id}`), JSON settings (including
+  selection `descriptive_columns_{page_name_id}`, the project's missing
+  codes `missing_codes_{project_id}`, and the Stata names chosen on the
+  Replication page `stata_names_{alias}`), JSON settings (including
   each check page's, Prepare Data's and Corrections'
   [view state](#view-state)), and credential metadata
 - `cache/projects.json` — the project registry: `name`, `created_at`, and

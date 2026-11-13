@@ -914,9 +914,16 @@ class TestDuplicateColumnScript:
         assert "clonevar" not in script
         assert len(warnings) == 1
 
-    @pytest.mark.parametrize("name", ["age copy", "1age", "in", "x" * 33])
-    def test_name_stata_cannot_use_is_a_note_and_warning(self, name):
-        """Until the package maps names, an unusable name is flagged, not emitted."""
+    @pytest.mark.parametrize(
+        ("name", "stata"),
+        [
+            ("age copy", "age_copy"),
+            ("1age", "_1age"),
+            ("in", "in_"),
+            ("x" * 33, "x" * 32),
+        ],
+    )
+    def test_name_stata_cannot_use_gets_its_mapped_name_and_a_label(self, name, stata):
         warnings: list[str] = []
         script = generate_prepare_data_script(
             _log(("add new column", _copy_args("age", name))),
@@ -925,19 +932,47 @@ class TestDuplicateColumnScript:
             "0.1",
             on_warning=warnings.append,
         )
-        assert "clonevar" not in script
-        assert "NOTE" in script
-        assert len(warnings) == 1
-        assert "Stata" in warnings[0]
+        lines = [line.strip() for line in script.splitlines()]
+        clone = lines.index(f"clonevar {stata} = age")
+        assert lines[clone + 1] == f"order {stata}, after(age)"
+        assert lines[clone + 2] == f'label variable {stata} "{name}"'
+        assert warnings == []
+        assert "NOTE" not in script
 
-    def test_other_add_column_methods_flag_names_stata_cannot_use(self):
+    def test_other_add_column_methods_use_the_mapped_name(self):
         warnings: list[str] = []
         args = {"column_names": "visit date", "method": "constant", "value": "1"}
         script = generate_prepare_data_script(
             _log(("add new column", args)), "P", "S", "0.1", on_warning=warnings.append
         )
-        assert "gen visit date" not in script
-        assert len(warnings) == 1
+        assert "gen visit_date = 1" in script
+        assert warnings == []
+
+    def test_a_given_map_is_used_for_sources_and_new_names(self):
+        script = generate_prepare_data_script(
+            _log(("add new column", _copy_args("visit date", "copy 1"))),
+            "P",
+            "S",
+            "0.1",
+            name_map={"visit date": "vdate", "copy 1": "vcopy"},
+        )
+        assert "clonevar vcopy = vdate" in script
+        assert "order vcopy, after(vdate)" in script
+
+    def test_label_text_cannot_break_out_of_its_quotes_or_expand_macros(self):
+        script = generate_prepare_data_script(
+            _log(("add new column", _copy_args("age", 'a "b" $c `d\''))),
+            "P",
+            "S",
+            "0.1",
+        )
+        assert "label variable a__b___c__d_ \"a 'b' \\$c \\`d'\"" in script
+
+    def test_names_stata_accepts_get_no_label(self):
+        script = generate_prepare_data_script(
+            _log(("add new column", _copy_args("age", "age_copy"))), "P", "S", "0.1"
+        )
+        assert "label variable" not in script
 
 
 def _rename_args(method: str, value: list, pairs: list[tuple[str, str]]) -> dict:
@@ -1005,13 +1040,21 @@ class TestRenameScript:
         assert "NOTE" in script
         assert len(warnings) == 1
 
-    def test_new_name_stata_cannot_use_is_a_note_and_warning(self):
-        args = _rename_args("by name", [["a", "visit date"]], [("a", "visit date")])
+    def test_names_stata_cannot_use_get_their_mapped_names_and_labels(self):
+        args = _rename_args(
+            "by name",
+            [["visit date", "in"], ["a", "visit date"]],
+            [("visit date", "in"), ("a", "visit date")],
+        )
         script, warnings = _script(("rename column(s)", args))
 
-        assert "rename (" not in script
-        assert len(warnings) == 1
-        assert "Stata" in warnings[0]
+        lines = [line.strip() for line in script.splitlines()]
+        rename = lines.index("rename (visit_date a) (in_ visit_date)")
+        assert lines[rename + 1 : rename + 3] == [
+            'label variable in_ "in"',
+            'label variable visit_date "visit date"',
+        ]
+        assert warnings == []
 
     def test_step_that_failed_in_datasure_is_skipped(self):
         args = _rename_args("by name", [["a", "b"]], [("a", "b")])

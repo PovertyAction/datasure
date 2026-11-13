@@ -347,12 +347,9 @@ re-applied, even if they replaced a column. A **copy of column** step whose
 name is now taken, for example after a re-import adds a column with that name,
 fails and appears in the re-apply failure notice.
 
-If you build a Stata replication package, Stata has stricter rules: at most
-32 characters, starting with a letter or `_`, only letters, digits and `_`,
-and not a name Stata reserves such as `in` or `byte`. For now, a step whose
-new name breaks these rules is written to `prepare_data.do` as a NOTE, and
-the Replication page warns you. Choose a Stata-friendly name, such as
-`visit_date` rather than `visit date`, if you plan to export to Stata.
+Stata has stricter rules for names. If a name breaks them, the replication
+package gives the column a Stata name instead; see
+[Stata variable names](#stata-variable-names).
 
 **Copying a column (copy of column)**:
 
@@ -471,9 +468,9 @@ straight away.
 
 **In the replication package**, each rename step becomes one
 `rename (old …) (new …)` line in `prepare_data.do`, using the renames the
-step last made. Pattern steps also get a comment showing the pattern. As for
-added columns, a step whose new name Stata can't use is written as a NOTE and
-the Replication page warns you.
+step last made. Pattern steps also get a comment showing the pattern. A new
+name Stata can't use is written as its Stata name; see
+[Stata variable names](#stata-variable-names).
 
 #### Change Log
 
@@ -953,6 +950,37 @@ click **Build Replication Package**. Confirm the PII notice and click
 **Download replication package (.zip)**. See
 [Correction Audit Trail](#correction-audit-trail) for the **Exclude reviewer
 names** option.
+
+#### Stata variable names
+
+DataSure accepts any column name, but Stata accepts a name only if it:
+
+- has at most 32 characters
+- starts with a letter or `_`
+- uses only plain letters, digits and `_`
+- isn't a name Stata reserves, such as `in`, `byte` or `str80`
+
+When the package uses a name that breaks these rules, whether it came from
+your imported data or from a Prepare Data step, the page lists it under
+**Stata variable names** with the name the package will use instead. The
+proposed name:
+
+- replaces spaces and punctuation with `_`, and accented letters with plain
+  ones (`visit date` becomes `visit_date`, `âge` becomes `age`)
+- puts `_` before a leading digit (`2nd_visit` becomes `_2nd_visit`)
+- puts `_` after a reserved name (`in` becomes `in_`)
+- is cut to 32 characters
+- gets `_2`, `_3` and so on if another column already has the name
+
+Names Stata accepts never change. To choose your own name, edit it in the
+table. DataSure checks it against the same rules and against the other
+columns, and saves it with the project for later builds. If an edited name
+can't be used, **Build Replication Package** stays disabled until you fix it.
+
+In the package, `import_data.do` renames these columns right after import, and
+`prepare_data.do`, `corrections.do` and the codebook use the Stata names. A
+column a Prepare Data step creates gets its Stata name in that step. Each
+renamed variable is labelled with its DataSure name.
 
 ---
 

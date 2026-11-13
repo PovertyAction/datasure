@@ -9,6 +9,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Stata names in the replication package** (#449): every column name the
+  package uses that Stata can't use gets a Stata name when the package is
+  built
+  - `processing/column_names.stata_name_map(names, edits)` (Streamlit-free)
+    proposes the names: characters outside `[A-Za-z0-9_]` become `_`
+    (accented letters are NFKD-folded to ASCII), a leading digit gets a `_`
+    prefix, a reserved name gets a `_` suffix, names are cut to 32
+    characters, and taken names get `_2`, `_3` … Valid names are never
+    changed and are never taken by a proposal. `edits` without an error from
+    `stata_name_edit_errors` (rules, an unchanged name, or another edit)
+    claim their names first
+  - `replication/stata_names.py`: `package_column_names` lists the raw
+    columns, then the names prep steps use and create
+    (`prep_script_generator.prep_log_column_names`). Edits are stored per
+    dataset in `stata_names_{alias}` in `logs.duckdb`
+    (`load_stata_name_edits`, `save_stata_name_edits`).
+    `updated_stata_name_edits` decides which table values count as edits
+  - `build_replication_package(stata_name_edits=…)` builds the map and passes
+    it to the generators. `generate_import_script` and
+    `generate_scto_import_script` take `columns` and `name_map` and rename
+    mapped columns right after import by CSV position (one group `rename`
+    using `` `:word k of `ds_vars'' ``), labelling each with its DataSure
+    name; the SurveyCTO script also uses the Stata names in its field lists
+    and keeps the question text of a mapped field in its note only.
+    `generate_prepare_data_script(name_map=…)` maps `source_columns` and
+    `column_names` and labels columns created under a mapped name.
+    `generate_corrections_script(name_map=…)` maps the corrected column and
+    the key. The codebook lists Stata names. With nothing to map, the
+    package is unchanged
+  - The Replication page lists the mapped names in an editable table
+    (`_render_stata_names`), saves valid edits, shows errors for the rest
+    and disables the build until they are fixed
 - **Rename columns** (#446): new Prep action **rename column(s)**
   (`PrepActions.rename_column`), with methods **by name** and **by pattern**
   (`PrepMethods.by_name`, `PrepMethods.by_pattern`)
@@ -100,6 +132,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **No more NOTE for names Stata can't use** (#449): `_stata_add_column` and
+  `_stata_rename_columns` no longer write a step whose new name Stata can't
+  use as a NOTE with a warning (the #445 stopgap); the step is written with
+  the mapped Stata name
 - **Add new column never overwrites a column** (#445): every Add new column
   method now refuses a new step whose name already exists, ignoring case
   (DuckDB would otherwise store `Age` beside `age` as `Age_1`). The form and

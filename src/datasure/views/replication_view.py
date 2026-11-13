@@ -7,7 +7,14 @@ audit logs, README) as a zip file for download to the local drive.
 import polars as pl
 import streamlit as st
 
+from datasure.processing.column_names import stata_name_edit_errors, stata_name_map
 from datasure.replication.package_builder import build_replication_package
+from datasure.replication.stata_names import (
+    load_stata_name_edits,
+    package_column_names,
+    save_stata_name_edits,
+    updated_stata_name_edits,
+)
 from datasure.utils.cache_utils import get_cache_path
 from datasure.utils.config_utils import ConfigurationService
 from datasure.utils.duckdb_utils import duckdb_get_table
@@ -48,6 +55,17 @@ def _get_import_log_row(project_id: str, alias: str) -> dict | None:
         return row_df.row(0, named=True)
     except Exception:
         return None
+
+
+@st.cache_data(ttl=60)
+def _get_package_column_names(project_id: str, alias: str) -> list[str]:
+    """Return every column name the package for *alias* uses."""
+    try:
+        raw_columns = duckdb_get_table(project_id, alias, "raw").columns
+        prep_log = duckdb_get_table(project_id, f"prep_log_{alias}", "logs")
+    except Exception:
+        return []
+    return package_column_names(raw_columns, prep_log)
 
 
 # ── Configuration helpers (pure) ──────────────────────────────────────────────
@@ -232,6 +250,59 @@ def _render_config_details(page_configs: pl.DataFrame) -> None:
         )
 
 
+def _render_stata_names(project_id: str, alias: str) -> bool:
+    """List the column names that change in Stata and let people edit them.
+
+    Valid edits are saved with the project at once; the build uses them.
+    Shows nothing when every name works in Stata.
+
+    Returns
+    -------
+    bool
+        True when an edited name can't be used, so the build must wait.
+    """
+    names = _get_package_column_names(project_id, alias)
+    proposals = stata_name_map(names)
+    if not proposals:
+        return False
+    saved = load_stata_name_edits(project_id, alias)
+    shown = stata_name_map(names, saved)
+
+    section_header("Stata variable names", icon=":material/edit_note:")
+    st.caption(
+        "Stata can't use these column names, so the package renames them "
+        "right after import and uses the new names in every script and the "
+        "codebook. Each variable keeps its DataSure name as its label. Edit a "
+        "Stata name to choose your own; it is saved with the project."
+    )
+    edited = st.data_editor(
+        pl.DataFrame(
+            {"datasure_name": list(shown), "stata_name": list(shown.values())}
+        ).to_pandas(),
+        key=f"_replication_stata_names_{alias}",
+        disabled=["datasure_name"],
+        hide_index=True,
+        width="stretch",
+        num_rows="fixed",
+        column_config={
+            "datasure_name": "DataSure name",
+            "stata_name": st.column_config.TextColumn("Stata name", required=True),
+        },
+    )
+    typed = dict(zip(edited["datasure_name"], edited["stata_name"], strict=True))
+    edits = updated_stata_name_edits(typed, shown, proposals, saved)
+    errors = stata_name_edit_errors(names, edits)
+    for name, error in errors.items():
+        st.error(f"**{name}**: {error}", icon=":material/error:")
+
+    valid_edits = {n: v for n, v in edits.items() if n not in errors}
+    if valid_edits != saved:
+        save_stata_name_edits(project_id, alias, valid_edits)
+        # A package built before the edit used the old names.
+        st.session_state.pop("_replication_zip", None)
+    return bool(errors)
+
+
 def _render_package_preview(safe_project: str, safe_page: str, is_scto: bool) -> None:
     """Render the collapsible zip-contents preview."""
     with st.expander("What's inside the zip?", expanded=False):
@@ -328,6 +399,10 @@ if selected_page:
 else:
     st.info("Select a page to see its details here.")
 
+stata_name_errors = False
+if selected_page and alias:
+    stata_name_errors = _render_stata_names(project_id, alias)
+
 # ── Build ─────────────────────────────────────────────────────────────────────
 
 st.divider()
@@ -338,7 +413,8 @@ safe_project = project_name.lower().replace(" ", "_")
 if st.button(
     "Build Replication Package",
     type="primary",
-    disabled=not selected_page or not alias,
+    disabled=not selected_page or not alias or stata_name_errors,
+    help="Fix the Stata names above first." if stata_name_errors else None,
 ):
     build_warnings: list[str] = []
     with st.status("Building replication package…", expanded=True) as build_status:
@@ -363,6 +439,7 @@ if st.button(
             on_progress=_on_progress,
             exclude_reviewer_names=exclude_reviewer_names,
             on_warning=build_warnings.append,
+            stata_name_edits=load_stata_name_edits(project_id, alias),
         )
         build_status.update(label="Package ready!", state="complete", expanded=False)
 

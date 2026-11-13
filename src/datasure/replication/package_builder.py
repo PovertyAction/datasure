@@ -6,7 +6,7 @@ import io
 import json
 import logging
 import zipfile
-from collections.abc import Callable
+from collections.abc import Callable, Mapping
 
 import polars as pl
 
@@ -30,6 +30,7 @@ from datasure.replication.script_generators import (
 from datasure.replication.scto_import_generator import (
     generate_scto_import_script,
 )
+from datasure.replication.stata_names import package_name_map
 from datasure.utils.duckdb_utils import duckdb_get_table
 
 logger = logging.getLogger(__name__)
@@ -125,6 +126,8 @@ def _select_import_script(
     project_name: str,
     survey_name: str,
     datasure_version: str,
+    columns: list[str] | None = None,
+    name_map: Mapping[str, str] | None = None,
 ) -> str:
     if form_def is not None:
         return generate_scto_import_script(
@@ -133,12 +136,21 @@ def _select_import_script(
             form_title=form_def.get("title", survey_name),
             survey_name=survey_name,
             datasure_version=datasure_version,
+            columns=columns or [],
+            name_map=name_map,
         )
     return generate_import_script(
         project_name=project_name,
         survey_name=survey_name,
         datasure_version=datasure_version,
+        columns=columns or [],
+        name_map=name_map,
     )
+
+
+def _with_stata_names(df: pl.DataFrame, name_map: Mapping[str, str]) -> pl.DataFrame:
+    """``df`` with each mapped column renamed to its Stata name."""
+    return df.rename({col: name_map[col] for col in df.columns if col in name_map})
 
 
 def _serialize_prep_args(x: object) -> str | None:
@@ -162,6 +174,7 @@ def build_replication_package(
     on_progress: Callable[[str], None] | None = None,
     exclude_reviewer_names: bool = False,
     on_warning: Callable[[str], None] | None = None,
+    stata_name_edits: Mapping[str, str] | None = None,
 ) -> bytes:
     """Build the Stata replication package and return it as zip bytes.
 
@@ -198,6 +211,11 @@ def build_replication_package(
         Optional callback invoked with a message for each problem that does
         not stop the build, such as a prep step that could not be translated
         to Stata. Callers can pass ``st.warning``.
+    stata_name_edits : Mapping[str, str] | None
+        Stata names people chose for column names Stata can't use, from
+        ``stata_names.load_stata_name_edits``. Every other such name gets
+        its proposed Stata name (``stata_names.package_name_map``), and the
+        scripts and codebook use the Stata names.
 
     Returns
     -------
@@ -241,9 +259,19 @@ def build_replication_package(
 
     n_by_action = _action_summary(correction_log)
 
+    name_map = package_name_map(raw_df.columns, prep_log, stata_name_edits)
+    if name_map:
+        _step(f"{len(name_map):,} column names mapped to Stata names")
+
     # Generate scripts
     import_script = _select_import_script(
-        form_def, form_id, project_name, survey_name, datasure_version
+        form_def,
+        form_id,
+        project_name,
+        survey_name,
+        datasure_version,
+        columns=raw_df.columns,
+        name_map=name_map,
     )
     _step(
         "`import_data.do` generated (SurveyCTO — with labels & value labels)"
@@ -257,6 +285,7 @@ def build_replication_package(
         survey_name=survey_name,
         datasure_version=datasure_version,
         on_warning=on_warning,
+        name_map=name_map,
     )
     _step("`prepare_data.do` generated")
 
@@ -273,6 +302,7 @@ def build_replication_package(
         project_name=project_name,
         survey_name=survey_name,
         datasure_version=datasure_version,
+        name_map=name_map,
     )
     _step("`corrections.do` generated")
 
@@ -297,7 +327,7 @@ def build_replication_package(
     )
     _step("README generated")
 
-    codebook_csv = generate_codebook(corrected_df)
+    codebook_csv = generate_codebook(_with_stata_names(corrected_df, name_map))
     _step("Codebook generated")
 
     # Raw CSV (input for import_data.do)
