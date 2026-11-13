@@ -976,7 +976,12 @@ class PrepStepHandler:
         """
         row_index_text = st.text_input(
             label="Enter row index",
-            help="Enter row index to remove eg. 1, 2, 3, -5, 5:-2",
+            help=(
+                "Row positions to remove, separated by commas. The first row "
+                "is 0. Use a:b for a range that includes both ends, and a "
+                "negative number to count from the end (-1 is the last row). "
+                "E.g. 0, 3, 10:20, -5, 5:-2"
+            ),
             key=f"st_sb_del_rows_idx{self.step_index}",
         )
         if row_index_text:

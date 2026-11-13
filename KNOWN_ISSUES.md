@@ -16,13 +16,13 @@ To check which version you have, run `datasure --version`. Versions with `a`, `b
 
 ## Open issues
 
-### KI-033: Date and datetime questions from SurveyCTO import as blank
+### KI-034: The replication package fails or removes the wrong rows for "remove rows by row index" steps
 
-- **Status:** 🟡 Planned for 1.2.1
-- **Affected versions:** 1.0.0 – 1.2.0
-- **Symptom:** After you import a form from SurveyCTO, every `date` and `datetime` question in the form shows as blank. These columns can look like skipped questions on the **Missing Values** tab. Submission dates, start and end times, and data imported from a local file are not affected.
-- **Workaround:** Update to 1.2.1 when it is released, then refresh the form's data. Until then, export the data from SurveyCTO as a CSV and import it as a local file.
-- **Issue:** [#395](https://github.com/PovertyAction/datasure/issues/395)
+- **Status:** 🟡 Planned for 1.2.2. Fixed in the 1.2.2a1 pre-release
+- **Affected versions:** 1.0.0 – 1.2.1
+- **Symptom:** If a Prep step removes rows **by row index** with a range such as `0:30`, **Build Replication Package** fails with `ValueError: invalid literal for int() with base 10: '0:30'`. With single row numbers, the package builds, but `prepare_data.do` removes different rows from the ones DataSure removed. Negative row numbers such as `-5` remove nothing, or the wrong rows, on the Prep page.
+- **Workaround:** Install the 1.2.2a1 pre-release from [Test PyPI](https://test.pypi.org/project/datasure/) and rebuild the package. On earlier versions, list row numbers one by one instead of as a range, use only row numbers of 0 or more, and check every `drop` line in `prepare_data.do` by hand before you use it.
+- **Issue:** [#442](https://github.com/PovertyAction/datasure/issues/442)
 
 ### KI-019: Datasets or check pages with similar names overwrite each other
 
@@ -34,7 +34,7 @@ To check which version you have, run `datasure --version`. Versions with `a`, `b
 
 ### KI-018: Legacy `.xls` Excel files fail to import
 
-- **Status:** 🟡 Planned. From 1.2.0, DataSure rejects `.xls` files with a clear message; reading `.xls` files is planned for 1.3.0
+- **Status:** 🟡 Planned for 1.3.0. Since 1.2.0, DataSure rejects `.xls` files with a clear message instead of failing
 - **Affected versions:** 1.0.0 – 1.2.0a1
 - **Symptom:** A local `.xls` file is accepted on the Import page, then fails with an error from `openpyxl`.
 - **Workaround:** Open the file in Excel and save it as `.xlsx`, or export it as CSV.
@@ -49,6 +49,14 @@ To check which version you have, run `datasure --version`. Versions with `a`, `b
 - **Issue:** [#340](https://github.com/PovertyAction/datasure/issues/340)
 
 ## Recently fixed
+
+### KI-033: Date and datetime questions from SurveyCTO import as blank
+
+- **Status:** 🟢 Fixed in 1.2.1
+- **Affected versions:** 1.0.0 – 1.2.0
+- **Symptom:** After you import a form from SurveyCTO, every `date` and `datetime` question in the form shows as blank. These columns can look like skipped questions on the **Missing Values** tab. Submission dates, start and end times, and data imported from a local file are not affected.
+- **Fix:** Upgrade to 1.2.1 or later, then refresh the form's data to fill in the blank columns.
+- **Issue:** [#395](https://github.com/PovertyAction/datasure/issues/395) · [Changelog](CHANGELOG.md#121---2026-11-06)
 
 ### KI-032: DataSure closes without an error while you review duplicates
 

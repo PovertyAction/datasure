@@ -7,6 +7,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Fixed
+
+- **Replication package crashed on row-index ranges, and Stata dropped the
+  wrong rows** (#442): building the package raised
+  `ValueError: invalid literal for int() with base 10: '0:30'` when a
+  **remove row(s) → by row index** step used a range. Even without a range,
+  `prepare_data.do` dropped the wrong rows, and negative indices removed
+  nothing or the wrong range in DataSure itself
+  - Root cause: `_drop_by_index` in
+    `src/datasure/replication/prep_script_generator.py` called `int()` on
+    every value and copied DataSure's 0-based positions into Stata's 1-based
+    `in` and `_n` unchanged. `RemoveRowsOperation._remove_by_index` matched
+    raw values against non-negative row numbers, so `-5` and `5:-2` did not
+    count from the end
+  - Solution: new Streamlit-free `src/datasure/processing/row_index.py`
+    (`parse_row_indices` → `RowSpan`, `resolve_row_positions`) is shared by the
+    prep engine and the generator. Values are a position, a negative position
+    counting from the end, or an inclusive `a:b` range. Earlier prep logs'
+    string values, `","` and `None` entries still parse; anything else raises
+    `ValueError`, which the engine reports as `ValidationError`. The generator
+    emits one `drop if` over `_n` (`_n == i+1`, `inrange(_n, a+1, b+1)`,
+    negative ends as `_N - k`), so all values refer to positions before the
+    step. It never emits `drop in`, which stops with r(198) on positions
+    outside 1.._N or reversed spans, where `resolve_row_positions` ignores them
+  - The SurveyCTO `2_import_data.do` (`scto_import_generator.py`) records
+    the .csv row order in `_ds_row` after `insheet` and restores it before
+    saving. On a rerun, appending the saved .dta and `sort KEY` had left the
+    rows in KEY order, so positional prep steps dropped different
+    submissions. Saved rows take the position of the new row with the same
+    KEY; rows found only in the saved .dta go last
+  - `generate_prepare_data_script` and `build_replication_package` take an
+    `on_warning` callback. A step that can't be translated gets a `NOTE` line
+    in `prepare_data.do` and a warning on the Replication page, which keeps it
+    beside the download button, instead of stopping the build. This covers
+    emitters that raise and the cases they don't support (`uuid` columns,
+    unsupported transform, add-column or remove-row methods and conditions,
+    unknown actions), which now raise `_UntranslatableStepError` instead of
+    returning a silent `NOTE`. A row-index step with no values stays a silent
+    no-op
+  - The row-index help text on the Prep page now describes this syntax.
+    `TestStataRemoveRows` expected the 0-based output and is corrected
+
 ## [1.2.1] - 2026-11-06
 
 ### Fixed

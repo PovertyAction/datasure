@@ -50,7 +50,8 @@ src/datasure/
 ├── processing/
 │   ├── prep.py             # Data preparation operations (Polars)
 │   ├── corrections.py      # Corrections and accept entries (CorrectionProcessor)
-│   └── correction_log.py   # Correction log schema/backfill, Action enum (no Streamlit)
+│   ├── correction_log.py   # Correction log schema/backfill, Action enum (no Streamlit)
+│   └── row_index.py        # Row-index parsing shared by prep and replication (no Streamlit)
 ├── replication/            # Stata/Python replication package export
 ├── models/
 │   ├── schemas.py          # Pydantic models
