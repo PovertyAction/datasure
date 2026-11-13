@@ -11,6 +11,7 @@ from __future__ import annotations
 import logging
 from collections.abc import Iterable, Mapping
 
+import duckdb
 import polars as pl
 
 from datasure.processing.column_names import stata_name_map
@@ -20,6 +21,9 @@ from datasure.utils.duckdb_utils import duckdb_get_table, duckdb_save_table
 logger = logging.getLogger(__name__)
 
 _EDITS_SCHEMA = {"datasure_name": pl.String, "stata_name": pl.String}
+
+# Variables the package's import scripts create, so no column may take them.
+PACKAGE_VARIABLES = ("_ds_row", "new_data_row", "num_for_key")
 
 
 def stata_names_table(alias: str) -> str:
@@ -44,7 +48,9 @@ def package_name_map(
     edits: Mapping[str, str] | None = None,
 ) -> dict[str, str]:
     """Stata names for the names the package uses that Stata can't use."""
-    return stata_name_map(package_column_names(raw_columns, prep_log), edits)
+    return stata_name_map(
+        package_column_names(raw_columns, prep_log), edits, PACKAGE_VARIABLES
+    )
 
 
 def updated_stata_name_edits(
@@ -74,8 +80,8 @@ def load_stata_name_edits(project_id: str, alias: str) -> dict[str, str]:
     """The Stata names people chose for a dataset, keyed by DataSure name."""
     try:
         table = duckdb_get_table(project_id, stata_names_table(alias), "logs")
-    except Exception:
-        logger.warning("Could not read the Stata name edits for %s", alias)
+    except (duckdb.Error, OSError):
+        logger.exception("Could not read the Stata name edits for %s", alias)
         return {}
     if table.is_empty() or not set(_EDITS_SCHEMA) <= set(table.columns):
         return {}

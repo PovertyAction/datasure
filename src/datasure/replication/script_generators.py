@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import re
 from collections.abc import Iterable, Mapping
 from datetime import date
 
@@ -45,10 +46,12 @@ _LABEL_MAX = 80
 def _stata_label(text: str) -> str:
     """Quoted Stata label for ``text``, cut to 80 characters.
 
-    Double quotes become single quotes, and ``$`` and backticks are escaped
-    so a do-file doesn't expand them as macros.
+    Runs of whitespace, including line breaks, become one space, double
+    quotes become single quotes, a trailing backslash is dropped, and ``$``
+    and backticks are escaped so a do-file doesn't expand them as macros.
     """
-    text = text[:_LABEL_MAX].replace('"', "'")
+    text = re.sub(r"\s+", " ", text).strip()
+    text = text[:_LABEL_MAX].replace('"', "'").rstrip("\\ ")
     text = text.replace("$", "\\$").replace("`", "\\`")
     return f'"{text}"'
 

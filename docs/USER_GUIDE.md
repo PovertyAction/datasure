@@ -970,12 +970,16 @@ proposed name:
 - puts `_` before a leading digit (`2nd_visit` becomes `_2nd_visit`)
 - puts `_` after a reserved name (`in` becomes `in_`)
 - is cut to 32 characters
-- gets `_2`, `_3` and so on if another column already has the name
+- gets `_2`, `_3` and so on if another column, or a variable the package's
+  scripts create such as `_ds_row`, already has the name
 
 Names Stata accepts never change. To choose your own name, edit it in the
 table. DataSure checks it against the same rules and against the other
 columns, and saves it with the project for later builds. If an edited name
 can't be used, **Build Replication Package** stays disabled until you fix it.
+If a saved name stops working, for example because a re-import added a column
+with that name, the page tells you and uses the proposed name instead. Saved
+names aren't included when you export the project configuration.
 
 In the package, `import_data.do` renames these columns right after import, and
 `prepare_data.do`, `corrections.do` and the codebook use the Stata names. A

@@ -106,16 +106,16 @@ def stata_name_error(name: str) -> str | None:
         )
     if name[0].isdigit():
         return f"'{name}' must start with a letter or _."
-    if name in STATA_RESERVED_NAMES or _STATA_STR_TYPE.fullmatch(name):
+    if _is_reserved(name):
         return f"'{name}' is reserved by Stata. Choose another name."
     return None
 
 
-_NOT_STATA_CHAR = re.compile(r"[^A-Za-z0-9_]")
-
-
 def _is_reserved(name: str) -> bool:
     return name in STATA_RESERVED_NAMES or bool(_STATA_STR_TYPE.fullmatch(name))
+
+
+_NOT_STATA_CHAR = re.compile(r"[^A-Za-z0-9_]")
 
 
 def _propose_stata_name(name: str) -> str:
@@ -145,58 +145,70 @@ def _unique(proposal: str, taken: set[str]) -> str:
     return candidate
 
 
-def stata_name_edit_errors(
+def _split_names(
     names: Iterable[str], edits: Mapping[str, str]
+) -> tuple[list[str], set[str], dict[str, str]]:
+    """``(names, kept, edited)``: the names once each, the names Stata can
+    use as they are, and the edits for the other names.
+    """
+    names = list(dict.fromkeys(names))
+    kept = {name for name in names if stata_name_error(name) is None}
+    edited = {name: edits[name] for name in names if name not in kept and name in edits}
+    return names, kept, edited
+
+
+def stata_name_edit_errors(
+    names: Iterable[str],
+    edits: Mapping[str, str],
+    reserved: Iterable[str] = (),
 ) -> dict[str, str]:
     """Return why each edited Stata name can't be used, keyed by DataSure name.
 
     ``edits`` maps DataSure names to the Stata names people typed. An edit
     must follow Stata's rules, must not be a name the package already uses
-    unchanged, and must not be used by another edit. Edits for names that
+    unchanged or one of ``reserved`` (variables the package's scripts
+    create), and must not be used by another edit. Edits for names that
     need no mapping are ignored, as ``stata_name_map`` ignores them.
     """
-    names = list(dict.fromkeys(names))
-    kept = {name for name in names if stata_name_error(name) is None}
-    edited = {name: edits[name] for name in names if name not in kept and name in edits}
+    _names, kept, edited = _split_names(names, edits)
+    taken = kept | set(reserved)
     errors: dict[str, str] = {}
     for name, new in edited.items():
         rule_error = stata_name_error(new)
         if rule_error:
             errors[name] = rule_error
-        elif new in kept:
-            errors[name] = f"'{new}' is already the name of another column."
+        elif new in taken:
+            errors[name] = f"'{new}' is already the name of another variable."
         elif sum(other == new for other in edited.values()) > 1:
             errors[name] = f"'{new}' is used for more than one column."
     return errors
 
 
 def stata_name_map(
-    names: Iterable[str], edits: Mapping[str, str] | None = None
+    names: Iterable[str],
+    edits: Mapping[str, str] | None = None,
+    reserved: Iterable[str] = (),
 ) -> dict[str, str]:
     """Map each name Stata can't use to a unique Stata-safe name.
 
     ``names`` is every column name the package uses, in order: the imported
     columns, then the names prep steps create. Names Stata can already use
     are never changed and are left out of the result, and no mapped name
-    takes one of them. The rules: characters outside ``[A-Za-z0-9_]``
-    become ``_`` (accented letters become their plain letter), a leading
-    digit gets ``_`` in front, a reserved name gets ``_`` after, names are
-    cut to 32 characters, and a name already taken gets ``_2``, ``_3`` ...
+    takes one of them or one of ``reserved``. The rules: characters outside
+    ``[A-Za-z0-9_]`` become ``_`` (accented letters become their plain
+    letter), a leading digit gets ``_`` in front, a reserved name gets ``_``
+    after, names are cut to 32 characters, and a name already taken gets
+    ``_2``, ``_3`` ...
 
     ``edits`` holds names people chose instead of the proposals. Edits
     without an error from ``stata_name_edit_errors`` are used and claim
     their names first; the rest fall back to the proposal.
     """
-    names = list(dict.fromkeys(names))
-    edits = dict(edits or {})
-    kept = {name for name in names if stata_name_error(name) is None}
-    errors = stata_name_edit_errors(names, edits)
-    mapping: dict[str, str] = {
-        name: edits[name]
-        for name in names
-        if name not in kept and name in edits and name not in errors
-    }
-    taken = kept | set(mapping.values())
+    reserved = set(reserved)
+    names, kept, edited = _split_names(names, edits or {})
+    errors = stata_name_edit_errors(names, edited, reserved)
+    mapping = {name: new for name, new in edited.items() if name not in errors}
+    taken = kept | reserved | set(mapping.values())
     for name in names:
         if name in kept or name in mapping:
             continue

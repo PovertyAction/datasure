@@ -195,3 +195,19 @@ class TestStataNameEdits:
     def test_two_edits_with_the_same_name_are_both_errors(self):
         errors = stata_name_edit_errors(["a b", "c d"], {"a b": "x", "c d": "x"})
         assert set(errors) == {"a b", "c d"}
+
+
+class TestReservedVariables:
+    """Variables the package's scripts create are never given to a column."""
+
+    def test_a_proposal_skips_a_reserved_variable(self):
+        assert stata_name_map(["_ds row"], reserved=["_ds_row"]) == {
+            "_ds row": "_ds_row_2"
+        }
+
+    def test_an_edit_to_a_reserved_variable_is_an_error(self):
+        errors = stata_name_edit_errors(["a b"], {"a b": "_ds_row"}, ["_ds_row"])
+        assert "already" in errors["a b"]
+        assert stata_name_map(["a b"], {"a b": "_ds_row"}, ["_ds_row"]) == {
+            "a b": "a_b"
+        }

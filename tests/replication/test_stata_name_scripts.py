@@ -6,6 +6,7 @@ import polars as pl
 
 from datasure.processing.column_names import stata_name_map
 from datasure.replication.script_generators import (
+    _stata_label,
     generate_corrections_script,
     generate_import_script,
 )
@@ -127,3 +128,11 @@ class TestCorrectionsScriptUsesStataNames:
     def test_without_a_map_names_are_unchanged(self):
         script = generate_corrections_script(self._log("age"), "KEY", "P", "S", "1.0")
         assert 'replace age = 3 if KEY == "k1"' in script
+
+
+class TestStataLabel:
+    def test_line_breaks_and_a_trailing_backslash_cannot_break_the_line(self):
+        assert _stata_label("visit\r\ndate \\") == '"visit date"'
+
+    def test_labels_are_cut_to_80_characters(self):
+        assert _stata_label("x" * 100) == f'"{"x" * 80}"'

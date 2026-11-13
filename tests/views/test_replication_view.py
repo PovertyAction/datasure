@@ -704,3 +704,21 @@ class TestRenderStataNames:
         _st.error.assert_called_once()
         assert "visit date" in _st.error.call_args.args[0]
         save.assert_not_called()
+
+    def test_a_saved_name_that_no_longer_works_is_reported(self):
+        blocked, save = self._render(
+            ["visit date", "vdate"], saved={"visit date": "vdate"}
+        )
+        _st.warning.assert_called_once()
+        assert "visit date" in _st.warning.call_args.args[0]
+        save.assert_called_once_with("p", "survey", {})
+        assert blocked is False
+
+    def test_an_unreadable_dataset_blocks_the_build(self):
+        _st.data_editor = MagicMock()
+        with patch.object(
+            _rv_mod, "_get_package_column_names", side_effect=RuntimeError("db")
+        ):
+            assert _render_stata_names("p", "survey") is True
+        _st.error.assert_called_once()
+        _st.data_editor.assert_not_called()

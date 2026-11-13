@@ -17,9 +17,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     (accented letters are NFKD-folded to ASCII), a leading digit gets a `_`
     prefix, a reserved name gets a `_` suffix, names are cut to 32
     characters, and taken names get `_2`, `_3` … Valid names are never
-    changed and are never taken by a proposal. `edits` without an error from
-    `stata_name_edit_errors` (rules, an unchanged name, or another edit)
-    claim their names first
+    changed and are never taken by a proposal, nor are `reserved` names
+    (`stata_names.PACKAGE_VARIABLES`, the variables the import scripts
+    create). `edits` without an error from `stata_name_edit_errors` (rules,
+    an unchanged or reserved name, or another edit) claim their names first
   - `replication/stata_names.py`: `package_column_names` lists the raw
     columns, then the names prep steps use and create
     (`prep_script_generator.prep_log_column_names`). Edits are stored per
@@ -39,8 +40,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     the key. The codebook lists Stata names. With nothing to map, the
     package is unchanged
   - The Replication page lists the mapped names in an editable table
-    (`_render_stata_names`), saves valid edits, shows errors for the rest
-    and disables the build until they are fixed
+    (`_render_stata_names`). It saves edits only when all of them can be
+    used, otherwise shows the errors and disables the build; it warns when a
+    saved edit no longer applies, and blocks the build when the column names
+    can't be read. Edits aren't part of the exported project configuration
 - **Rename columns** (#446): new Prep action **rename column(s)**
   (`PrepActions.rename_column`), with methods **by name** and **by pattern**
   (`PrepMethods.by_name`, `PrepMethods.by_pattern`)
