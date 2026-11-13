@@ -30,3 +30,55 @@ class TestStataNameError:
 
     def test_empty_name_is_rejected(self):
         assert stata_name_error("") is not None
+
+    @pytest.mark.parametrize(
+        "name",
+        [
+            "alias",
+            "_all",
+            "_b",
+            "byte",
+            "_coef",
+            "_cons",
+            "double",
+            "float",
+            "if",
+            "in",
+            "int",
+            "long",
+            "_n",
+            "_N",
+            "_pi",
+            "_pred",
+            "_r_b",
+            "_r_ci",
+            "_r_cri",
+            "_r_crlb",
+            "_r_crub",
+            "_r_df",
+            "_r_lb",
+            "_r_p",
+            "_r_se",
+            "_r_ub",
+            "_r_z",
+            "_r_z_abs",
+            "_rc",
+            "_se",
+            "_skip",
+            "str1",
+            "str80",
+            "str2045",
+            "strL",
+            "using",
+            "with",
+        ],
+    )
+    def test_stata_reserved_names_are_rejected(self, name):
+        assert "reserved" in stata_name_error(name)
+
+    @pytest.mark.parametrize(
+        "name", ["IN", "Byte", "strl", "string", "str_", "_merge", "inc", "with_id"]
+    )
+    def test_names_that_only_resemble_reserved_names_are_allowed(self, name):
+        """Stata names are case-sensitive, and only exact matches are reserved."""
+        assert stata_name_error(name) is None

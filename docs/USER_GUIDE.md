@@ -338,27 +338,25 @@ Create new calculated or derived columns:
 5. Define calculation or value
 6. Click "Add"
 
-**Column names**: a new column's name must work as a Stata variable name,
-because each prep step is also written to the replication package's
-`prepare_data.do`. The name:
+**Column names**: a new column can have any name except one that is already
+a column in the dataset. Adding a column never overwrites one: the name box
+explains the clash and **Add** stays disabled until you change the name. A
+saved step whose name is now taken, for example after a re-import adds a
+column with that name, fails when your steps are re-applied and appears in
+the re-apply failure notice.
 
-- has at most 32 characters
-- starts with a letter or `_`
-- uses only letters, digits and `_`: no spaces, punctuation or accented
-  letters
-
-For example, `visit_2` and `_flag` are allowed, but `2nd_visit`,
-`visit date` and `âge` are not. A name that breaks a rule is explained under
-the name box, and **Add** stays disabled until you fix it. A saved step whose
-name breaks a rule fails when your steps are re-applied, and it appears in the
-re-apply failure notice.
+If you build a Stata replication package, Stata has stricter rules: at most
+32 characters, starting with a letter or `_`, only letters, digits and `_`,
+and not a name Stata reserves such as `in` or `byte`. For now, a step whose
+new name breaks these rules is written to `prepare_data.do` as a NOTE, and
+the Replication page warns you. Choose a Stata-friendly name, such as
+`visit_date` rather than `visit date`, if you plan to export to Stata.
 
 **Copying a column (copy of column)**:
 
 1. Choose the **copy of column** method.
 2. Select the column to copy.
-3. Keep the suggested name, `<column>_copy`, or type another one. A name that
-   already exists is blocked.
+3. Keep the suggested name, `<column>_copy`, or type another one.
 
 The copy is placed right after the column it copies. It has the same values,
 data type and missing values. To keep the original values next to a

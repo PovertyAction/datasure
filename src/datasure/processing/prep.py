@@ -23,7 +23,6 @@ from datasure.models.enums import (
     PrepOperations,
     PrepRowConditions,
 )
-from datasure.processing.column_names import stata_name_error
 from datasure.processing.row_index import parse_row_indices, resolve_row_positions
 from datasure.utils.duckdb_utils import duckdb_get_table, duckdb_save_table
 from datasure.utils.prep_utils import (
@@ -736,7 +735,7 @@ class AddNewColumnOperation(PrepOperation):
             method = prep_args.method
             source_columns = prep_args.source_columns or [""]
 
-            self._validate_new_name(new_col_name)
+            self._validate_new_name(data, new_col_name)
 
             if method == PrepFunctions.copy.value:
                 results = self._add_copy_column(data, new_col_name, source_columns)
@@ -778,25 +777,28 @@ class AddNewColumnOperation(PrepOperation):
         except Exception as e:
             raise OperationError(f"Failed to add new column: {e}") from e
 
-    def _validate_new_name(self, name: str | None) -> None:
-        """Raise if ``name`` can't be a Stata variable name."""
-        error = stata_name_error(name or "")
-        if error:
-            raise ValidationError(f"Invalid column name: {error}")
+    def _validate_new_name(self, data: pl.DataFrame, name: str | None) -> None:
+        """Raise if ``name`` is empty or already a column.
+
+        No add-column method may overwrite a column, so a replay never
+        replaces data quietly. Names Stata can't use are allowed here: the
+        replication package deals with them.
+        """
+        if not name:
+            raise ValidationError("Enter a name for the new column.")
+        if name in data.columns:
+            raise ValidationError(f"Column '{name}' already exists.")
 
     def _add_copy_column(
         self, data: pl.DataFrame, col_name: str, source_columns: list[str]
     ) -> pl.DataFrame:
         """Copy one column to a new name, placed right after its source.
 
-        The copy keeps the source's data type and missing values. An existing
-        name is never overwritten, so a replay can't clobber a column.
+        The copy keeps the source's data type and missing values.
         """
-        source = source_columns[0] if source_columns else ""
+        source = source_columns[0]
         if source not in data.columns:
             raise ValidationError(f"Column to copy '{source}' not found.")
-        if col_name in data.columns:
-            raise ValidationError(f"Column '{col_name}' already exists.")
 
         order = list(data.columns)
         order.insert(order.index(source) + 1, col_name)

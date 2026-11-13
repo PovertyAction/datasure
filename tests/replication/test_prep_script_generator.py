@@ -913,3 +913,28 @@ class TestDuplicateColumnScript:
         )
         assert "clonevar" not in script
         assert len(warnings) == 1
+
+    @pytest.mark.parametrize("name", ["age copy", "1age", "in", "x" * 33])
+    def test_name_stata_cannot_use_is_a_note_and_warning(self, name):
+        """Until the package maps names, an unusable name is flagged, not emitted."""
+        warnings: list[str] = []
+        script = generate_prepare_data_script(
+            _log(("add new column", _copy_args("age", name))),
+            "P",
+            "S",
+            "0.1",
+            on_warning=warnings.append,
+        )
+        assert "clonevar" not in script
+        assert "NOTE" in script
+        assert len(warnings) == 1
+        assert "Stata" in warnings[0]
+
+    def test_other_add_column_methods_flag_names_stata_cannot_use(self):
+        warnings: list[str] = []
+        args = {"column_names": "visit date", "method": "constant", "value": "1"}
+        script = generate_prepare_data_script(
+            _log(("add new column", args)), "P", "S", "0.1", on_warning=warnings.append
+        )
+        assert "gen visit date" not in script
+        assert len(warnings) == 1

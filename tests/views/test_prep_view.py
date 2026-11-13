@@ -256,19 +256,29 @@ class TestIsAddColumnIncomplete:
 
 
 class TestAddColumnNameRules:
-    """Add Column's name input is checked against Stata's naming rules."""
+    """Add Column's name input: any new name, but never an existing column."""
 
-    @pytest.mark.parametrize("name", ["x" * 33, "1st_visit", "visit date", "née"])
-    def test_invalid_name_is_incomplete_and_explained(self, name):
-        args = {"column_names": name, "method": PrepFunctions.constant.value}
-        assert _is_add_column_incomplete(args) is True
-        assert _new_column_name_error(args, []) is not None
-
-    @pytest.mark.parametrize("name", ["x" * 32, "_visit", "visit2"])
-    def test_valid_name_is_complete(self, name):
+    @pytest.mark.parametrize(
+        "name", ["x" * 40, "1st_visit", "visit date", "née", "in", "_visit"]
+    )
+    def test_any_new_name_is_complete(self, name):
         args = {"column_names": name, "method": PrepFunctions.constant.value}
         assert _is_add_column_incomplete(args) is False
         assert _new_column_name_error(args, []) is None
+
+    @pytest.mark.parametrize(
+        "method",
+        [
+            PrepFunctions.constant.value,
+            PrepFunctions.sum.value,
+            PrepFunctions.concat.value,
+            PrepFunctions.index.value,
+        ],
+    )
+    def test_existing_name_is_blocked_for_every_method(self, method):
+        args = {"column_names": "age", "method": method}
+        assert "already exists" in _new_column_name_error(args, ["hhid", "age"])
+        assert _is_add_column_incomplete(args, ["hhid", "age"]) is True
 
     def test_empty_name_shows_no_error_yet(self):
         args = {"column_names": "", "method": PrepFunctions.constant.value}
@@ -306,10 +316,6 @@ class TestCopyColumnForm:
         args = _copy_args("age", "income")
         assert _is_add_column_incomplete(args, self.columns) is True
         assert "already exists" in _new_column_name_error(args, self.columns)
-
-    def test_invalid_stata_name_is_blocked(self):
-        args = _copy_args("age", "age copy")
-        assert _is_add_column_incomplete(args, self.columns) is True
 
     def test_dispatcher_checks_existing_names(self):
         args = _copy_args("age", "hhid")

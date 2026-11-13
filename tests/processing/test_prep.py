@@ -2588,12 +2588,6 @@ class TestDuplicateColumn:
         assert "age_copy" not in result.columns
         assert "income_copy" in result.columns
 
-    def test_invalid_stata_name_fails(self, survey):
-        result, outcomes = _replay(survey, [_copy_step("age", "1age")])
-        assert outcomes[0].status == "Failed"
-        assert "start with a letter" in outcomes[0].error
-        assert result.equals(survey)
-
     def test_removing_a_duplicate_step_replays_the_rest(self, survey):
         """Without the copy step, a step on the copy fails; the others run."""
         log = [
@@ -2616,11 +2610,14 @@ class TestDuplicateColumn:
         assert result["hhid"].to_list() == ["H1", "H2", "H3"]
 
 
-class TestAddColumnStataNames:
-    """Every add-column method checks its new name against Stata's rules."""
+class TestAddColumnNames:
+    """New column names: any non-empty name that isn't already a column."""
 
-    @pytest.mark.parametrize("name", ["x" * 33, "2nd_visit", "visit-date", "née"])
-    def test_replayed_step_with_invalid_name_fails(self, name):
+    @pytest.mark.parametrize(
+        "name", ["x" * 40, "2nd_visit", "visit date", "née", "in", "using"]
+    )
+    def test_names_stata_cannot_use_are_allowed(self, name):
+        """Stata names are handled when a replication package is built."""
         data = pl.DataFrame({"a": [1, 2]})
         step = PrepActionResult(
             action="add new column",
@@ -2629,16 +2626,49 @@ class TestAddColumnStataNames:
             value="1",
         )
         result, outcomes = _replay(data, [step])
-        assert outcomes[0].status == "Failed"
-        assert name in outcomes[0].error
-        assert result.columns == ["a"]
+        assert outcomes[0].status == "Successful"
+        assert result.columns == ["a", name]
 
-    def test_valid_name_of_32_characters_is_added(self):
+    def test_copy_with_a_name_stata_cannot_use(self):
+        data = pl.DataFrame({"a": [1, 2], "b": [3, 4]})
+        result, outcomes = _replay(data, [_copy_step("a", "a copy")])
+        assert outcomes[0].status == "Successful"
+        assert result.columns == ["a", "a copy", "b"]
+
+    def test_empty_name_fails(self):
         data = pl.DataFrame({"a": [1, 2]})
-        name = "x" * 32
         step = PrepActionResult(
-            action="add new column", column_names=name, method="constant", value="1"
+            action="add new column", column_names="", method="constant", value="1"
         )
         result, outcomes = _replay(data, [step])
-        assert outcomes[0].status == "Successful"
-        assert name in result.columns
+        assert outcomes[0].status == "Failed"
+        assert result.columns == ["a"]
+
+    @pytest.mark.parametrize(
+        ("method", "source_columns", "value"),
+        [
+            ("constant", None, "1"),
+            ("sum", ["a", "b"], None),
+            ("concat", ["t", "u"], "_"),
+            ("index", None, None),
+            ("copy of column", ["a"], None),
+        ],
+    )
+    def test_existing_name_fails_without_overwriting(
+        self, method, source_columns, value
+    ):
+        """No add-column method may overwrite a column, in the app or on replay."""
+        data = pl.DataFrame(
+            {"a": [1, 2], "b": [3, 4], "t": ["x", "y"], "u": ["p", "q"]}
+        )
+        step = PrepActionResult(
+            action="add new column",
+            column_names="b",
+            method=method,
+            source_columns=source_columns,
+            value=value,
+        )
+        result, outcomes = _replay(data, [step])
+        assert outcomes[0].status == "Failed"
+        assert "'b' already exists" in outcomes[0].error
+        assert result.equals(data)

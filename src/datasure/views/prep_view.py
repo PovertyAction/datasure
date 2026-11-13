@@ -19,7 +19,6 @@ from datasure.models.enums import (
     PrepOperations,
     PrepRowConditions,
 )
-from datasure.processing.column_names import stata_name_error
 from datasure.processing.corrections import CorrectionProcessor
 from datasure.processing.prep import (
     OperationError,
@@ -210,10 +209,7 @@ CONCAT_SEPARATORS = {
 }
 CONCAT_SPECIFY = "Specify"
 
-NEW_NAME_HELP = (
-    "Name of the new column. Use at most 32 characters: letters, digits and _, "
-    "starting with a letter or _ (Stata's rules for variable names)."
-)
+NEW_NAME_HELP = "Name of the new column. It can't be a column that already exists."
 
 
 def _concat_separator(choice: str, custom: str) -> str | None:
@@ -246,19 +242,13 @@ def _new_column_name_error(
 ) -> str | None:
     """Return why Add Column's new name can't be used, or None.
 
-    Every name must be a valid Stata name. A copy also can't take a name that
-    already exists. An empty name has no error yet: the form is just
-    incomplete.
+    A new name must not already exist: adding a column never overwrites one.
+    An empty name has no error yet: the form is just incomplete.
     """
     name = prep_args.get("column_names")
     if not name:
         return None
-    error = stata_name_error(name)
-    if error:
-        return error
-    if prep_args.get("method") == PrepFunctions.copy.value and (
-        name in existing_columns
-    ):
+    if name in existing_columns:
         return f"Column '{name}' already exists. Enter a new name."
     return None
 

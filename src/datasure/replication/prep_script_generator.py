@@ -18,6 +18,7 @@ from typing import Any
 
 import polars as pl
 
+from datasure.processing.column_names import stata_name_error
 from datasure.processing.row_index import parse_row_indices
 from datasure.replication.script_generators import _C, _LOG_CLOSE, _header
 
@@ -414,6 +415,14 @@ def _stata_add_column(args: dict, _desc: str) -> list[str]:
     method = (args.get("method") or "").lower()
     src_cols = _cols(args)
     values = _val_list(args)
+
+    # DataSure allows any new name; Stata doesn't. Until the package maps
+    # names to Stata-safe ones, flag the step rather than emit a broken line.
+    name_error = stata_name_error(new_col)
+    if name_error:
+        raise _UntranslatableStepError(
+            f"the new column name can't be used in Stata: {name_error}"
+        )
 
     if method == "constant":
         raw = values[0] if values else (args.get("value") or "")
