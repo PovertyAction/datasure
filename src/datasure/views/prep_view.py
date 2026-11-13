@@ -1401,7 +1401,7 @@ def prep_add_step(
         # greet the user when it opens again.
         st.session_state.pop(_pending_rename_key(step_index), None)
 
-        @st.dialog("Add data prep step", width="large")
+        @st.dialog("Add data prep step", width="medium")
         def _dialog() -> None:
             _render_add_step_form(prep_data, step_index, alias)
 
