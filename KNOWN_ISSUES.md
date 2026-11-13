@@ -16,101 +16,13 @@ To check which version you have, run `datasure --version`. Versions with `a`, `b
 
 ## Open issues
 
-### KI-031: New installs fail to import data with `Resource In Use Error` or `no attribute 'pl'`
+### KI-034: The replication package fails or removes the wrong rows for "remove rows by row index" steps
 
-- **Status:** 🟡 Planned for 1.2.0
-- **Affected versions:** 1.0.0 – 1.2.0a6, when installed on or after 2026-10-21
-- **Symptom:** On a new install, importing data or opening a check page fails with `Resource In Use Error: connection has an unfinished result from execute()` or `'DuckDBPyConnection' object has no attribute 'pl'`. Installs made before 21 October 2026 are not affected unless you reinstall or upgrade.
-- **Workaround:** Reinstall with an older DuckDB: `uv tool install datasure --force --with "duckdb<2"`.
-- **Issue:** [#393](https://github.com/PovertyAction/datasure/issues/393)
-
-### KI-030: Outliers & Constraints and GPS Checks tabs crash with `cannot compare string with numeric type (i32)` after applying a project setup
-
-- **Status:** 🟡 Planned for 1.2.0 (fixed in 1.2.0a6)
-- **Affected versions:** 1.2.0a2 – 1.2.0a5
-- **Symptom:** After you apply an exported project setup that includes corrections, the **Outliers & Constraints** and **GPS Checks** tabs show `ComputeError: cannot compare string with numeric type (i32)`.
-- **Workaround:** Update to 1.2.0a6 or later. Projects that already show the error load again after the update.
-- **Issue:** [#352](https://github.com/PovertyAction/datasure/issues/352)
-
-### KI-029: Missing codes such as -99 are counted as values in Outliers, Descriptive Stats and Enumerator Stats
-
-- **Status:** 🟡 Planned for 1.2.0
-- **Affected versions:** 1.0.0 and later
-- **Symptom:** Codes you add on the Missing Values tab, such as `-99` for Don't know, are treated as real answers on other tabs. On **Outliers & Constraints**, `-99` answers are flagged as outliers or constraint violations, and they count towards the outlier % on the Summary tab. On **Descriptive Stats** and in **Column Statistics by Enumerator**, they pull down the mean and show as the minimum.
-- **Workaround:** Read the Missing Values tab for how often each code was used, and ignore flags and minimums that are a missing code. To get statistics without the codes, replace the codes with blanks in your data before you import it.
-- **Issue:** [#379](https://github.com/PovertyAction/datasure/issues/379)
-
-### KI-028: Enumerator summary shows wrong first and last submission dates and this week/month counts
-
-- **Status:** 🟡 Planned for 1.2.0
-- **Affected versions:** 1.0.0 and later
-- **Symptom:** On the Enumerator tab, when your data covers more than one month, the summary table can show the wrong **first submission** and **last submission** dates, and **# submissions this week** and **# submissions this month** can include submissions from earlier months. For example, 30 Sep can be counted in October's "this month", and an enumerator who started in January can show April as their first submission.
-- **Workaround:** Check first and last submission dates and recent counts in the data itself, for example by filtering the data by enumerator and date. Don't rely on the summary table for these numbers.
-- **Issue:** [#380](https://github.com/PovertyAction/datasure/issues/380)
-
-### KI-027: Outliers & Constraints and GPS Checks tabs crash with `unable to find column "action"`
-
-- **Status:** 🔴 Open
-- **Affected versions:** 1.2.0a1 only
-- **Symptom:** In a project with no corrections yet, the **Outliers & Constraints** and **GPS Checks** tabs show `ColumnNotFoundError: unable to find column "action"`. This can start after you re-run prep or refresh the data. It can also start as soon as you open a project you used with 1.1.0, if you re-imported its data in that version.
-- **Workaround:** On the **Correct Data** page, use **Add correction step** to add any correction, then remove it with **Remove correction step**. The tabs load again.
-- **Issue:** [#368](https://github.com/PovertyAction/datasure/issues/368)
-
-### KI-026: Outliers tab crashes after you delete an outlier column
-
-- **Status:** 🔴 Open
-- **Affected versions:** 1.0.0 – 1.2.0a1
-- **Symptom:** After you use **Delete outlier column** on the Outliers tab, the tab shows an error every time it loads: `DuplicateError: column with name 'index' has more than one occurrence`.
-- **Workaround:** None in the app yet. Avoid deleting outlier columns until this is fixed.
-- **Issue:** [#368](https://github.com/PovertyAction/datasure/issues/368)
-
-### KI-025: The Summary tab's outlier % and back check error rate always show 0
-
-- **Status:** 🟡 Planned for 1.2.0
-- **Affected versions:** 1.0.0 and later
-- **Symptom:** The Summary tab shows 0 for outlier % and back check error rate in every project, even when the Outliers and Backchecks tabs show flags. These tiles have not been built yet. A 0 here does not mean there are no problems.
-- **Workaround:** Read these figures from the Outliers and Backchecks tabs. In the next release, these tiles are replaced by the **Outliers & Constraints** and **Backchecks** rows in Summary's check health list, which show the same figures as those checks.
-- **Issue:** [#358](https://github.com/PovertyAction/datasure/issues/358)
-
-### KI-024: Restart Demo keeps your earlier corrections and settings
-
-- **Status:** 🟡 Planned for 1.2.0
-- **Affected versions:** 1.0.0 and later
-- **Symptom:** After **Restart Demo**, corrections and check settings from your last demo session come back when you recreate the "Household HFCs" check page, so the demo guidance no longer matches what you see. The Restart dialog says corrections are deleted, but they are not.
-- **Workaround:** Close DataSure, delete the `demoproject` folder in the DataSure cache directory (see [Cache Directory Locations](README.md#cache-directory-locations)), then start the demo again.
-- **Issue:** [#357](https://github.com/PovertyAction/datasure/issues/357)
-
-### KI-023: Demo guidance mentions labels and columns that do not exist
-
-- **Status:** 🟡 Planned for 1.2.0
-- **Affected versions:** 1.0.0 and later
-- **Symptom:** Some demo steps ask you to pick a column or option that is not in the demo data or on the page. For example, they mention `household_size` (the column is `household_count`) and "Select column to group by" (the label is "Group by column").
-- **Workaround:** Pick the column or label with the closest name.
-- **Issue:** [#356](https://github.com/PovertyAction/datasure/issues/356)
-
-### KI-022: Check pages share Descriptive Statistics columns and enumerator consent results
-
-- **Status:** 🟡 Planned for 1.2.0
-- **Affected versions:** 1.0.0 and later
-- **Symptom:** Choosing Descriptive Statistics columns on one check page changes them on every other page in the project. The Enumerator report keeps showing old consent and outcome results after a data refresh, or after you change the settings on another page.
-- **Workaround:** Click **Apply Consent and Outcome Settings** on the Enumerator tab after every data refresh. Re-select Descriptive Statistics columns when you switch pages.
-- **Issue:** [#353](https://github.com/PovertyAction/datasure/issues/353)
-
-### KI-021: Exporting a project setup leaves out some check settings
-
-- **Status:** 🟡 Planned for 1.2.0
-- **Affected versions:** 1.1.0 and later
-- **Symptom:** After you apply an exported project setup to another project, these settings are missing: missing-value codes, Descriptive Statistics columns, and the column rules for Duplicates, Outliers, GPS and Backchecks.
-- **Workaround:** Set these again in the new project after applying the setup.
-- **Issue:** [#352](https://github.com/PovertyAction/datasure/issues/352)
-
-### KI-020: "Remove rows" also removes rows with a missing value in the selected column
-
-- **Status:** 🟡 Planned for 1.2.0
-- **Affected versions:** 1.0.0 and later
-- **Symptom:** A prep step such as "remove rows where `age` is greater than 60" also removes rows where `age` is blank. The step's affected-row count includes those rows. Replication scripts exported from DataSure do the same.
-- **Workaround:** Before you add the step, count the rows where the column is blank. Then check the step's affected-row count against what you expect.
-- **Issue:** [#351](https://github.com/PovertyAction/datasure/issues/351)
+- **Status:** 🟡 Planned for 1.2.2. Fixed in the 1.2.2a1 pre-release
+- **Affected versions:** 1.0.0 – 1.2.1
+- **Symptom:** If a Prep step removes rows **by row index** with a range such as `0:30`, **Build Replication Package** fails with `ValueError: invalid literal for int() with base 10: '0:30'`. With single row numbers, the package builds, but `prepare_data.do` removes different rows from the ones DataSure removed. Negative row numbers such as `-5` remove nothing, or the wrong rows, on the Prep page.
+- **Workaround:** Install the 1.2.2a1 pre-release from [Test PyPI](https://test.pypi.org/project/datasure/) and rebuild the package. On earlier versions, list row numbers one by one instead of as a range, use only row numbers of 0 or more, and check every `drop` line in `prepare_data.do` by hand before you use it.
+- **Issue:** [#442](https://github.com/PovertyAction/datasure/issues/442)
 
 ### KI-019: Datasets or check pages with similar names overwrite each other
 
@@ -122,27 +34,11 @@ To check which version you have, run `datasure --version`. Versions with `a`, `b
 
 ### KI-018: Legacy `.xls` Excel files fail to import
 
-- **Status:** 🟡 Planned. From 1.2.0, DataSure rejects `.xls` files with a clear message; reading `.xls` files is planned for 1.3.0
+- **Status:** 🟡 Planned for 1.3.0. Since 1.2.0, DataSure rejects `.xls` files with a clear message instead of failing
 - **Affected versions:** 1.0.0 – 1.2.0a1
 - **Symptom:** A local `.xls` file is accepted on the Import page, then fails with an error from `openpyxl`.
 - **Workaround:** Open the file in Excel and save it as `.xlsx`, or export it as CSV.
-- **Issue:** [#349](https://github.com/PovertyAction/datasure/issues/349) · [Changelog](CHANGELOG.md#unreleased)
-
-### KI-017: Remove Credentials reports success but keeps the saved password
-
-- **Status:** 🟡 Planned. Fix merged; ships in 1.2.0 (not in any release yet)
-- **Affected versions:** 1.0.0 – 1.2.0a1
-- **Symptom:** On the Import page, **Remove Credentials** shows a success message, but the SurveyCTO password or private key is still saved on your computer and usually still appears in the list.
-- **Workaround:** Delete the entry from your operating system's credential store: Credential Manager on Windows, Keychain Access on macOS, or your keyring app on Linux. DataSure's entries start with `datasure_` and include the server name.
-- **Issue:** [#342](https://github.com/PovertyAction/datasure/issues/342) · [Changelog](CHANGELOG.md#unreleased)
-
-### KI-016: SurveyCTO imports leave out submissions completed before 2024
-
-- **Status:** 🟡 Planned. Fix merged; ships in 1.2.0 (not in any release yet)
-- **Affected versions:** 1.0.0 – 1.2.0a1
-- **Symptom:** A SurveyCTO form imports without error, but submissions completed before 1 January 2024 are missing. The row count is lower than in the SurveyCTO console.
-- **Workaround:** Export the full dataset from the SurveyCTO console and import it as a local file.
-- **Issue:** [#341](https://github.com/PovertyAction/datasure/issues/341) · [Changelog](CHANGELOG.md#unreleased)
+- **Issue:** [#349](https://github.com/PovertyAction/datasure/issues/349) · [Changelog](CHANGELOG.md#120---2026-11-03)
 
 ### KI-015: Every SurveyCTO refresh downloads the whole dataset again
 
@@ -152,77 +48,199 @@ To check which version you have, run `datasure --version`. Versions with `a`, `b
 - **Workaround:** None needed. Expect slow refreshes on large or encrypted forms.
 - **Issue:** [#340](https://github.com/PovertyAction/datasure/issues/340)
 
+## Recently fixed
+
+### KI-033: Date and datetime questions from SurveyCTO import as blank
+
+- **Status:** 🟢 Fixed in 1.2.1
+- **Affected versions:** 1.0.0 – 1.2.0
+- **Symptom:** After you import a form from SurveyCTO, every `date` and `datetime` question in the form shows as blank. These columns can look like skipped questions on the **Missing Values** tab. Submission dates, start and end times, and data imported from a local file are not affected.
+- **Fix:** Upgrade to 1.2.1 or later, then refresh the form's data to fill in the blank columns.
+- **Issue:** [#395](https://github.com/PovertyAction/datasure/issues/395) · [Changelog](CHANGELOG.md#121---2026-11-06)
+
+### KI-032: DataSure closes without an error while you review duplicates
+
+- **Status:** 🟢 Fixed in 1.2.0
+- **Affected versions:** 1.2.0 pre-releases (seen on 1.2.0rc1) on Windows, when installed over an earlier DataSure install
+- **Symptom:** While you work on the **Duplicates** tab, the app stops and the terminal returns to the prompt with no error, even with `datasure --logging debug`. The browser tab stops responding.
+- **Fix:** Upgrade to 1.2.0 or later.
+- **Issue:** [#426](https://github.com/PovertyAction/datasure/issues/426) · [Changelog](CHANGELOG.md#120---2026-11-03)
+
+### KI-031: New installs fail to import data with `Resource In Use Error` or `no attribute 'pl'`
+
+- **Status:** 🟢 Fixed in 1.2.0
+- **Affected versions:** 1.0.0 – 1.2.0a6, when installed on or after 2026-10-21
+- **Symptom:** On a new install, importing data or opening a check page fails with `Resource In Use Error: connection has an unfinished result from execute()` or `'DuckDBPyConnection' object has no attribute 'pl'`. Installs made before 21 October 2026 are not affected unless you reinstall or upgrade.
+- **Fix:** Upgrade to 1.2.0 or later.
+- **Issue:** [#393](https://github.com/PovertyAction/datasure/issues/393) · [Changelog](CHANGELOG.md#120---2026-11-03)
+
+### KI-030: Outliers & Constraints and GPS Checks tabs crash with `cannot compare string with numeric type (i32)` after applying a project setup
+
+- **Status:** 🟢 Fixed in 1.2.0
+- **Affected versions:** 1.2.0a2 – 1.2.0a5
+- **Symptom:** After you apply an exported project setup that includes corrections, the **Outliers & Constraints** and **GPS Checks** tabs show `ComputeError: cannot compare string with numeric type (i32)`.
+- **Fix:** Upgrade to 1.2.0 or later. Projects that already show the error load again after the update.
+- **Issue:** [#352](https://github.com/PovertyAction/datasure/issues/352) · [Changelog](CHANGELOG.md#120---2026-11-03)
+
+### KI-029: Missing codes such as -99 are counted as values in Outliers, Descriptive Stats and Enumerator Stats
+
+- **Status:** 🟢 Fixed in 1.2.0
+- **Affected versions:** 1.0.0 – 1.2.0a4
+- **Symptom:** Codes you add on the Missing Values tab, such as `-99` for Don't know, are treated as real answers on other tabs. On **Outliers & Constraints**, `-99` answers are flagged as outliers or constraint violations, and they count towards the outlier % on the Summary tab. On **Descriptive Stats** and in **Column Statistics by Enumerator**, they pull down the mean and show as the minimum.
+- **Fix:** Upgrade to 1.2.0 or later.
+- **Issue:** [#379](https://github.com/PovertyAction/datasure/issues/379) · [Changelog](CHANGELOG.md#120---2026-11-03)
+
+### KI-028: Enumerator summary shows wrong first and last submission dates and this week/month counts
+
+- **Status:** 🟢 Fixed in 1.2.0
+- **Affected versions:** 1.0.0 – 1.2.0a3
+- **Symptom:** On the Enumerator tab, when your data covers more than one month, the summary table can show the wrong **first submission** and **last submission** dates, and **# submissions this week** and **# submissions this month** can include submissions from earlier months. For example, 30 Sep can be counted in October's "this month", and an enumerator who started in January can show April as their first submission.
+- **Fix:** Upgrade to 1.2.0 or later.
+- **Issue:** [#380](https://github.com/PovertyAction/datasure/issues/380) · [Changelog](CHANGELOG.md#120---2026-11-03)
+
+### KI-027: Outliers & Constraints and GPS Checks tabs crash with `unable to find column "action"`
+
+- **Status:** 🟢 Fixed in 1.2.0
+- **Affected versions:** 1.2.0a1 only
+- **Symptom:** In a project with no corrections yet, the **Outliers & Constraints** and **GPS Checks** tabs show `ColumnNotFoundError: unable to find column "action"`. This can start after you re-run prep or refresh the data. It can also start as soon as you open a project you used with 1.1.0, if you re-imported its data in that version.
+- **Fix:** Upgrade to 1.2.0 or later.
+- **Issue:** [#368](https://github.com/PovertyAction/datasure/issues/368) · [Changelog](CHANGELOG.md#120---2026-11-03)
+
+### KI-026: Outliers tab crashes after you delete an outlier column
+
+- **Status:** 🟢 Fixed in 1.2.0
+- **Affected versions:** 1.0.0 – 1.2.0a1
+- **Symptom:** After you use **Delete outlier column** on the Outliers tab, the tab shows an error every time it loads: `DuplicateError: column with name 'index' has more than one occurrence`.
+- **Fix:** Upgrade to 1.2.0 or later. Pages that already show the error load again after the update.
+- **Issue:** [#368](https://github.com/PovertyAction/datasure/issues/368) · [Changelog](CHANGELOG.md#120---2026-11-03)
+
+### KI-025: The Summary tab's outlier % and back check error rate always show 0
+
+- **Status:** 🟢 Fixed in 1.2.0
+- **Affected versions:** 1.0.0 – 1.2.0a2
+- **Symptom:** The Summary tab shows 0 for outlier % and back check error rate in every project, even when the Outliers and Backchecks tabs show flags. These tiles have not been built yet. A 0 here does not mean there are no problems.
+- **Fix:** Upgrade to 1.2.0 or later. These tiles are replaced by the **Outliers & Constraints** and **Backchecks** rows in Summary's check health list.
+- **Issue:** [#358](https://github.com/PovertyAction/datasure/issues/358) · [Changelog](CHANGELOG.md#120---2026-11-03)
+
+### KI-024: Restart Demo keeps your earlier corrections and settings
+
+- **Status:** 🟢 Fixed in 1.2.0
+- **Affected versions:** 1.0.0 – 1.2.0a6
+- **Symptom:** After **Restart Demo**, corrections and check settings from your last demo session come back when you recreate the "Household HFCs" check page, so the demo guidance no longer matches what you see. The Restart dialog says corrections are deleted, but they are not.
+- **Fix:** Upgrade to 1.2.0 or later.
+- **Issue:** [#357](https://github.com/PovertyAction/datasure/issues/357) · [Changelog](CHANGELOG.md#120---2026-11-03)
+
+### KI-023: Demo guidance mentions labels and columns that do not exist
+
+- **Status:** 🟢 Fixed in 1.2.0
+- **Affected versions:** 1.0.0 – 1.2.0a6
+- **Symptom:** Some demo steps ask you to pick a column or option that is not in the demo data or on the page. For example, they mention `household_size` (the column is `household_count`) and "Select column to group by" (the label is "Group by column").
+- **Fix:** Upgrade to 1.2.0 or later.
+- **Issue:** [#356](https://github.com/PovertyAction/datasure/issues/356) · [Changelog](CHANGELOG.md#120---2026-11-03)
+
+### KI-022: Check pages share Descriptive Statistics columns and enumerator consent results
+
+- **Status:** 🟢 Fixed in 1.2.0
+- **Affected versions:** 1.0.0 – 1.2.0a4
+- **Symptom:** Choosing Descriptive Statistics columns on one check page changes them on every other page in the project. The Enumerator report keeps showing old consent and outcome results after a data refresh, or after you change the settings on another page.
+- **Fix:** Upgrade to 1.2.0 or later.
+- **Issue:** [#353](https://github.com/PovertyAction/datasure/issues/353) · [Changelog](CHANGELOG.md#120---2026-11-03)
+
+### KI-021: Exporting a project setup leaves out some check settings
+
+- **Status:** 🟢 Fixed in 1.2.0
+- **Affected versions:** 1.1.0 – 1.2.0a4
+- **Symptom:** After you apply an exported project setup to another project, these settings are missing: missing-value codes, Descriptive Statistics columns, and the column rules for Duplicates, Outliers, GPS and Backchecks.
+- **Fix:** Upgrade to 1.2.0 or later and export the setup again. Setups exported by an older version still leave these settings out.
+- **Issue:** [#352](https://github.com/PovertyAction/datasure/issues/352) · [Changelog](CHANGELOG.md#120---2026-11-03)
+
+### KI-020: "Remove rows" also removes rows with a missing value in the selected column
+
+- **Status:** 🟢 Fixed in 1.2.0
+- **Affected versions:** 1.0.0 – 1.2.0a6
+- **Symptom:** A prep step such as "remove rows where `age` is greater than 60" also removes rows where `age` is blank. The step's affected-row count includes those rows. Replication scripts exported from DataSure do the same.
+- **Fix:** Upgrade to 1.2.0 or later. Check the affected-row count of saved **Remove rows** steps on columns with blank values, since they now keep more rows.
+- **Issue:** [#351](https://github.com/PovertyAction/datasure/issues/351) · [Changelog](CHANGELOG.md#120---2026-11-03)
+
+### KI-017: Remove Credentials reports success but keeps the saved password
+
+- **Status:** 🟢 Fixed in 1.2.0
+- **Affected versions:** 1.0.0 – 1.2.0a1
+- **Symptom:** On the Import page, **Remove Credentials** shows a success message, but the SurveyCTO password or private key is still saved on your computer and usually still appears in the list.
+- **Fix:** Upgrade to 1.2.0 or later.
+- **Issue:** [#342](https://github.com/PovertyAction/datasure/issues/342) · [Changelog](CHANGELOG.md#120---2026-11-03)
+
+### KI-016: SurveyCTO imports leave out submissions completed before 2024
+
+- **Status:** 🟢 Fixed in 1.2.0
+- **Affected versions:** 1.0.0 – 1.2.0a1
+- **Symptom:** A SurveyCTO form imports without error, but submissions completed before 1 January 2024 are missing. The row count is lower than in the SurveyCTO console.
+- **Fix:** Upgrade to 1.2.0 or later; the next refresh downloads the older submissions.
+- **Issue:** [#341](https://github.com/PovertyAction/datasure/issues/341) · [Changelog](CHANGELOG.md#120---2026-11-03)
+
 ### KI-014: A correction overwrites a value the field team fixed, if the cell was blank
 
-- **Status:** 🟡 Planned. Fix merged; ships in 1.2.0 (not in any release yet)
+- **Status:** 🟢 Fixed in 1.2.0
 - **Affected versions:** 1.1.0 – 1.2.0a1
 - **Symptom:** You fill a blank cell with a correction. Later the field team fills the same cell at source and you re-import. DataSure replaces their value with your correction and gives no warning. A correction to a cell that was not blank correctly warns instead.
-- **Workaround:** After each re-import, review corrections that filled blank cells on the Correct Data page, and remove any whose cell now has a value from the field.
-- **Issue:** [#337](https://github.com/PovertyAction/datasure/issues/337) · [Changelog](CHANGELOG.md#unreleased)
+- **Fix:** Upgrade to 1.2.0 or later. Such a correction now fails with a reason and the field team's value is kept.
+- **Issue:** [#337](https://github.com/PovertyAction/datasure/issues/337) · [Changelog](CHANGELOG.md#120---2026-11-03)
 
 ### KI-013: The app loads, then disconnects without a message
 
-- **Status:** 🟡 Planned. Fix merged; ships in 1.2.0 (not in any release yet)
+- **Status:** 🟢 Fixed in 1.2.0
 - **Affected versions:** 1.1.0 – 1.2.0a1, when installed on or after 2026-10-13
 - **Symptom:** DataSure opens in the browser, then loses its connection. The terminal shows `RuntimeError: Expected ASGI message 'http.response.start', but got 'http.response.body'`.
-- **Workaround:** Reinstall with the command in [KI-012](#ki-012-fresh-installs-crash-on-the-prep-page-and-several-check-pages).
-- **Issue:** [#330](https://github.com/PovertyAction/datasure/issues/330) · [Changelog](CHANGELOG.md#unreleased)
+- **Fix:** Upgrade to 1.2.0 or later.
+- **Issue:** [#330](https://github.com/PovertyAction/datasure/issues/330) · [Changelog](CHANGELOG.md#120---2026-11-03)
 
 ### KI-012: Fresh installs crash on the Prep page and several check pages
 
-- **Status:** 🟡 Planned. Fix merged; ships in 1.2.0 (not in any release yet)
+- **Status:** 🟢 Fixed in 1.2.0
 - **Affected versions:** 1.0.0 – 1.2.0a1, when installed after polars 2.0 was released
 - **Symptom:** The Prep page and several checks (Duplicates, Missing, Summary, Outliers, Enumerator) stop with an error such as `AttributeError: module 'polars' has no attribute 'NUMERIC_DTYPES'`.
-- **Workaround:** Reinstall with an earlier version of polars:
-
-  ```bash
-  uv tool install datasure==1.1.0 --force --with "polars<2" --with "starlette<1.8"
-  ```
-
-  This command also avoids [KI-013](#ki-013-the-app-loads-then-disconnects-without-a-message).
-- **Fix PR:** [#329](https://github.com/PovertyAction/datasure/pull/329) · [Changelog](CHANGELOG.md#unreleased)
+- **Fix:** Upgrade to 1.2.0 or later.
+- **Fix PR:** [#329](https://github.com/PovertyAction/datasure/pull/329) · [Changelog](CHANGELOG.md#120---2026-11-03)
 
 ### KI-011: A prep step that removes every row brings back the raw data
 
-- **Status:** 🟡 Planned. Fix merged; ships in 1.2.0 (not in any release yet)
+- **Status:** 🟢 Fixed in 1.2.0
 - **Affected versions:** 1.0.0 – 1.2.0a1
 - **Symptom:** If a "remove rows" step removes every row, check pages show the original raw data instead of an empty dataset. The Prep page then says "No data available to prepare" and hides the controls you would use to remove that step.
-- **Workaround:** None in the app. Before you add a "remove rows" step, check that its condition does not match every row.
-- **Issue:** [#315](https://github.com/PovertyAction/datasure/issues/315) · [Changelog](CHANGELOG.md#unreleased)
+- **Fix:** Upgrade to 1.2.0 or later.
+- **Issue:** [#315](https://github.com/PovertyAction/datasure/issues/315) · [Changelog](CHANGELOG.md#120---2026-11-03)
 
 ### KI-010: Duplicates "Records to Include" filters leak between pages or disappear
 
-- **Status:** 🟡 Planned. Fixed in pre-release 1.2.0a1 on Test PyPI; the stable fix ships in 1.2.0
+- **Status:** 🟢 Fixed in 1.2.0
 - **Affected versions:** 1.0.0 – 1.1.0
 - **Symptom:** In a project with more than one check page, setting the Records to Include filter on one page changes another page's results. A filter that matches no records checks every record instead. Some saved filters come back empty in a new session.
-- **Workaround:** Use one check page per project, and check the filter each time you open the Duplicates tab.
-- **Issue:** [#306](https://github.com/PovertyAction/datasure/issues/306) · [Changelog](CHANGELOG.md#120a1---2026-10-11)
+- **Fix:** Upgrade to 1.2.0 or later.
+- **Issue:** [#306](https://github.com/PovertyAction/datasure/issues/306) · [Changelog](CHANGELOG.md#120---2026-11-03)
 
 ### KI-009: The Mapbox token entered in GPS settings is not saved
 
-- **Status:** 🟡 Planned. Fixed in pre-release 1.2.0a1 on Test PyPI; the stable fix ships in 1.2.0
+- **Status:** 🟢 Fixed in 1.2.0
 - **Affected versions:** 1.0.0 – 1.1.0
 - **Symptom:** You enter a Mapbox token in the GPS settings, but the map does not use it, and it is gone in your next session.
-- **Workaround:** None in the app.
-- **Issue:** [#304](https://github.com/PovertyAction/datasure/issues/304) · [Changelog](CHANGELOG.md#120a1---2026-10-11)
+- **Fix:** Upgrade to 1.2.0 or later.
+- **Issue:** [#304](https://github.com/PovertyAction/datasure/issues/304) · [Changelog](CHANGELOG.md#120---2026-11-03)
 
 ### KI-008: Back check dates and "Avg Days" are empty
 
-- **Status:** 🟡 Planned. Fixed in pre-release 1.2.0a1 on Test PyPI; the stable fix ships in 1.2.0
+- **Status:** 🟢 Fixed in 1.2.0
 - **Affected versions:** 1.0.0 – 1.1.0
 - **Symptom:** On the Backchecks tab, back check dates and "Avg Days" statistics are blank when survey and back check submissions have different KEYs. Backchecker statistics are also blank when the survey KEY is used as the ID.
-- **Workaround:** None.
-- **Issue:** [#300](https://github.com/PovertyAction/datasure/issues/300) · [Changelog](CHANGELOG.md#120a1---2026-10-11)
+- **Fix:** Upgrade to 1.2.0 or later.
+- **Issue:** [#300](https://github.com/PovertyAction/datasure/issues/300) · [Changelog](CHANGELOG.md#120---2026-11-03)
 
 ### KI-007: Back check Duplicate Handling and target % settings have no effect
 
-- **Status:** 🟡 Planned. Fixed in pre-release 1.2.0a1 on Test PyPI; the stable fix ships in 1.2.0
+- **Status:** 🟢 Fixed in 1.2.0
 - **Affected versions:** 1.0.0 – 1.1.0
 - **Symptom:** On the Backchecks tab, duplicates are always dropped and the back check target is always 10%, whatever you choose.
-- **Workaround:** None. In 1.2.0 the Duplicate Handling setting is removed and duplicates are left out until you resolve them (see [RELEASENOTES.md](RELEASENOTES.md)). Targets saved in earlier versions are not carried over, so set the target again after upgrading.
-- **Issue:** [#299](https://github.com/PovertyAction/datasure/issues/299) · [Changelog](CHANGELOG.md#120a1---2026-10-11)
-
-## Recently fixed
+- **Fix:** Upgrade to 1.2.0 or later. The Duplicate Handling setting is removed and duplicates are left out until you resolve them (see [RELEASENOTES.md](RELEASENOTES.md)). Targets saved in earlier versions are not carried over, so set the target again after upgrading.
+- **Issue:** [#299](https://github.com/PovertyAction/datasure/issues/299) · [Changelog](CHANGELOG.md#120---2026-11-03)
 
 ### KI-006: `datasure` did not open the browser
 

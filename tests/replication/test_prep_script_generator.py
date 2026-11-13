@@ -5,6 +5,7 @@ from __future__ import annotations
 import polars as pl
 import pytest
 
+from datasure.processing.row_index import parse_row_indices, resolve_row_positions
 from datasure.replication.prep_script_generator import (
     _col_list,
     _cols,
@@ -15,6 +16,7 @@ from datasure.replication.prep_script_generator import (
     _stata_remove_rows,
     _stata_str_literal,
     _stata_transform_column,
+    _UntranslatableStepError,
     _val,
     _val_list,
     generate_prepare_data_script,
@@ -113,13 +115,72 @@ class TestStataRemoveColumns:
 
 
 class TestStataRemoveRows:
-    def test_by_index_single(self):
-        lines = _stata_remove_rows({"method": "by row index", "value": [5]}, "")
-        assert lines == ["drop in 5"]
+    @pytest.mark.parametrize(
+        ("value", "expected"),
+        [
+            # DataSure counts rows from 0, Stata from 1
+            ([5], "drop if _n == 6"),
+            (["0"], "drop if _n == 1"),
+            (["0:30"], "drop if inrange(_n, 1, 31)"),
+            # Negative positions count back from _N
+            (["-1"], "drop if _n == _N"),
+            (["-5"], "drop if _n == _N - 4"),
+            (["5:-2"], "drop if inrange(_n, 6, _N - 1)"),
+            (["-3:-2"], "drop if inrange(_n, _N - 2, _N - 1)"),
+            # Several values all refer to positions before the step
+            ([1, 3], "drop if _n == 2 | _n == 4"),
+            (["1", "-1"], "drop if _n == 2 | _n == _N"),
+            (
+                ["2:4", "-3:-2"],
+                "drop if inrange(_n, 3, 5) | inrange(_n, _N - 2, _N - 1)",
+            ),
+            ([1, "7:-1"], "drop if _n == 2 | inrange(_n, 8, _N)"),
+            # Prep logs from earlier versions
+            (["0", ",", None, "2"], "drop if _n == 1 | _n == 3"),
+        ],
+    )
+    def test_by_index(self, value, expected):
+        lines = _stata_remove_rows({"method": "by row index", "value": value}, "")
+        assert lines == [expected]
 
-    def test_by_index_multiple(self):
-        lines = _stata_remove_rows({"method": "by row index", "value": [1, 3]}, "")
-        assert lines == ["drop if _n == 1 | _n == 3"]
+    @pytest.mark.parametrize(
+        ("value", "expected_drop"),
+        [
+            # Range past the end: DataSure keeps it to the rows it has
+            (["0:30"], set(range(10))),
+            (["100:99999"], set()),
+            # Mixed-sign span that resolves reversed: nothing
+            (["-3:5"], set()),
+            # Single value outside the data: nothing
+            (["-20"], set()),
+            (["20"], set()),
+            (["8:-1"], {8, 9}),
+        ],
+    )
+    def test_by_index_matches_datasure_out_of_range(self, value, expected_drop):
+        # Stata's `in` stops with r(198) on these; `drop if` must select the
+        # same rows DataSure does. Evaluate the emitted condition in Python.
+        n_rows = 10
+        assert resolve_row_positions(parse_row_indices(value), n_rows) == expected_drop
+        (line,) = _stata_remove_rows({"method": "by row index", "value": value}, "")
+        assert line.startswith("drop if ")
+        assert "drop in" not in line
+        expr = (
+            line.removeprefix("drop if ")
+            .replace("|", " or ")
+            .replace("_N", str(n_rows))
+            .replace("inrange", "_inrange")
+        )
+        dropped = {
+            n - 1
+            for n in range(1, n_rows + 1)
+            if eval(expr, {"_inrange": lambda x, a, b: a <= x <= b, "_n": n})
+        }
+        assert dropped == expected_drop
+
+    def test_by_index_no_values_is_note(self):
+        lines = _stata_remove_rows({"method": "by row index", "value": [","]}, "")
+        assert lines[0].startswith("* NOTE")
 
     def test_missing_condition(self):
         lines = _stata_remove_rows(
@@ -253,15 +314,15 @@ class TestStataRemoveRows:
         )
         assert lines == ["drop if !missing(a)", "drop if !missing(b)"]
 
-    def test_no_cols_no_condition_returns_note(self):
-        lines = _stata_remove_rows({}, "")
-        assert "NOTE" in lines[0]
+    def test_no_cols_no_condition_is_untranslatable(self):
+        with pytest.raises(_UntranslatableStepError):
+            _stata_remove_rows({}, "")
 
-    def test_unknown_condition_returns_note(self):
-        lines = _stata_remove_rows(
-            {"source_columns": ["col"], "condition": "something weird"}, ""
-        )
-        assert "NOTE" in lines[0]
+    def test_unknown_condition_is_untranslatable(self):
+        with pytest.raises(_UntranslatableStepError, match="something weird"):
+            _stata_remove_rows(
+                {"source_columns": ["col"], "condition": "something weird"}, ""
+            )
 
 
 class TestStataTransformColumn:
@@ -331,11 +392,11 @@ class TestStataTransformColumn:
         )
         assert "tabulate" in lines[0]
 
-    def test_unknown_method_returns_note(self):
-        lines = _stata_transform_column(
-            {"source_columns": ["col"], "method": "unknown_method"}, ""
-        )
-        assert "NOTE" in lines[0]
+    def test_unknown_method_is_untranslatable(self):
+        with pytest.raises(_UntranslatableStepError, match="unknown_method"):
+            _stata_transform_column(
+                {"source_columns": ["col"], "method": "unknown_method"}, ""
+            )
 
     def test_string_to_number(self):
         lines = _stata_transform_column(
@@ -518,9 +579,9 @@ class TestStataAddColumn:
         )
         assert 'cond(uid == "" | `v\' == "", "", char(96) + "v\'")' in lines[2]
 
-    def test_uuid_note(self):
-        lines = _stata_add_column({"column_names": "uid", "method": "uuid"}, "")
-        assert "NOTE" in lines[0]
+    def test_uuid_is_untranslatable(self):
+        with pytest.raises(_UntranslatableStepError, match="uid"):
+            _stata_add_column({"column_names": "uid", "method": "uuid"}, "")
 
     def test_random(self):
         lines = _stata_add_column({"column_names": "rnd", "method": "random"}, "")
@@ -576,9 +637,9 @@ class TestStataAddColumn:
         )
         assert "gen q = a / b" in lines[0]
 
-    def test_unknown_method_returns_note(self):
-        lines = _stata_add_column({"column_names": "nc", "method": "unknown"}, "")
-        assert "NOTE" in lines[0]
+    def test_unknown_method_is_untranslatable(self):
+        with pytest.raises(_UntranslatableStepError, match="unknown"):
+            _stata_add_column({"column_names": "nc", "method": "unknown"}, "")
 
     def test_min_aggregation(self):
         lines = _stata_add_column(
@@ -685,6 +746,98 @@ class TestGeneratePrepareDataScript:
         )
         result = generate_prepare_data_script(log, "P", "S", "0.1")
         assert "Removes old column" in result
+
+    def test_untranslatable_step_is_note_and_warning(self):
+        log = pl.DataFrame(
+            {
+                "action": ["remove row(s)", "remove column(s)"],
+                "description": ["Remove rows", "Drop col"],
+                "prep_args": [
+                    '{"method": "by row index", "value": ["abc"]}',
+                    '{"source_columns": ["x"]}',
+                ],
+                "action_index": [1, 2],
+            }
+        )
+        warnings: list[str] = []
+        result = generate_prepare_data_script(
+            log, "P", "S", "0.1", on_warning=warnings.append
+        )
+        assert "* NOTE: step 1 could not be translated" in result
+        assert "drop x" in result
+        assert len(warnings) == 1
+        assert "Step 1" in warnings[0]
+
+    @pytest.mark.parametrize(
+        ("action", "prep_args", "reason"),
+        [
+            (
+                "add new column",
+                '{"column_names": "uid", "method": "uuid"}',
+                "no direct Stata equivalent",
+            ),
+            (
+                "transform column(s)",
+                '{"source_columns": ["c"], "method": "unknown_method"}',
+                "not supported",
+            ),
+            (
+                "remove row(s)",
+                '{"source_columns": ["c"], "condition": "something weird"}',
+                "not supported",
+            ),
+            ("mystery action", "{}", "unknown action 'mystery action'"),
+        ],
+    )
+    def test_unsupported_step_without_error_still_warns(
+        self, action, prep_args, reason
+    ):
+        log = pl.DataFrame(
+            {
+                "action": [action, "remove column(s)"],
+                "description": ["Step one", "Drop col"],
+                "prep_args": [prep_args, '{"source_columns": ["x"]}'],
+                "action_index": [1, 2],
+            }
+        )
+        warnings: list[str] = []
+        result = generate_prepare_data_script(
+            log, "P", "S", "0.1", on_warning=warnings.append
+        )
+        assert "* NOTE: step 1 could not be translated" in result
+        assert reason in result
+        assert "drop x" in result
+        assert len(warnings) == 1
+        assert "Step 1 (Step one)" in warnings[0]
+        assert reason in warnings[0]
+
+    def test_empty_row_index_step_is_note_without_warning(self):
+        log = pl.DataFrame(
+            {
+                "action": ["remove row(s)"],
+                "description": ["Remove rows"],
+                "prep_args": ['{"method": "by row index", "value": [","]}'],
+                "action_index": [1],
+            }
+        )
+        warnings: list[str] = []
+        result = generate_prepare_data_script(
+            log, "P", "S", "0.1", on_warning=warnings.append
+        )
+        assert "NOTE: no row indices provided" in result
+        assert warnings == []
+
+    def test_range_step_end_to_end(self):
+        log = pl.DataFrame(
+            {
+                "action": ["remove row(s)"],
+                "description": ["Remove rows"],
+                "prep_args": ['{"method": "by row index", "value": ["0:30"]}'],
+                "action_index": [1],
+            }
+        )
+        result = generate_prepare_data_script(log, "P", "S", "0.1")
+        assert "drop if inrange(_n, 1, 31)" in result
 
     def test_returns_string(self):
         log = pl.DataFrame(

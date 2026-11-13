@@ -12,12 +12,16 @@ from pydantic import ValidationError
 from datasure.models.schemas import ProjectConfigBundle
 from datasure.utils.cache_utils import get_cache_path
 from datasure.utils.config_utils import ConfigurationService
+from datasure.utils.demo_lifecycle import (
+    DEMO_NOTICE_SCOPE,
+    DEMO_RESET_FAILED_MESSAGE,
+    RESTART_DEMO_MESSAGE,
+    reset_demo_project,
+)
 from datasure.utils.duckdb_utils import duckdb_get_aliases
 from datasure.utils.onboarding_utils import (
     DEMO_PROJECT_ID,
-    create_demo_project,
-    load_demo_data,
-    set_onboarding_step,
+    DEMO_PROJECT_NAME,
     show_demo_intro,
 )
 from datasure.utils.project_config import (
@@ -26,7 +30,8 @@ from datasure.utils.project_config import (
     render_config_resolution_and_apply,
     render_project_config_wizard,
 )
-from datasure.utils.ui_utils import confirm_dialog
+from datasure.utils.project_registry import read_registry, update_registry
+from datasure.utils.ui_utils import confirm_dialog, queue_notice, show_queued_notices
 
 logger = logging.getLogger(__name__)
 
@@ -101,13 +106,8 @@ def valid_project_name(project_name: str) -> bool:
 
 
 def load_projects() -> dict:
-    """Load available projects from the local directory."""
-    projects_file = get_cache_path(PROJECTS_FILE)
-    if projects_file.exists():
-        with open(projects_file) as f:
-            projects = json.load(f)
-        return projects
-    return {}
+    """Load available projects from the registry (``{}`` if missing or corrupt)."""
+    return read_registry(get_cache_path(PROJECTS_FILE))
 
 
 def _now_str() -> str:
@@ -115,11 +115,9 @@ def _now_str() -> str:
     return datetime.now().strftime("%Y-%m-%d %H:%M:%S")
 
 
-def _save_projects(projects: dict) -> None:
-    """Write the full projects registry back to disk."""
-    projects_file = get_cache_path(PROJECTS_FILE)
-    with open(projects_file, "w") as f:
-        json.dump(projects, f, indent=4)
+def _update_projects(mutate) -> bool:
+    """Read-modify-write the registry under its lock; see ``update_registry``."""
+    return update_registry(get_cache_path(PROJECTS_FILE), mutate)
 
 
 def save_project(project_name: str, project_id: str):
@@ -146,15 +144,17 @@ def save_project(project_name: str, project_id: str):
             created_at = _now_str()
             with open(project_info_path, "w") as f:
                 json.dump({"created_at": created_at}, f, indent=4)
-    last_used = _now_str()
-    projects = load_projects() or {}
     new_project = {
         "name": project_name,
         "created_at": created_at,
-        "last_used": last_used,
+        "last_used": _now_str(),
     }
-    projects[project_id] = new_project
-    _save_projects(projects)
+
+    def _register(projects: dict) -> bool:
+        projects[project_id] = new_project
+        return True
+
+    _update_projects(_register)
 
 
 def delete_project(project_id: str):
@@ -163,11 +163,7 @@ def delete_project(project_id: str):
         st.error(f"Invalid project ID: {project_id}")
         return
 
-    projects = load_projects()
-    if project_id in projects:
-        projects.pop(project_id)
-        _save_projects(projects)
-
+    if _update_projects(lambda projects: projects.pop(project_id, None) is not None):
         project_path = get_cache_path(project_id)
 
         if project_path.exists():
@@ -177,29 +173,61 @@ def delete_project(project_id: str):
         st.error(f"Project '{project_id}' does not exist.")
 
 
+def _record_last_used(project_id: str) -> None:
+    """Stamp ``last_used`` on a project in the registry.
+
+    Keeps the home page's "Last used" caption and sort truthful, and gives
+    tools that manage the cache an on-disk record of which project was opened
+    most recently. ``last_used`` changes when a project is opened, not while
+    it is in use, so its age says nothing about whether someone is still
+    working in it: DataSure has no "close project" action (going back to the
+    home page keeps the project in the session), and Streamlit has no event
+    for a session ending. A host should treat a change in ``last_used`` as
+    that project being opened, and judge whether a project is still in use
+    from its own signals. See docs/ARCHITECTURE.md.
+
+    A registry that can't be written is logged, never fatal: opening the
+    project matters more.
+    """
+
+    def _stamp(projects: dict) -> bool:
+        if project_id not in projects:
+            return False
+        projects[project_id]["last_used"] = _now_str()
+        return True
+
+    try:
+        _update_projects(_stamp)
+    except (OSError, ValueError):
+        logger.warning("Could not record last_used for project %s", project_id)
+
+
 def _activate_project(project_id: str) -> None:
     """Set the active project and jump to the Import Data page."""
     st.session_state.st_project_id = project_id
+    _record_last_used(project_id)
     ConfigurationService(project_id).sync_output_view_files()
     st.switch_page(st.session_state.st_import_data_page)
 
 
 def _launch_fresh_demo():
-    """Create a clean demo project and navigate to the import page."""
-    demo_project_id = create_demo_project()
-    st.session_state.st_project_id = demo_project_id
-    set_onboarding_step(1)
+    """Rebuild the demo project from scratch and navigate to the import page.
+
+    On failure the error is queued and the page reruns, so it shows on the
+    demo row whether this ran from the Start button or the Restart dialog.
+    """
     with st.spinner("Loading demo data..."):
-        if load_demo_data():
-            st.session_state.st_project_id = demo_project_id
-            set_onboarding_step(2)
-            st.switch_page(st.session_state.st_import_data_page)
-        else:
-            st.error("Failed to load demo data. Please try again.")
+        reset = reset_demo_project()
+    if reset:
+        st.switch_page(st.session_state.st_import_data_page)
+        return
+    queue_notice(DEMO_NOTICE_SCOPE, "error", DEMO_RESET_FAILED_MESSAGE)
+    st.rerun()
 
 
 def _render_demo_row() -> None:
     """Render the pinned DataSure Demo row."""
+    show_queued_notices(DEMO_NOTICE_SCOPE)
     demo_exists = DEMO_PROJECT_ID in load_projects()
 
     if not demo_exists:
@@ -208,11 +236,11 @@ def _render_demo_row() -> None:
     with st.container(border=True):
         name_col, action_col = st.columns([0.7, 0.3])
         with name_col:
-            st.markdown(":material/school: **DataSure Demo**")
+            st.markdown(f":material/school: **{DEMO_PROJECT_NAME}**")
             st.caption("A pre-loaded sample project for exploring DataSure.")
         with action_col:
             if demo_exists:
-                resume_col, restart_col = st.columns(2)
+                resume_col, restart_col, export_col = st.columns(3)
                 with resume_col:
                     if st.button(
                         "Resume", type="primary", width="stretch", key="demo_resume"
@@ -222,13 +250,18 @@ def _render_demo_row() -> None:
                     if st.button("Restart", width="stretch", key="demo_restart"):
                         confirm_dialog(
                             "Restart demo",
-                            "Restarting will permanently delete all your demo "
-                            "progress, including any corrections and data "
-                            "preparation steps you have made. This cannot be "
-                            "undone.",
+                            RESTART_DEMO_MESSAGE,
                             confirm_label="Restart demo",
                             on_confirm=_launch_fresh_demo,
                         )
+                with export_col:
+                    if st.button(
+                        "Export",
+                        width="stretch",
+                        key="demo_export",
+                        help="Export the demo's configuration to a file.",
+                    ):
+                        _export_config_dialog(DEMO_PROJECT_NAME, DEMO_PROJECT_ID)
             else:
                 if st.button(
                     "Start Demo", type="primary", width="stretch", key="demo_start"

@@ -50,7 +50,8 @@ src/datasure/
 ├── processing/
 │   ├── prep.py             # Data preparation operations (Polars)
 │   ├── corrections.py      # Corrections and accept entries (CorrectionProcessor)
-│   └── correction_log.py   # Correction log schema/backfill, Action enum (no Streamlit)
+│   ├── correction_log.py   # Correction log schema/backfill, Action enum (no Streamlit)
+│   └── row_index.py        # Row-index parsing shared by prep and replication (no Streamlit)
 ├── replication/            # Stata/Python replication package export
 ├── models/
 │   ├── schemas.py          # Pydantic models
@@ -444,7 +445,20 @@ Per project (UUID-keyed):
   codes `missing_codes_{project_id}`), JSON settings (including
   each check page's, Prepare Data's and Corrections'
   [view state](#view-state)), and credential metadata
-- `cache/projects.json` — the project registry
+- `cache/projects.json` — the project registry: `name`, `created_at`, and
+  `last_used`. All reads and writes go through `utils/project_registry.py`:
+  updates hold an OS lock on `projects.json.lock` so sessions sharing one
+  cache can't overwrite each other's changes, and each write replaces the
+  file in one step so a failed write leaves the previous registry intact. A
+  corrupt registry reads as empty, and the next write keeps it as
+  `projects.json.corrupt`. `last_used` is stamped whenever a project is
+  opened from the home page. It changes when a project is opened, not while
+  it is in use, so its age says nothing about whether the project is still
+  open: DataSure has no "close project" action (the home page keeps the
+  project in the session) and Streamlit has no session-end event. A host
+  that locks projects per user should treat a change in `last_used` as that
+  project being opened, and judge whether a project is still in use from
+  its own signals, such as session shutdown or recent file changes.
 - `cache/user_settings.json` — per-user preferences, currently the
   "Reviewer name" recorded as `user` in correction logs
   (`utils/reviewer.py`). Display names only, never credentials.
@@ -499,6 +513,15 @@ travel.
   ticked by default, and builds the bundle only once the dialog opens. Apply
   writes whatever the bundle holds; attribution rows for records that don't
   exist are kept but match nothing.
+- **Import sources.** `ImportSourceEntry.source` is `"SurveyCTO"`,
+  `"local storage"` or `"Demo Data"`; any other value fails
+  `parse_project_config`, so a bundle that can't import is rejected before
+  apply. Apply asks for a sign-in per SurveyCTO server and a path per local
+  file. A `"Demo Data"` dataset needs neither: `_import_demo_dataset` rebuilds
+  it with `onboarding_utils.build_demo_datasets`, the same builder the demo
+  uses, because the demo's raw tables carry generated fields the packaged
+  CSVs don't. The apply result shows as an error, not a success, when no
+  dataset was imported and no page created.
 - **Pages.** Apply creates a page only when no page has its name and its
   survey dataset was imported. Only then are its settings file and check
   tables written, so an existing page keeps its own.
@@ -520,6 +543,21 @@ travel.
 `st_output_pages`, ...). View modules are page scripts: they run top to bottom
 on every rerun and guard on `st_project_id`, calling `st.stop()` when no
 project is selected. If cross-page state looks corrupted, check `app.py` first.
+
+The demo project (`demoproject`) is started, restarted and exited through
+`utils/demo_lifecycle.py`. `reset_demo_project()` deletes everything under
+`cache/demoproject/` and reloads the bundled demo data; both Restart actions
+use it. If the folder cannot be deleted or the data cannot be loaded, it
+removes the demo from `projects.json` and leaves it, so a partly deleted demo
+is never offered for Resume; both Restart actions then show the error on the
+Start page's demo row (`DEMO_NOTICE_SCOPE`). Both `reset_demo_project()` and `exit_demo()` clear every session
+key except the app-wide ones (the page handles `app.py` builds each run, the
+reviewer name and queued messages) and other projects' navigation keys, then
+restore the defaults in `utils/session_defaults.py` that `app.py` also sets.
+A new view's session state is therefore cleared without being listed, and
+the next project opens without demo datasets, pages or a stale replication
+package. A new app-wide key must be added to `_APP_WIDE_KEYS` in
+`demo_lifecycle.py` to survive Exit Demo.
 
 The check page last viewed is not session state: see
 [View state](#view-state) ("Last viewed check page").

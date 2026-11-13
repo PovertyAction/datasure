@@ -23,6 +23,7 @@ from datasure.models.enums import (
     PrepOperations,
     PrepRowConditions,
 )
+from datasure.processing.row_index import parse_row_indices, resolve_row_positions
 from datasure.utils.duckdb_utils import duckdb_get_table, duckdb_save_table
 from datasure.utils.prep_utils import (
     PrepActionResult,
@@ -261,16 +262,11 @@ class RemoveRowsOperation(PrepOperation):
 
     def _remove_by_index(self, data: pl.DataFrame, index_values: list) -> pl.DataFrame:
         """Remove rows by index positions."""
-        rows_to_drop = []
-        for item in index_values:
-            if item in [",", None]:
-                continue
-            if isinstance(item, str) and ":" in item:
-                # Handle range like "1:3"
-                start, end = item.split(":")
-                rows_to_drop.extend(range(int(start), int(end) + 1))
-            else:
-                rows_to_drop.append(int(item))
+        try:
+            spans = parse_row_indices(index_values)
+        except ValueError as e:
+            raise ValidationError(str(e)) from e
+        rows_to_drop = list(resolve_row_positions(spans, data.height))
 
         # Create row number column for filtering
         data_with_idx = data.with_row_index("__row_idx__")

@@ -57,6 +57,8 @@ from datasure.utils.navigations_utils import (
     show_demo_next_action,
 )
 from datasure.utils.onboarding_utils import (
+    DemoBackcheckColumn,
+    DemoColumn,
     ImportDemoInfo,
     demo_expander,
     is_demo_project,
@@ -974,7 +976,12 @@ class PrepStepHandler:
         """
         row_index_text = st.text_input(
             label="Enter row index",
-            help="Enter row index to remove eg. 1, 2, 3, -5, 5:-2",
+            help=(
+                "Row positions to remove, separated by commas. The first row "
+                "is 0. Use a:b for a range that includes both ends, and a "
+                "negative number to count from the end (-1 is the last row). "
+                "E.g. 0, 3, 10:20, -5, 5:-2"
+            ),
             key=f"st_sb_del_rows_idx{self.step_index}",
         )
         if row_index_text:
@@ -1332,7 +1339,8 @@ def render_dataset(item: NavItem, step_index: int, tables: PrepTables) -> None:
     if is_demo_project():
         demo_callout(
             "Use **:material/add: Add data prep step** to transform your data. "
-            "The only required step is converting **submissiondate** to datetime — "
+            f"The only required step is converting **{DemoColumn.SUBMISSIONDATE}** "
+            "to datetime — "
             "all other transformations are optional.",
         )
 
@@ -1383,7 +1391,8 @@ def render_dataset(item: NavItem, step_index: int, tables: PrepTables) -> None:
         if is_demo_project():
             demo_callout(
                 f"Here's your **{alias}** data. Notice the data quality issues like missing values "
-                f"({miss_perc:.1f}% missing) that we'll identify in **Configure Quality Checks**.",
+                f"({miss_perc:.1f}% missing) that the quality reports will find once "
+                "you configure your checks.",
                 "info",
             )
 
@@ -1481,17 +1490,19 @@ if is_demo_project():
 
     if not prep_log_survey.is_empty() and not prep_log_backcheck.is_empty():
         # check that the correct prep steps have been added
-        pattern = r'"submissiondate"\s+updated\s+using\s+string\s+to\s+datetime'
-        if prep_log_survey["description"].str.contains(pattern).any():
-            enable_next_count += 1
-
-        if prep_log_backcheck["description"].str.contains(pattern).any():
-            enable_next_count += 1
+        for prep_log, date_column in (
+            (prep_log_survey, DemoColumn.SUBMISSIONDATE),
+            (prep_log_backcheck, DemoBackcheckColumn.SUBMISSIONDATE),
+        ):
+            pattern = rf'"{date_column}"\s+updated\s+using\s+string\s+to\s+datetime'
+            if prep_log["description"].str.contains(pattern).any():
+                enable_next_count += 1
 
     if enable_next_count < 2:
         demo_callout(
             "The **Configure Quality Checks** button will be enabled once you have converted "
-            "the **submissiondate** column to datetime in both **demo_survey** and **demo_backcheck**. "
+            f"the **{DemoColumn.SUBMISSIONDATE}** column to datetime in both "
+            "**demo_survey** and **demo_backcheck**. "
             "Follow the guidance at the top of the page to complete this step.",
             "warning",
         )
