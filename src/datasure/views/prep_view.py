@@ -26,7 +26,25 @@ from datasure.processing.prep import (
     ValidationError,
     prep_apply_action,
 )
+from datasure.processing.rename_plan import (
+    CASES,
+    MODE_CASE,
+    MODE_WILDCARD,
+    ByName,
+    ChangeCase,
+    RegexRename,
+    RenamePlan,
+    RenameSpec,
+    Wildcard,
+    plan_rename,
+    spec_from_args,
+    spec_to_args,
+)
 from datasure.utils.cache_utils import get_cache_path
+from datasure.utils.column_references import (
+    find_column_references,
+    format_references,
+)
 from datasure.utils.dataframe_utils import (
     ColumnByType,
     TableState,
@@ -146,6 +164,10 @@ class PrepViewConfig:
 
         # Get row deletion methods from prep_utils
         self.DP_DEL_METHODS = tuple(self.descriptions.DEL_METHODS.keys())
+
+        # Rename methods and pattern modes
+        self.DP_RENAME_METHODS = tuple(self.descriptions.RENAME_METHODS.keys())
+        self.DP_RENAME_MODES = tuple(self.descriptions.RENAME_MODES.keys())
 
         # Get function categories from prep_utils
         self.DP_FUNCS = tuple(self.descriptions.FUNC_CATEGORIES.keys())
@@ -318,6 +340,57 @@ def _is_remove_row_incomplete(prep_args: dict) -> bool:
     return False
 
 
+def _rename_spec(prep_args: dict) -> RenameSpec | None:
+    """Return the rename a form's args describe, or None if they don't."""
+    try:
+        return spec_from_args(prep_args.get("method"), prep_args.get("value"))
+    except ValueError:
+        return None
+
+
+def _is_rename_incomplete(prep_args: dict, existing_columns: Sequence[str]) -> bool:
+    """A rename can be added only when its plan renames something cleanly.
+
+    The plan must have at least one pair and no collisions, empty names or
+    errors: the same plan the step applies.
+    """
+    spec = _rename_spec(prep_args)
+    return spec is None or not plan_rename(existing_columns, spec).can_apply
+
+
+def _rename_pairs_from_rows(rows: list[dict]) -> tuple[tuple[str, str], ...]:
+    """Turn the by-name table's rows into (old, new) pairs.
+
+    Rows with neither name are dropped. A row with an old name but no new
+    one becomes a pair with an empty new name, which the plan flags.
+    """
+    pairs = []
+    for row in rows:
+        # The data editor gives NaN or None for an empty cell.
+        old, new = (
+            value.strip() if isinstance(value, str) else ""
+            for value in (row.get("old"), row.get("new"))
+        )
+        if old:
+            pairs.append((old, new))
+    return tuple(pairs)
+
+
+def _rename_preview(plan: RenamePlan) -> pl.DataFrame:
+    """Return the old → new preview of a rename plan, one row per pair.
+
+    The Problem column says why a row's new name can't be used.
+    """
+    return pl.DataFrame(
+        {
+            "Old name": plan.old_names,
+            "New name": plan.new_names,
+            "Problem": [plan.problems.get(old, "") for old in plan.old_names],
+        },
+        schema={"Old name": pl.String, "New name": pl.String, "Problem": pl.String},
+    )
+
+
 def _is_prep_form_incomplete(
     action: str, prep_args: dict, existing_columns: Sequence[str] = ()
 ) -> bool:
@@ -341,6 +414,9 @@ def _is_prep_form_incomplete(
         PrepActions.transform_column.value: _is_transform_column_incomplete,
         PrepActions.remove_column.value: lambda args: not args.get("source_columns"),
         PrepActions.remove_row.value: _is_remove_row_incomplete,
+        PrepActions.rename_column.value: lambda args: _is_rename_incomplete(
+            args, existing_columns
+        ),
     }
 
     validator = validators.get(action)
@@ -1006,6 +1082,142 @@ class PrepStepHandler:
             )
         return inputs
 
+    def rename_column_handler(self) -> dict | None:
+        """Handle the rename column(s) UI: by name or by pattern, with a preview."""
+        method = st.selectbox(
+            label="Select Method",
+            options=config.DP_RENAME_METHODS,
+            key=f"st_sb_rename_method{self.step_index}",
+            help="By name: list each column and its new name. By pattern: "
+            "rename every column matching a pattern.",
+        )
+        if method == PrepMethods.by_name.value:
+            spec = self._rename_by_name_inputs()
+        else:
+            spec = self._rename_by_pattern_inputs()
+        if spec is None:
+            return None
+
+        plan = plan_rename(self.all_cols, spec)
+        self._show_rename_preview(spec, plan)
+        method, value = spec_to_args(spec)
+        return {
+            "action": PrepActions.rename_column.value,
+            "column_names": plan.new_names,
+            "affected_count": len(plan.pairs),
+            "remaining_count": self.prep_data.shape[1],
+            "value": value,
+            "method": method,
+            "source_columns": plan.old_names,
+            "condition": None,
+            "failed_count": None,
+            "additional_info": None,
+        }
+
+    def _rename_by_name_inputs(self) -> ByName | None:
+        """Render the old → new table; None until a row has an old name."""
+        empty = pd.DataFrame(
+            {"old": pd.Series(dtype="object"), "new": pd.Series(dtype="object")}
+        )
+        edited = st.data_editor(
+            empty,
+            column_config={
+                "old": st.column_config.SelectboxColumn(
+                    "Column to rename", options=list(self.all_cols)
+                ),
+                "new": st.column_config.TextColumn("New name"),
+            },
+            num_rows="dynamic",
+            hide_index=True,
+            width="stretch",
+            key=f"st_de_rename_pairs{self.step_index}",
+        )
+        pairs = _rename_pairs_from_rows(edited.to_dict("records"))
+        return ByName(pairs) if pairs else None
+
+    def _rename_by_pattern_inputs(self) -> RenameSpec | None:
+        """Render the chosen pattern mode's inputs; None until they're filled."""
+        mode = st.selectbox(
+            label="Pattern type",
+            options=config.DP_RENAME_MODES,
+            format_func=lambda m: m.capitalize(),
+            key=f"st_sb_rename_mode{self.step_index}",
+            help="\n\n".join(
+                f"**{m.capitalize()}**: {d}"
+                for m, d in config.descriptions.RENAME_MODES.items()
+            ),
+        )
+        key = f"{self.step_index}_{mode}"
+        if mode == MODE_CASE:
+            case = st.radio(
+                "Change names to",
+                options=CASES,
+                format_func=lambda c: f"{c}case",
+                horizontal=True,
+                key=f"st_rd_rename_case{key}",
+            )
+            name_filter = st.text_input(
+                "Only columns matching",
+                value="*",
+                help="A wildcard pattern: * matches any run of characters and "
+                "? exactly one. Leave * to change every column.",
+                key=f"st_ti_rename_filter{key}",
+            )
+            return ChangeCase(case, name_filter or "*")
+
+        if mode == MODE_WILDCARD:
+            old_label, new_label = "Old pattern", "New pattern"
+            old_help = (
+                "* matches any run of characters, including none, and ? exactly "
+                "one. The pattern must match the whole name, e.g. grp_* or *_old."
+            )
+            new_help = (
+                "Each * or ? is filled, in order, with what the old pattern's "
+                "wildcards matched, e.g. * or *_new. Use as many wildcards as "
+                "the old pattern."
+            )
+        else:
+            old_label, new_label = "Regex", "Replacement"
+            old_help = (
+                "A Python regular expression matched against the whole name. "
+                r"For example, q(\d+)_(\w+) with replacement \2_q\1 renames "
+                "q1_age to age_q1."
+            )
+            new_help = r"The new name. \1, \2 and so on insert the regex's groups."
+        old = st.text_input(old_label, help=old_help, key=f"st_ti_rename_old{key}")
+        new = st.text_input(new_label, help=new_help, key=f"st_ti_rename_new{key}")
+        if not old and not new:
+            return None
+        return Wildcard(old, new) if mode == MODE_WILDCARD else RegexRename(old, new)
+
+    def _show_rename_preview(self, spec: RenameSpec, plan: RenamePlan) -> None:
+        """Show the old → new preview, with each problem on its row."""
+        if plan.error:
+            st.error(plan.error, icon=":material/error:")
+            return
+        if plan.missing:
+            st.warning(
+                "Not columns in this dataset: "
+                + ", ".join(f"'{name}'" for name in plan.missing),
+                icon=":material/warning:",
+            )
+        if not plan.pairs:
+            nothing = (
+                "No columns match this pattern."
+                if not isinstance(spec, ByName) and not plan.matched
+                else "No column names would change."
+            )
+            st.info(nothing, icon=":material/info:")
+            return
+        count = len(plan.pairs)
+        st.caption(f"Preview: {count} {'column' if count == 1 else 'columns'} renamed")
+        st.dataframe(_rename_preview(plan), hide_index=True, width="stretch")
+        if plan.problems:
+            st.error(
+                "Fix the names flagged in the preview before adding this step.",
+                icon=":material/error:",
+            )
+
     def remove_column_handler(self) -> dict | None:
         """Handle remove column UI and logic."""
         dp_prep_del_cols = st.multiselect(
@@ -1212,6 +1424,9 @@ def prep_add_step(
         elif dp_prep_action == PrepActions.remove_row.value:
             prep_args = prep_handler.remove_rows_handler()
 
+        elif dp_prep_action == PrepActions.rename_column.value:
+            prep_args = prep_handler.rename_column_handler()
+
         if prep_args is None:
             st.warning("Please complete the form to add a new preparation step.")
             return
@@ -1228,19 +1443,78 @@ def prep_add_step(
             help="Add the data preparation step to the log",
             disabled=disable_add,
         ):
-            # apply action and re-run
-            try:
-                prep_apply_action(project_id, alias, PrepActionResult(**prep_args))
-            except (ValidationError, OperationError) as e:
-                st.error(f"Error adding preparation step: {e!s}")
+            if dp_prep_action == PrepActions.rename_column.value:
+                _add_rename_step(alias, prep_args)
             else:
-                queue_notice(
-                    _notice_scope(alias),
-                    "success",
-                    "Preparation step added successfully!",
-                )
-                _refresh_corrected_data(alias)
-                st.rerun()
+                _add_step(alias, prep_args)
+
+
+def _add_step(alias: str, prep_args: dict) -> None:
+    """Apply a new step and rerun, or show why it failed."""
+    try:
+        prep_apply_action(project_id, alias, PrepActionResult(**prep_args))
+    except (ValidationError, OperationError) as e:
+        st.error(f"Error adding preparation step: {e!s}")
+    else:
+        queue_notice(
+            _notice_scope(alias), "success", "Preparation step added successfully!"
+        )
+        _refresh_corrected_data(alias)
+        st.rerun()
+
+
+def _add_step_after_confirm(alias: str, prep_args: dict) -> None:
+    """Apply a new step from a confirm dialog, which reruns afterwards."""
+    try:
+        prep_apply_action(project_id, alias, PrepActionResult(**prep_args))
+    except (ValidationError, OperationError) as e:
+        queue_notice(
+            _notice_scope(alias), "error", f"Error adding preparation step: {e!s}"
+        )
+    else:
+        queue_notice(
+            _notice_scope(alias), "success", "Preparation step added successfully!"
+        )
+        _refresh_corrected_data(alias)
+
+
+def _add_rename_step(alias: str, prep_args: dict) -> None:
+    """Add a rename step, first warning if checks or corrections use the columns.
+
+    Nothing is rewritten: the dialog lists what will stop matching and lets
+    the user rename anyway.
+    """
+    renamed = list(prep_args.get("source_columns") or [])
+    # UI boundary: the lookup only reads settings, so if it fails the user is
+    # told (in the dialog below) and can still decide whether to rename.
+    try:
+        references = find_column_references(project_id, alias, renamed)
+        lookup_error = None
+    except Exception as e:
+        logger.exception("Could not check where columns of %s are used", alias)
+        references, lookup_error = [], str(e)
+
+    if not references and not lookup_error:
+        _add_step(alias, prep_args)
+        return
+
+    if lookup_error:
+        body = (
+            "DataSure couldn't check whether check settings or corrections use "
+            f"these columns ({lookup_error}). Rename them anyway?"
+        )
+    else:
+        body = (
+            "Check settings or corrections use these columns. After renaming, "
+            "they won't find them until you update them. Nothing is changed "
+            "for you.\n\n" + format_references(references)
+        )
+    confirm_dialog(
+        "Rename columns in use",
+        body,
+        confirm_label="Rename anyway",
+        on_confirm=lambda: _add_step_after_confirm(alias, prep_args),
+    )
 
 
 # --- Remove Preparation Step ---#

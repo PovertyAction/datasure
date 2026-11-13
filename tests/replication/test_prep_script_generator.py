@@ -938,3 +938,85 @@ class TestDuplicateColumnScript:
         )
         assert "gen visit date" not in script
         assert len(warnings) == 1
+
+
+def _rename_args(method: str, value: list, pairs: list[tuple[str, str]]) -> dict:
+    return {
+        "action": "rename column(s)",
+        "method": method,
+        "value": value,
+        "source_columns": [old for old, _ in pairs],
+        "column_names": [new for _, new in pairs],
+    }
+
+
+def _script(*steps: tuple[str, dict], status: str | None = None) -> tuple[str, list]:
+    warnings: list[str] = []
+    log = _log(*steps)
+    if status:
+        log = log.with_columns(pl.lit(status).alias("status"))
+    script = generate_prepare_data_script(
+        log, "P", "S", "0.1", on_warning=warnings.append
+    )
+    return script, warnings
+
+
+class TestRenameScript:
+    """A rename step becomes one rename (old …) (new …) from its recorded pairs."""
+
+    def test_by_name_uses_the_recorded_pairs(self):
+        args = _rename_args(
+            "by name", [["a", "b"], ["b", "a"], ["gone", "x"]], [("a", "b"), ("b", "a")]
+        )
+        script, warnings = _script(("rename column(s)", args))
+
+        lines = [line.strip() for line in script.splitlines()]
+        assert "rename (a b) (b a)" in lines
+        assert "gone" not in script
+        assert warnings == []
+
+    def test_pattern_step_has_a_comment_with_the_pattern(self):
+        args = _rename_args(
+            "by pattern", ["wildcard", "x_*", "y_*"], [("x_1", "y_1"), ("x_5", "y_5")]
+        )
+        script, warnings = _script(("rename column(s)", args))
+
+        lines = [line.strip() for line in script.splitlines()]
+        rename = lines.index("rename (x_1 x_5) (y_1 y_5)")
+        assert lines[rename - 1] == '* Pattern: matching "x_*" to "y_*"'
+        assert warnings == []
+
+    @pytest.mark.parametrize(
+        "value", [["change case", "lower", "Q*"], ["regex", r"q(\d+)", "item\1"]]
+    )
+    def test_case_and_regex_steps_are_translated_with_a_comment(self, value):
+        args = _rename_args("by pattern", value, [("Q1", "q1")])
+        script, warnings = _script(("rename column(s)", args))
+
+        assert "rename (Q1) (q1)" in script
+        assert "* Pattern: matching" in script
+        assert warnings == []
+
+    def test_step_without_recorded_pairs_is_a_note_and_warning(self):
+        args = _rename_args("by pattern", ["wildcard", "x*", "y*"], [])
+        script, warnings = _script(("rename column(s)", args))
+
+        assert "rename (" not in script
+        assert "NOTE" in script
+        assert len(warnings) == 1
+
+    def test_new_name_stata_cannot_use_is_a_note_and_warning(self):
+        args = _rename_args("by name", [["a", "visit date"]], [("a", "visit date")])
+        script, warnings = _script(("rename column(s)", args))
+
+        assert "rename (" not in script
+        assert len(warnings) == 1
+        assert "Stata" in warnings[0]
+
+    def test_step_that_failed_in_datasure_is_skipped(self):
+        args = _rename_args("by name", [["a", "b"]], [("a", "b")])
+        script, warnings = _script(("rename column(s)", args), status="Failed")
+
+        assert "rename (" not in script
+        assert "failed the last time" in script
+        assert warnings == []

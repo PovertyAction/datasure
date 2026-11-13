@@ -9,6 +9,48 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Rename columns** (#446): new Prep action **rename column(s)**
+  (`PrepActions.rename_column`), with methods **by name** and **by pattern**
+  (`PrepMethods.by_name`, `PrepMethods.by_pattern`)
+  - `processing/rename_plan.py` (Streamlit-free) holds the rename plan:
+    `plan_rename(columns, spec)` resolves a `ByName`, `Wildcard`,
+    `ChangeCase` or `RegexRename` spec into a `RenamePlan`. The plan has the
+    pairs in column order, the collisions, invalid (empty) names, missing by-name
+    columns, the matched columns, per-row `problems`, and a spec-level
+    `error`. Renames apply all at once, so swaps and chains are allowed. Names
+    are compared ignoring case, as DuckDB does. Wildcards are Stata's `*` and
+    `?`, matched against the whole name, with earlier `*`s matching greedily;
+    `#` and `=` are rejected. Regex uses `re.fullmatch` and `Match.expand`.
+    `spec_to_args`/`spec_from_args` are the logged form, and
+    `describe_pattern` is the readable form
+  - `processing/prep.RenameColumnsOperation` applies the plan with
+    `DataFrame.rename`, which keeps column positions. By name skips old
+    columns that are gone (`failed_count`, `additional_info`) and fails when
+    none are left. A pattern that matches nothing fails. Collisions and empty
+    names fail the step, so replay never overwrites a column. The request is
+    logged in `value` (`[[old, new], …]` by name, `[mode, a, b]` by pattern).
+    Each run's resolved pairs go in `source_columns` → `column_names`, and
+    `_build_log_from_outcomes` keeps a successful rename's args from that
+    run, so pattern steps record what they matched on the latest re-import.
+    `PrepConfirmationMessages.rename_columns` describes the step
+  - `prep_script_generator._stata_rename_columns` writes one
+    `rename (old …) (new …)` from the recorded pairs, with a `* Pattern:`
+    comment for pattern steps. With no recorded pairs, or a new name Stata
+    can't use, the step is a NOTE with a warning. A rename whose log status is
+    `Failed` is written as a skipped-step comment, since it renamed nothing
+  - `utils/column_references.py` (Streamlit-free, read-only):
+    `find_column_references(project_id, alias, columns)` reports where a
+    dataset's check pages use the columns, as survey or backcheck data. It
+    reads the `check_config` fields, the duplicates, outliers, backchecks, GPS
+    and descriptive check tables, and the check settings files without view
+    state. It also counts `corr_log_{alias}` entries per column, including GPS
+    acceptances' coordinate columns
+  - The Prep form (`PrepStepHandler.rename_column_handler`) has a by-name
+    `st.data_editor` table and wildcard, change-case and regex inputs. It
+    shows a live old → new preview (`_rename_preview`) with problems on their
+    rows, and `_is_rename_incomplete` disables **Add** unless
+    `RenamePlan.can_apply`. Before adding, `_add_rename_step` opens
+    `confirm_dialog` listing any references; nothing is rewritten
 - **Duplicate a column** (#445): Add new column has a new **copy of column**
   method (`PrepFunctions.copy`). `AddNewColumnOperation._add_copy_column`
   inserts a copy of one source column right after it, keeping its dtype and

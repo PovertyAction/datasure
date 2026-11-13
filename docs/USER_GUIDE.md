@@ -405,6 +405,76 @@ Delete unnecessary or problematic data:
 3. Select column(s) or define row filter
 4. Click "Add"
 
+##### Rename Columns
+
+Rename one or many columns in a single step, either **by name** or **by
+pattern**. Every rename form shows a live preview of each old → new name
+before you add the step. A renamed column keeps its place in the dataset.
+
+**By name**: list each column to rename and its new name, one row per
+column. All the renames apply at once, so you can swap two names (`a` → `b`
+and `b` → `a`) in one step.
+
+**By pattern** has three types:
+
+- **Wildcard**, as in Stata's `rename`: `*` matches any run of characters
+  (including none) and `?` matches exactly one character. The old pattern
+  must match the whole name. Each `*` or `?` in the new pattern is filled, in
+  order, with what the old pattern's wildcards matched, so both patterns need
+  the same number of wildcards. When a name could match in more than one way,
+  earlier `*`s take as much as they can. Stata's `#` and `=` aren't supported.
+  Examples:
+
+  | Old pattern | New pattern | Renames |
+  | --- | --- | --- |
+  | `x*` | `y*` | `x1` → `y1`, `x_b` → `y_b` |
+  | `*_old` | `*_new` | `age_old` → `age_new` |
+  | `grp_*` | `*` | `grp_age` → `age` |
+  | `*` | `*_r` | every column, `age` → `age_r` |
+  | `q?` | `Q?` | `q1` → `Q1`, but not `q10` |
+  | `q*_*` | `*_q*` | `q1_a` → `a_q1` |
+
+- **Change case**: make names lowercase or uppercase. To change only some
+  columns, give a wildcard filter such as `Q*`; the default `*` means every
+  column. Names that are already in that case aren't counted as renamed.
+- **Regex**: a Python regular expression matched against the whole name, so
+  `q1` renames `q1` but not `q10` or `aq1`. The replacement can use `\1`,
+  `\2` and so on for the regex's groups. For example, `q(\d+)_(\w+)` with
+  replacement `\2_q\1` renames `q1_age` to `age_q1`. A regex that can't be
+  used is explained under the form.
+
+**Add** stays disabled until the preview has at least one rename and no
+problems. A problem is shown on its row: a new name that is already a column
+that isn't renamed, two columns given the same new name, or an empty name.
+Upper and lower case don't count as different, so `age` clashes with `Age`.
+
+**When your steps are re-applied** (for example after a new import):
+
+- A **by name** step renames the columns that still exist. If some are gone,
+  they are skipped and the step's log entry lists them; when none are left,
+  the step fails.
+- A **by pattern** step is matched again, so a column added by a later form
+  version, such as a new `x_5` for the pattern `x_*`, is renamed too. A
+  pattern that matches nothing fails.
+- A step whose new names would clash with a column, or be empty, fails and
+  names the columns involved. Re-applying never overwrites a column.
+
+The log entry shows the renames each run actually made.
+
+**Columns used by checks or corrections**: if a column you rename is used by
+a check page's settings (such as the survey ID, enumerator, duplicate or GPS
+columns) or by entries in the correction log, a dialog lists those uses
+before the step is added. Choose **Rename anyway** to go ahead or **Cancel**
+to stop. DataSure doesn't update those settings or corrections for you, so
+update them afterwards. Renames that touch no such columns add the step
+straight away.
+
+**In the replication package**, each rename step becomes one
+`rename (old …) (new …)` line in `prepare_data.do`, using the renames the
+step last made. Pattern steps also get a comment showing the pattern. As for
+added columns, a step whose new name Stata can't use is written as a NOTE and
+the Replication page warns you.
+
 #### Change Log
 
 All preparation steps are tracked:

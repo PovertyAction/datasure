@@ -52,6 +52,7 @@ src/datasure/
 │   ├── corrections.py      # Corrections and accept entries (CorrectionProcessor)
 │   ├── correction_log.py   # Correction log schema/backfill, Action enum (no Streamlit)
 │   ├── column_names.py     # Stata variable-name rules for replication (no Streamlit)
+│   ├── rename_plan.py      # Rename specs -> old/new pairs, collisions (no Streamlit)
 │   └── row_index.py        # Row-index parsing shared by prep and replication (no Streamlit)
 ├── replication/            # Stata/Python replication package export
 ├── models/
@@ -59,6 +60,7 @@ src/datasure/
 │   └── enums.py            # Prep action/method enums
 ├── utils/                  # Shared utilities (DuckDB, cache, config, charts,
 │                           # credentials, SurveyCTO API, UI helpers, ...)
+│   ├── column_references.py #  Where check settings/corrections use columns (no Streamlit)
 │   ├── correction_form.py  #   Shared correction form used across pages
 │   ├── navigation.py       #   Navigation resolver and status types (no Streamlit)
 │   └── nav_ui.py           #   Shared navigation controls and render wrapper

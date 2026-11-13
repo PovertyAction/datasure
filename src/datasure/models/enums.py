@@ -15,6 +15,7 @@ class PrepActions(Enum):
     transform_column: str = "transform column(s)"
     remove_column: str = "remove column(s)"
     remove_row: str = "remove row(s)"
+    rename_column: str = "rename column(s)"
 
 
 class PrepMethods(Enum):
@@ -22,6 +23,8 @@ class PrepMethods(Enum):
 
     row_index: str = "by row index"
     condition: str = "by condition"
+    by_name: str = "by name"
+    by_pattern: str = "by pattern"
 
 
 class PrepFunctions(Enum):

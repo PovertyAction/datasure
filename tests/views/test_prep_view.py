@@ -16,6 +16,7 @@ from datasure.models.enums import (
     PrepOperations,
     PrepRowConditions,
 )
+from datasure.processing.rename_plan import ByName, plan_rename
 from datasure.utils.reapply_utils import ReapplyFailure
 from datasure.utils.ui_utils import queue_notice, show_queued_notices
 
@@ -74,6 +75,9 @@ _render_pattern_value_inputs = pv._render_pattern_value_inputs
 _render_range_value_inputs = pv._render_range_value_inputs
 _render_string_function_inputs = pv._render_string_function_inputs
 _render_substring_inputs = pv._render_substring_inputs
+_is_rename_incomplete = pv._is_rename_incomplete
+_rename_pairs_from_rows = pv._rename_pairs_from_rows
+_rename_preview = pv._rename_preview
 _validate_column_types_for_range = pv._validate_column_types_for_range
 prep_add_step = pv.prep_add_step
 prep_remove_step = pv.prep_remove_step
@@ -330,6 +334,72 @@ class TestCopyColumnForm:
             _is_prep_form_incomplete(PrepActions.add_column.value, args, self.columns)
             is True
         )
+
+
+def _rename_args(method: str, value: list) -> dict:
+    """Build rename step args the way the rename form does."""
+    return {"action": PrepActions.rename_column.value, "method": method, "value": value}
+
+
+class TestRenameForm:
+    """When the rename form can be applied, and what its preview flags."""
+
+    columns = ("a", "b", "Q1")
+
+    def _incomplete(self, method: str, value: list) -> bool:
+        return _is_prep_form_incomplete(
+            PrepActions.rename_column.value, _rename_args(method, value), self.columns
+        )
+
+    def test_by_name_with_a_pair_is_complete(self):
+        assert self._incomplete("by name", [["a", "x"]]) is False
+
+    def test_swap_is_complete(self):
+        assert self._incomplete("by name", [["a", "b"], ["b", "a"]]) is False
+
+    def test_by_name_without_pairs_is_incomplete(self):
+        assert self._incomplete("by name", []) is True
+
+    def test_collision_blocks_apply(self):
+        assert self._incomplete("by name", [["a", "B"]]) is True
+
+    def test_empty_new_name_blocks_apply(self):
+        assert self._incomplete("by name", [["a", ""]]) is True
+
+    def test_wildcard_that_matches_is_complete(self):
+        assert self._incomplete("by pattern", ["wildcard", "Q*", "q*"]) is False
+
+    def test_pattern_that_matches_nothing_is_incomplete(self):
+        assert self._incomplete("by pattern", ["wildcard", "z*", "y*"]) is True
+
+    def test_regex_that_wont_compile_is_incomplete(self):
+        assert self._incomplete("by pattern", ["regex", "q(", "x"]) is True
+
+    def test_case_change_with_no_names_changing_is_incomplete(self):
+        assert self._incomplete("by pattern", ["change case", "lower", "a"]) is True
+
+    def test_rows_become_pairs_and_fully_blank_rows_are_dropped(self):
+        rows = [
+            {"old": "a", "new": "x"},
+            {"old": None, "new": None},
+            {"old": "b", "new": None},
+            {"old": None, "new": "y"},
+        ]
+
+        assert _rename_pairs_from_rows(rows) == (("a", "x"), ("b", ""))
+
+    def test_preview_flags_the_row_that_collides(self):
+        plan = plan_rename(self.columns, ByName((("a", "x"), ("b", "Q1"))))
+        preview = _rename_preview(plan)
+
+        assert preview.to_dicts() == [
+            {"Old name": "a", "New name": "x", "Problem": ""},
+            {
+                "Old name": "b",
+                "New name": "Q1",
+                "Problem": "'Q1' is already a column and isn't renamed.",
+            },
+        ]
 
 
 def _concat_args(columns: list[str], choice: str, custom: str = "") -> dict:
