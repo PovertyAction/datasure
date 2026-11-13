@@ -2715,3 +2715,209 @@ class TestAddColumnNames:
         assert outcomes[0].status == "Failed"
         assert "'b' already exists" in outcomes[0].error
         assert result.equals(data)
+
+
+def _rename_by_name(*pairs: tuple[str, str]) -> PrepActionResult:
+    """A by-name rename step, built the way the rename form builds it."""
+    return PrepActionResult(
+        action="rename column(s)",
+        method="by name",
+        value=[list(pair) for pair in pairs],
+        source_columns=[old for old, _ in pairs],
+        column_names=[new for _, new in pairs],
+    )
+
+
+def _rename_by_pattern(mode: str, first: str, second: str) -> PrepActionResult:
+    """A by-pattern rename step, built the way the rename form builds it."""
+    return PrepActionResult(
+        action="rename column(s)",
+        method="by pattern",
+        value=[mode, first, second],
+    )
+
+
+class TestRenameColumns:
+    """The rename column(s) action, run through the prep processor."""
+
+    @pytest.fixture
+    def survey(self) -> pl.DataFrame:
+        return pl.DataFrame({"a": [1, 2], "b": ["x", "y"], "c": [3.0, None]})
+
+    def test_by_name_renames_keep_positions_and_values(self, survey):
+        result, outcomes = _replay(survey, [_rename_by_name(("b", "bee"))])
+
+        assert outcomes[0].status == "Successful"
+        assert result.columns == ["a", "bee", "c"]
+        assert result["bee"].to_list() == ["x", "y"]
+
+    def test_swap_in_one_step(self, survey):
+        result, _ = _replay(survey, [_rename_by_name(("a", "b"), ("b", "a"))])
+
+        assert result.columns == ["b", "a", "c"]
+        assert result["a"].to_list() == ["x", "y"]
+
+    def test_outcome_records_the_resolved_pairs_and_counts(self, survey):
+        _, outcomes = _replay(survey, [_rename_by_name(("a", "x"), ("c", "z"))])
+
+        args = outcomes[0].prep_args
+        assert args.source_columns == ["a", "c"]
+        assert args.column_names == ["x", "z"]
+        assert args.affected_count == 2
+        assert args.failed_count == 0
+        assert args.value == [["a", "x"], ["c", "z"]]
+
+    def test_missing_old_columns_are_skipped_and_reported(self, survey):
+        result, outcomes = _replay(survey, [_rename_by_name(("a", "x"), ("gone", "y"))])
+
+        args = outcomes[0].prep_args
+        assert outcomes[0].status == "Successful"
+        assert result.columns == ["x", "b", "c"]
+        assert args.source_columns == ["a"]
+        assert args.failed_count == 1
+        assert args.additional_info == "Columns not found and skipped: 'gone'."
+
+    def test_fails_when_no_old_column_is_left(self, survey):
+        result, outcomes = _replay(survey, [_rename_by_name(("gone", "y"))])
+
+        assert outcomes[0].status == "Failed"
+        assert "gone" in outcomes[0].error
+        assert result.columns == survey.columns
+
+    def test_collision_fails_and_leaves_the_data_unchanged(self, survey):
+        result, outcomes = _replay(survey, [_rename_by_name(("a", "B"))])
+
+        assert outcomes[0].status == "Failed"
+        assert "'B'" in outcomes[0].error
+        assert result.columns == survey.columns
+
+    def test_wildcard_is_matched_again_on_replay(self):
+        step = _rename_by_pattern("wildcard", "x_*", "y_*")
+        before, _ = _replay(pl.DataFrame({"x_1": [1]}), [step])
+        after, outcomes = _replay(pl.DataFrame({"x_1": [1], "x_5": [2]}), [step])
+
+        assert before.columns == ["y_1"]
+        assert after.columns == ["y_1", "y_5"]
+        assert outcomes[0].prep_args.source_columns == ["x_1", "x_5"]
+        assert outcomes[0].prep_args.value == ["wildcard", "x_*", "y_*"]
+
+    def test_pattern_that_matches_nothing_fails(self, survey):
+        _, outcomes = _replay(survey, [_rename_by_pattern("wildcard", "q*", "r*")])
+
+        assert outcomes[0].status == "Failed"
+        assert "No columns match" in outcomes[0].error
+
+    def test_change_case_and_regex_modes(self):
+        data = pl.DataFrame({"Q1": [1], "q10_a": [2]})
+        steps = [
+            _rename_by_pattern("change case", "lower", "*"),
+            _rename_by_pattern("regex", r"q(\d+)_a", r"a_q\1"),
+        ]
+
+        result, outcomes = _replay(data, steps)
+
+        assert [o.status for o in outcomes] == ["Successful", "Successful"]
+        assert result.columns == ["q1", "a_q10"]
+
+    def test_invalid_spec_fails_with_its_reason(self, survey):
+        _, outcomes = _replay(survey, [_rename_by_pattern("regex", "q(", "x")])
+
+        assert outcomes[0].status == "Failed"
+        assert "The regex can't be used" in outcomes[0].error
+
+    def test_later_steps_use_the_new_names(self, survey):
+        steps = [
+            _rename_by_name(("a", "age")),
+            PrepActionResult(action="remove column(s)", source_columns=["age"]),
+        ]
+
+        result, outcomes = _replay(survey, steps)
+
+        assert [o.status for o in outcomes] == ["Successful", "Successful"]
+        assert result.columns == ["b", "c"]
+
+    def test_removing_a_rename_step_replays_the_remaining_steps(self, survey):
+        rename = _rename_by_name(("a", "age"))
+        copy_b = _copy_step("b", "b_copy")
+        uses_new_name = _copy_step("age", "age_copy")
+
+        result, outcomes = _replay(survey, [copy_b, uses_new_name])
+
+        assert [o.status for o in outcomes] == ["Successful", "Failed"]
+        assert result.columns == ["a", "b", "b_copy", "c"]
+        renamed, _ = _replay(survey, [rename, copy_b, uses_new_name])
+        assert renamed.columns == ["age", "age_copy", "b", "b_copy", "c"]
+
+    def test_description_lists_the_pairs(self, survey):
+        _, outcomes = _replay(survey, [_rename_by_name(("a", "x"), ("b", "y"))])
+
+        assert _generate_action_description(outcomes[0].prep_args) == (
+            '✓ Renamed 2 columns: "a" → "x", "b" → "y".'
+        )
+
+    def test_pattern_description_shows_the_pattern(self, survey):
+        _, outcomes = _replay(survey, [_rename_by_pattern("wildcard", "*", "*_r")])
+
+        assert _generate_action_description(outcomes[0].prep_args).startswith(
+            '✓ Renamed 3 columns matching "*" to "*_r": '
+        )
+
+
+class TestRenameLog:
+    """A rename step's log entry records the pairs of its latest run."""
+
+    @staticmethod
+    def _saved_args(mock_save) -> dict:
+        log = next(
+            call[0][1]
+            for call in mock_save.call_args_list
+            if call[0][2].startswith("prep_log_")
+        )
+        return json.loads(_convert_prep_args_to_string(log)["prep_args"][0])
+
+    @patch("datasure.processing.prep.duckdb_get_table")
+    @patch("datasure.processing.prep.duckdb_save_table")
+    def test_reapply_records_the_pairs_a_pattern_matched_this_time(
+        self, mock_save, mock_get
+    ):
+        empty_log = pl.DataFrame(
+            {"action": [], "description": [], "prep_args": [], "action_index": []}
+        )
+        mock_get.return_value = pl.DataFrame({"x_1": [1]})
+        step = _rename_by_pattern("wildcard", "x_*", "y_*")
+        _apply_single_action("proj", "alias", step, empty_log, PrepProcessor())
+        saved_log = _convert_prep_args_to_string(mock_save.call_args_list[0][0][1])
+        assert self._saved_args(mock_save)["source_columns"] == ["x_1"]
+
+        mock_save.reset_mock()
+        mock_get.return_value = pl.DataFrame({"x_1": [1], "x_5": [2]})
+        failures = _reapply_all_actions("proj", "alias", saved_log, PrepProcessor())
+
+        args = self._saved_args(mock_save)
+        assert failures == []
+        assert args["value"] == ["wildcard", "x_*", "y_*"]
+        assert args["source_columns"] == ["x_1", "x_5"]
+        assert args["column_names"] == ["y_1", "y_5"]
+
+    @patch("datasure.processing.prep.duckdb_get_table")
+    @patch("datasure.processing.prep.duckdb_save_table")
+    def test_by_name_pair_skipped_once_is_renamed_when_its_column_returns(
+        self, mock_save, mock_get
+    ):
+        empty_log = pl.DataFrame(
+            {"action": [], "description": [], "prep_args": [], "action_index": []}
+        )
+        mock_get.return_value = pl.DataFrame({"a": [1], "b": [2]})
+        step = _rename_by_name(("a", "x"), ("b", "y"))
+        _apply_single_action("proj", "alias", step, empty_log, PrepProcessor())
+        saved_log = _convert_prep_args_to_string(mock_save.call_args_list[0][0][1])
+
+        for raw, expected in [
+            (pl.DataFrame({"a": [1]}), ["x"]),
+            (pl.DataFrame({"a": [1], "b": [2]}), ["x", "y"]),
+        ]:
+            mock_save.reset_mock()
+            mock_get.return_value = raw
+            _reapply_all_actions("proj", "alias", saved_log, PrepProcessor())
+            saved_log = _convert_prep_args_to_string(mock_save.call_args_list[1][0][1])
+            assert mock_save.call_args_list[0][0][1].columns == expected

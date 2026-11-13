@@ -33,8 +33,8 @@ class TestPrepActions:
     """Tests for the PrepActions enum."""
 
     def test_member_count(self):
-        """Verify PrepActions has exactly 4 members."""
-        assert len(PrepActions) == 4
+        """Verify PrepActions has exactly 5 members."""
+        assert len(PrepActions) == 5
 
     def test_add_column_value(self):
         """Verify add_column has the expected string value."""
@@ -51,6 +51,10 @@ class TestPrepActions:
     def test_remove_row_value(self):
         """Verify remove_row has the expected string value."""
         assert PrepActions.remove_row.value == "remove row(s)"
+
+    def test_rename_column_value(self):
+        """Verify rename_column has the expected string value."""
+        assert PrepActions.rename_column.value == "rename column(s)"
 
     def test_access_by_name(self):
         """Verify enum members can be accessed by name."""
@@ -75,8 +79,8 @@ class TestPrepMethods:
     """Tests for the PrepMethods enum."""
 
     def test_member_count(self):
-        """Verify PrepMethods has exactly 2 members."""
-        assert len(PrepMethods) == 2
+        """Verify PrepMethods has exactly 4 members."""
+        assert len(PrepMethods) == 4
 
     def test_row_index_value(self):
         """Verify row_index has the expected string value."""
@@ -85,6 +89,11 @@ class TestPrepMethods:
     def test_condition_value(self):
         """Verify condition has the expected string value."""
         assert PrepMethods.condition.value == "by condition"
+
+    def test_rename_method_values(self):
+        """Verify the rename methods have the expected string values."""
+        assert PrepMethods.by_name.value == "by name"
+        assert PrepMethods.by_pattern.value == "by pattern"
 
 
 # ============================================

@@ -19,6 +19,7 @@ from typing import Any
 import polars as pl
 
 from datasure.processing.column_names import stata_name_error
+from datasure.processing.rename_plan import describe_pattern, spec_from_args
 from datasure.processing.row_index import parse_row_indices
 from datasure.replication.script_generators import _C, _LOG_CLOSE, _header
 
@@ -41,6 +42,7 @@ _ACT_REMOVE_COL = "remove column(s)"
 _ACT_REMOVE_ROW = "remove row(s)"
 _ACT_TRANSFORM = "transform column(s)"
 _ACT_ADD_COL = "add new column"
+_ACT_RENAME = "rename column(s)"
 
 _METH_BY_INDEX = "by row index"
 _METH_COPY = "copy of column"
@@ -456,11 +458,47 @@ def _stata_add_column(args: dict, _desc: str) -> list[str]:
 # Dispatch table
 # ---------------------------------------------------------------------------
 
+
+def _stata_rename_columns(args: dict, _desc: str) -> list[str]:
+    """One group ``rename`` built from the pairs the step last renamed.
+
+    Stata applies a group rename all at once, as DataSure does, so swaps and
+    chains come out the same. A pattern step gets a comment with its pattern.
+    """
+    old_names = _cols(args)
+    new_cols = args.get("column_names") or []
+    new_names = [new_cols] if isinstance(new_cols, str) else list(new_cols)
+    if not old_names or len(old_names) != len(new_names):
+        raise _UntranslatableStepError("the step has no recorded renames")
+
+    # DataSure allows any new name; Stata doesn't. Until the package maps
+    # names to Stata-safe ones (#449), flag the step rather than emit a
+    # broken line.
+    for name in new_names:
+        name_error = stata_name_error(name)
+        if name_error:
+            raise _UntranslatableStepError(
+                f"a new column name can't be used in Stata: {name_error}"
+            )
+
+    lines = []
+    try:
+        pattern = describe_pattern(spec_from_args(args.get("method"), _val(args)))
+    except ValueError:
+        logger.warning("Rename step has an unreadable pattern: %r", _val(args))
+        pattern = ""
+    if pattern:
+        lines.append(f"{_C} Pattern: {pattern}")
+    lines.append(f"rename ({_col_list(old_names)}) ({_col_list(new_names)})")
+    return lines
+
+
 _EMITTERS = {
     _ACT_REMOVE_COL: _stata_remove_columns,
     _ACT_REMOVE_ROW: _stata_remove_rows,
     _ACT_TRANSFORM: _stata_transform_column,
     _ACT_ADD_COL: _stata_add_column,
+    _ACT_RENAME: _stata_rename_columns,
 }
 
 # ---------------------------------------------------------------------------
@@ -506,6 +544,15 @@ def _emit_prep_step(
     args = _parse_prep_args(row.get("prep_args") or "{}")
 
     comment = [f"{_C} Step {i}: {description or action}"]
+    # A rename that failed in DataSure left the names alone, but its log
+    # still holds the pairs of an earlier run; renaming here would differ.
+    if action == _ACT_RENAME and row.get("status") == "Failed":
+        return [
+            *comment,
+            f"{_C} Skipped: this step failed the last time DataSure applied it, "
+            "so it renamed nothing.",
+            "",
+        ]
     try:
         body = _EMITTERS.get(action, _unknown_action(action))(args, description)
     # Per-step boundary: one untranslatable step must not stop the package.

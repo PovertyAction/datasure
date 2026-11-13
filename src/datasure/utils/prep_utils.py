@@ -1,3 +1,4 @@
+import logging
 from dataclasses import dataclass
 from typing import ClassVar
 
@@ -8,6 +9,16 @@ from datasure.models.enums import (
     PrepOperations,
     PrepRowConditions,
 )
+from datasure.processing.rename_plan import (
+    METHOD_BY_PATTERN,
+    MODE_CASE,
+    MODE_REGEX,
+    MODE_WILDCARD,
+    describe_pattern,
+    spec_from_args,
+)
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -49,6 +60,20 @@ class PrepDescriptions:
         PrepActions.add_column.value: "Create a new column using various calculation methods or data sources",
         PrepActions.remove_column.value: "Delete selected columns from your dataset to reduce size or remove unnecessary data",
         PrepActions.remove_row.value: "Delete specific rows based on index position or conditional criteria",
+        PrepActions.rename_column.value: "Rename columns by listing old and new names, or by a pattern that renames every matching column",
+    }
+
+    # Rename Methods
+    RENAME_METHODS: ClassVar[dict[str, str]] = {
+        PrepMethods.by_name.value: "Pick one column and edit its name",
+        PrepMethods.by_pattern.value: "Rename every column matching a pattern. The pattern is matched again each time your steps are re-applied, so columns added by a later import are renamed too",
+    }
+
+    # Rename pattern modes
+    RENAME_MODES: ClassVar[dict[str, str]] = {
+        MODE_WILDCARD: "Stata-style wildcards: * matches any run of characters (including none) and ? exactly one, e.g. grp_* to *",
+        MODE_CASE: "Change names to lowercase or uppercase, optionally only those matching a wildcard filter",
+        MODE_REGEX: "Python regular expression matched against the whole name, with back-references to its groups",
     }
 
     # Add Column Methods
@@ -392,6 +417,48 @@ class PrepConfirmationMessages:
             message = f"{message} {result.additional_info}"
         return cls._with_remaining(message, result)
 
+    # Pairs listed in a rename message before the rest are counted.
+    RENAME_PAIRS_SHOWN: ClassVar[int] = 10
+
+    @classmethod
+    def rename_columns(cls, result: PrepActionResult) -> str:
+        """Generate message for renaming columns.
+
+        ``source_columns`` and ``column_names`` hold the pairs the step
+        actually renamed, so the log shows what each run did.
+        """
+        old_names = cls._as_list(result.source_columns)
+        new_names = cls._as_list(result.column_names)
+        pairs = [
+            f'"{old}" → "{new}"' for old, new in zip(old_names, new_names, strict=False)
+        ]
+        shown = ", ".join(pairs[: cls.RENAME_PAIRS_SHOWN])
+        if len(pairs) > cls.RENAME_PAIRS_SHOWN:
+            shown += f" and {len(pairs) - cls.RENAME_PAIRS_SHOWN} more"
+
+        count = len(pairs)
+        heading = f"✓ Renamed {count} {cls._pluralize(count, 'column')}"
+        if result.method == METHOD_BY_PATTERN:
+            try:
+                spec = spec_from_args(result.method, result.value)
+            except ValueError:
+                logger.warning(
+                    "Rename step has an unreadable pattern: %r", result.value
+                )
+            else:
+                heading += f" {describe_pattern(spec)}"
+        message = f"{heading}: {shown}." if shown else f"{heading}."
+        if result.additional_info:
+            message = f"{message} {result.additional_info}"
+        return message
+
+    @staticmethod
+    def _as_list(names: str | list[str] | None) -> list[str]:
+        """Return logged column name(s) as a list."""
+        if names is None:
+            return []
+        return [names] if isinstance(names, str) else list(names)
+
     # Add Column Methods
     @classmethod
     def add_column_constant(cls, result: PrepActionResult) -> str:
@@ -663,6 +730,7 @@ class PrepConfirmationMessages:
         PrepActions.add_column.value: "_resolve_add_column",
         PrepActions.remove_column.value: "remove_columns",
         PrepActions.remove_row.value: "_resolve_remove_row",
+        PrepActions.rename_column.value: "rename_columns",
     }
 
     @classmethod
