@@ -42,6 +42,7 @@ _ACT_TRANSFORM = "transform column(s)"
 _ACT_ADD_COL = "add new column"
 
 _METH_BY_INDEX = "by row index"
+_METH_COPY = "copy of column"
 
 _COND_MISSING = "value is missing"
 _COND_NOT_MISSING = "value is not missing"
@@ -417,6 +418,12 @@ def _stata_add_column(args: dict, _desc: str) -> list[str]:
     if method == "constant":
         raw = values[0] if values else (args.get("value") or "")
         return [f"gen {new_col} = {_fmt_val(raw)}"]
+
+    if method == _METH_COPY and src_cols:
+        source = src_cols[0]
+        # clonevar keeps the storage type, labels and missing values, and
+        # order puts the copy right after its source, as DataSure does.
+        return [f"clonevar {new_col} = {source}", f"order {new_col}, after({source})"]
 
     if method == "concat" and len(src_cols) >= 2:
         return _stata_concat(new_col, src_cols, args.get("value") or "")

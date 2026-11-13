@@ -54,6 +54,7 @@ class PrepDescriptions:
     # Add Column Methods
     ADD_METHODS: ClassVar[dict[str, str]] = {
         PrepFunctions.constant.value: "Add a column with the same value in every row",
+        PrepFunctions.copy.value: "Add a copy of a column, placed right after it, with the same values, data type and missing values",
         PrepFunctions.sum.value: "Add a column containing the sum of values from selected columns",
         PrepFunctions.mean.value: "Add a column containing the average of values from selected columns",
         PrepFunctions.median.value: "Add a column containing the middle value from selected columns",
@@ -339,6 +340,8 @@ class PrepConfirmationMessages:
         """Generate message for adding new column."""
         if result.method == PrepFunctions.concat.value:
             return cls._with_remaining(cls.add_column_concat(result), result)
+        if result.method == PrepFunctions.copy.value:
+            return cls._with_remaining(cls.add_column_copy(result), result)
         source_display = (
             cls._format_column_names(result.source_columns)
             if result.source_columns
@@ -423,6 +426,14 @@ class PrepConfirmationMessages:
         return (
             f"✓ Concat column added. {cls._format_column_names(result.column_names)} "
             f"created by joining {source_display} with {separator}."
+        )
+
+    @classmethod
+    def add_column_copy(cls, result: PrepActionResult) -> str:
+        """Generate message for a copy of a column."""
+        return (
+            f"✓ Column {cls._format_column_names(result.column_names)} added as a "
+            f"copy of {cls._format_column_names(result.source_columns)}."
         )
 
     @classmethod

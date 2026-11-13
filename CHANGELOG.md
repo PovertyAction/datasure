@@ -9,6 +9,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Duplicate a column** (#445): Add new column has a new **copy of column**
+  method (`PrepFunctions.copy`). `AddNewColumnOperation._add_copy_column`
+  inserts a copy of one source column right after it, keeping its dtype and
+  nulls. It raises `ValidationError` when the source is missing or the new
+  name already exists, so a replay never overwrites a column. The step is
+  logged with the new name in `column_names` and the source in
+  `source_columns`. `prep_script_generator._stata_add_column` translates it
+  to `clonevar <new> = <old>` plus `order <new>, after(<old>)`. The Prep form
+  picks the source first and prefills the name as `<source>_copy`
+- **Stata name validation for new columns** (#445): new
+  `processing/column_names.stata_name_error` (Streamlit-free) rejects names
+  over 32 characters, names not starting with a letter or `_`, and names with
+  characters outside `[A-Za-z0-9_]`. The Add new column form shows the error
+  under the name input and keeps **Add** disabled
+  (`prep_view._new_column_name_error`). `AddNewColumnOperation` checks every
+  method's name on apply and replay, so a logged step with an invalid name
+  now fails and shows in the re-apply failure notice. The Add new column form
+  now asks for the method before the name
+
 - **Headless keyring guidance**: `secure_credentials.keyring_backend_problem`
   detects a keyring backend that can't hold credentials safely: keyring's
   "fail" backend (headless Linux with no Secret Service) and plaintext file

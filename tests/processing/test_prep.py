@@ -2492,3 +2492,142 @@ class TestIntegration:
         """Test Validation chain."""
         with pytest.raises(ValidationError):
             PrepAction.from_args(PrepActionResult(action="invalid_action"))
+
+
+def _copy_step(source: str, new_name: str) -> PrepActionResult:
+    """A duplicate step, built the way the Add Column form builds it."""
+    return PrepActionResult(
+        action="add new column",
+        column_names=new_name,
+        method="copy of column",
+        source_columns=[source],
+    )
+
+
+def _replay(data: pl.DataFrame, steps: list[PrepActionResult]):
+    """Replay logged steps through the processor, as a re-import does."""
+    actions = [PrepAction.from_args(step) for step in steps]
+    return PrepProcessor().execute_all_actions(data, actions)
+
+
+class TestDuplicateColumn:
+    """Add Column's "copy of column" method, run through the prep processor."""
+
+    @pytest.fixture
+    def survey(self) -> pl.DataFrame:
+        return pl.DataFrame(
+            {
+                "hhid": ["H1", "H2", "H3"],
+                "age": [34, None, 51],
+                "income": [1.5, None, 3.25],
+                "visited": [date(2024, 1, 2), None, date(2024, 1, 4)],
+            },
+            schema={
+                "hhid": pl.String,
+                "age": pl.Int16,
+                "income": pl.Float64,
+                "visited": pl.Date,
+            },
+        )
+
+    def test_copy_is_placed_right_after_its_source(self, survey):
+        result, outcomes = _replay(survey, [_copy_step("age", "age_copy")])
+        assert outcomes[0].status == "Successful"
+        assert result.columns == ["hhid", "age", "age_copy", "income", "visited"]
+
+    def test_copy_of_last_column_is_placed_last(self, survey):
+        result, _ = _replay(survey, [_copy_step("visited", "visit_date")])
+        assert result.columns[-2:] == ["visited", "visit_date"]
+
+    @pytest.mark.parametrize("source", ["hhid", "age", "income", "visited"])
+    def test_copy_keeps_values_type_and_missing_values(self, survey, source):
+        result, _ = _replay(survey, [_copy_step(source, "dup")])
+        assert result.schema["dup"] == survey.schema[source]
+        assert result["dup"].to_list() == survey[source].to_list()
+        assert result["dup"].null_count() == survey[source].null_count()
+
+    def test_copy_is_independent_of_later_transforms_on_source(self, survey):
+        steps = [
+            _copy_step("hhid", "hhid_raw"),
+            PrepActionResult(
+                action="transform column(s)",
+                source_columns=["hhid"],
+                method="lowercase",
+            ),
+        ]
+        result, outcomes = _replay(survey, steps)
+        assert [o.status for o in outcomes] == ["Successful", "Successful"]
+        assert result["hhid"].to_list() == ["h1", "h2", "h3"]
+        assert result["hhid_raw"].to_list() == ["H1", "H2", "H3"]
+
+    def test_outcome_records_new_name_and_source(self, survey):
+        _, outcomes = _replay(survey, [_copy_step("age", "age_copy")])
+        recorded = outcomes[0].prep_args
+        assert recorded.column_names == "age_copy"
+        assert recorded.source_columns == ["age"]
+        assert recorded.method == "copy of column"
+        assert recorded.remaining_columns == 5
+
+    def test_existing_name_fails_without_overwriting(self, survey):
+        result, outcomes = _replay(survey, [_copy_step("age", "income")])
+        assert outcomes[0].status == "Failed"
+        assert "already exists" in outcomes[0].error
+        assert result.equals(survey)
+
+    def test_missing_source_fails_and_later_steps_still_run(self, survey):
+        reimported = survey.drop("age")
+        steps = [
+            _copy_step("age", "age_copy"),
+            _copy_step("income", "income_copy"),
+        ]
+        result, outcomes = _replay(reimported, steps)
+        assert outcomes[0].status == "Failed"
+        assert "'age'" in outcomes[0].error
+        assert "not found" in outcomes[0].error
+        assert outcomes[1].status == "Successful"
+        assert "age_copy" not in result.columns
+        assert "income_copy" in result.columns
+
+    def test_invalid_stata_name_fails(self, survey):
+        result, outcomes = _replay(survey, [_copy_step("age", "1age")])
+        assert outcomes[0].status == "Failed"
+        assert "start with a letter" in outcomes[0].error
+        assert result.equals(survey)
+
+    def test_replay_without_a_removed_step_keeps_the_rest(self, survey):
+        """Removing a duplicate step replays the remaining steps correctly."""
+        kept = [
+            _copy_step("income", "income_copy"),
+            PrepActionResult(action="remove column(s)", source_columns=["hhid"]),
+        ]
+        result, outcomes = _replay(survey, kept)
+        assert all(o.status == "Successful" for o in outcomes)
+        assert result.columns == ["age", "income", "income_copy", "visited"]
+
+
+class TestAddColumnStataNames:
+    """Every add-column method checks its new name against Stata's rules."""
+
+    @pytest.mark.parametrize("name", ["x" * 33, "2nd_visit", "visit-date", "née"])
+    def test_replayed_step_with_invalid_name_fails(self, name):
+        data = pl.DataFrame({"a": [1, 2]})
+        step = PrepActionResult(
+            action="add new column",
+            column_names=name,
+            method="constant",
+            value="1",
+        )
+        result, outcomes = _replay(data, [step])
+        assert outcomes[0].status == "Failed"
+        assert name in outcomes[0].error
+        assert result.columns == ["a"]
+
+    def test_valid_name_of_32_characters_is_added(self):
+        data = pl.DataFrame({"a": [1, 2]})
+        name = "x" * 32
+        step = PrepActionResult(
+            action="add new column", column_names=name, method="constant", value="1"
+        )
+        result, outcomes = _replay(data, [step])
+        assert outcomes[0].status == "Successful"
+        assert name in result.columns

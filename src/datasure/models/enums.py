@@ -47,6 +47,7 @@ class PrepFunctions(Enum):
     uuid: str = "uuid"
     random: str = "random"
     constant: str = "constant"
+    copy: str = "copy of column"
 
 
 class PrepOperations(Enum):

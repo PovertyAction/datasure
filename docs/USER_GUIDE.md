@@ -326,14 +326,46 @@ Create new calculated or derived columns:
 - Generate summary statistics
 - Create categorical groupings
 - Build a composite ID or full name by joining text columns (**concat**)
+- Keep a column's original values next to a transformed version
+  (**copy of column**)
 
 **Steps**:
 
 1. Click "Add data prep step"
 2. Choose "Add Column"
-3. Enter new column name
-4. Define calculation or value
-5. Click "Add"
+3. Choose a method
+4. Enter new column name
+5. Define calculation or value
+6. Click "Add"
+
+**Column names**: a new column's name must work as a Stata variable name,
+because each prep step is also written to the replication package's
+`prepare_data.do`. The name:
+
+- has at most 32 characters
+- starts with a letter or `_`
+- uses only letters, digits and `_`: no spaces, punctuation or accented
+  letters
+
+For example, `visit_2` and `_flag` are allowed, but `2nd_visit`,
+`visit date` and `âge` are not. A name that breaks a rule is explained under
+the name box, and **Add** stays disabled until you fix it. A saved step whose
+name breaks a rule fails when your steps are re-applied, and it appears in the
+re-apply failure notice.
+
+**Copying a column (copy of column)**:
+
+1. Choose the **copy of column** method.
+2. Select the column to copy.
+3. Keep the suggested name, `<column>_copy`, or type another one. A name that
+   already exists is blocked.
+
+The copy is placed right after the column it copies. It has the same values,
+data type and missing values. To keep the original values next to a
+transformed version, copy the column, then transform the copy. In the
+replication package the step becomes `clonevar` followed by
+`order ..., after(...)`. If a re-import removes the copied column, the step
+fails with a message naming it, and the rest of your steps still run.
 
 **Joining text columns (concat)**:
 

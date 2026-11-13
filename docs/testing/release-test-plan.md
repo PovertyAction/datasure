@@ -242,6 +242,8 @@ so reports can name them.
 | R8.2 | On Prepare Data, add a **concat** column from two text columns | The values are joined with the separator you chose |
 | R8.3 | Use **to string** on a number column and **to number** on a true/false column | The columns convert as described in the User Guide |
 | R8.4 | Add a local `.xls` file | DataSure rejects it with a message to save it as `.xlsx` |
+| R8.5 | On Prepare Data, add a **copy of column** step: pick a column, keep the suggested `<column>_copy` name | The copy appears right after its source with the same values; `prepare_data.do` in a replication package has `clonevar` then `order …, after(…)` |
+| R8.6 | In Add new column, type a name with a space, one starting with a digit, one over 32 characters, and (for a copy) one that already exists | Each shows an error under the name box and **Add** stays disabled |
 
 ## Sign-off
 

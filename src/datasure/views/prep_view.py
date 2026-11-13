@@ -1,4 +1,5 @@
 import logging
+from collections.abc import Sequence
 from typing import NamedTuple
 
 import pandas as pd
@@ -18,6 +19,7 @@ from datasure.models.enums import (
     PrepOperations,
     PrepRowConditions,
 )
+from datasure.processing.column_names import stata_name_error
 from datasure.processing.corrections import CorrectionProcessor
 from datasure.processing.prep import (
     OperationError,
@@ -208,6 +210,11 @@ CONCAT_SEPARATORS = {
 }
 CONCAT_SPECIFY = "Specify"
 
+NEW_NAME_HELP = (
+    "Name of the new column. Use at most 32 characters: letters, digits and _, "
+    "starting with a letter or _ (Stata's rules for variable names)."
+)
+
 
 def _concat_separator(choice: str, custom: str) -> str | None:
     """Return the separator a concat step stores for the user's choice.
@@ -229,11 +236,44 @@ def _has_none_values(values: list | None) -> bool:
     return values is None or not values or any(v is None for v in values)
 
 
-def _is_add_column_incomplete(prep_args: dict) -> bool:
+def _copy_default_name(source: str) -> str:
+    """Return the name a copy of ``source`` is prefilled with."""
+    return f"{source}_copy"
+
+
+def _new_column_name_error(
+    prep_args: dict, existing_columns: Sequence[str]
+) -> str | None:
+    """Return why Add Column's new name can't be used, or None.
+
+    Every name must be a valid Stata name. A copy also can't take a name that
+    already exists. An empty name has no error yet: the form is just
+    incomplete.
+    """
+    name = prep_args.get("column_names")
+    if not name:
+        return None
+    error = stata_name_error(name)
+    if error:
+        return error
+    if prep_args.get("method") == PrepFunctions.copy.value and (
+        name in existing_columns
+    ):
+        return f"Column '{name}' already exists. Enter a new name."
+    return None
+
+
+def _is_add_column_incomplete(
+    prep_args: dict, existing_columns: Sequence[str] = ()
+) -> bool:
     """Check if add column action is missing required fields."""
     if not prep_args.get("column_names"):
         return True
+    if _new_column_name_error(prep_args, existing_columns):
+        return True
     method = prep_args.get("method")
+    if method == PrepFunctions.copy.value:
+        return len(prep_args.get("source_columns") or []) != 1
     if method == PrepFunctions.concat.value:
         return (
             len(prep_args.get("source_columns") or []) < 2
@@ -287,20 +327,26 @@ def _is_remove_row_incomplete(prep_args: dict) -> bool:
     return False
 
 
-def _is_prep_form_incomplete(action: str, prep_args: dict) -> bool:
+def _is_prep_form_incomplete(
+    action: str, prep_args: dict, existing_columns: Sequence[str] = ()
+) -> bool:
     """Check if the preparation form is incomplete and the Add button should
     be disabled.
 
     Args:
         action: The selected preparation action
         prep_args: The arguments for the preparation action
+        existing_columns: The dataset's current columns, which a new column
+            name must not take
 
     Returns
     -------
         True if the form is incomplete (Add button should be disabled), False otherwise
     """
     validators = {
-        PrepActions.add_column.value: _is_add_column_incomplete,
+        PrepActions.add_column.value: lambda args: _is_add_column_incomplete(
+            args, existing_columns
+        ),
         PrepActions.transform_column.value: _is_transform_column_incomplete,
         PrepActions.remove_column.value: lambda args: not args.get("source_columns"),
         PrepActions.remove_row.value: _is_remove_row_incomplete,
@@ -760,21 +806,26 @@ class PrepStepHandler:
 
     def add_column_handler(self) -> dict | None:
         """Handle adding new column UI and logic."""
+        dp_prep_add_col_med = st.selectbox(
+            label="Select Method",
+            options=config.DP_ADD_METHODS,
+            key=f"st_sb_add_col_method{self.step_index}",
+            help="Select method to add new column",
+        )
+
+        if dp_prep_add_col_med == PrepFunctions.copy.value:
+            return self._copy_column_inputs()
+
         dp_prep_add_col = st.text_input(
             label="Enter column name",
-            help="Enter name of new column to add",
+            help=NEW_NAME_HELP,
             key=f"st_sb_add_col{self.step_index}",
+        )
+        self._show_name_error(
+            {"column_names": dp_prep_add_col, "method": dp_prep_add_col_med}
         )
 
         if dp_prep_add_col:
-            # select method to add column
-            dp_prep_add_col_med = st.selectbox(
-                label="Select Method",
-                options=config.DP_ADD_METHODS,
-                key=f"st_sb_add_col_method{self.step_index}",
-                help="Select method to add new column",
-            )
-
             if dp_prep_add_col_med == PrepFunctions.constant.value:
                 dp_prep_add_val = st.text_input(
                     label="Enter value",
@@ -828,6 +879,50 @@ class PrepStepHandler:
             }
 
         return None
+
+    def _show_name_error(self, prep_args: dict) -> None:
+        """Show why the new column name can't be used, under its input."""
+        error = _new_column_name_error(prep_args, self.all_cols)
+        if error:
+            st.error(error, icon=":material/error:")
+
+    def _copy_column_inputs(self) -> dict | None:
+        """Render "copy of column": a source picker and a prefilled new name.
+
+        The name input is keyed by source, so picking another source
+        prefills that source's default name again.
+        """
+        source = st.selectbox(
+            label="Select column to copy",
+            options=self.all_cols,
+            index=None,
+            key=f"st_sb_add_col_copy_src{self.step_index}",
+            help="The copy keeps this column's values, data type and missing "
+            "values, and is placed right after it.",
+        )
+        if not source:
+            return None
+
+        new_name = st.text_input(
+            label="Enter column name",
+            value=_copy_default_name(source),
+            help=NEW_NAME_HELP,
+            key=f"st_sb_add_col_copy_name{self.step_index}_{source}",
+        )
+        prep_args = {
+            "action": PrepActions.add_column.value,
+            "column_names": new_name,
+            "affected_count": None,
+            "remaining_count": self.prep_data.shape[1] + 1,
+            "value": None,
+            "method": PrepFunctions.copy.value,
+            "source_columns": [source],
+            "condition": None,
+            "failed_count": None,
+            "additional_info": None,
+        }
+        self._show_name_error(prep_args)
+        return prep_args if new_name else None
 
     def _concat_inputs(self) -> tuple[list[str], str | None]:
         """Render concat's column picker and separator choice.
@@ -1129,7 +1224,9 @@ def prep_add_step(
             st.warning("Please complete the form to add a new preparation step.")
             return
 
-        disable_add = _is_prep_form_incomplete(dp_prep_action, prep_args)
+        disable_add = _is_prep_form_incomplete(
+            dp_prep_action, prep_args, prep_handler.all_cols
+        )
 
         if st.button(
             label="Add",
