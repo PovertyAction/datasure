@@ -9,6 +9,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Page menu on top for hosts**: with the `DATASURE_NAV_POSITION`
+  environment variable set to `top` (`app.NAV_POSITION_ENV_VAR`), `app.py`
+  passes `position="top"` to `st.navigation`, so a host that shows DataSure
+  beside its own side menu doesn't get two. The same pages are registered;
+  the last group is labelled "Corrections and export" in the top bar, where
+  the sidebar's `---` divider would be a nameless drop-down. The sidebar
+  keeps the reviewer setting, demo help and links. Any other value, or none,
+  leaves the menu in the sidebar. The Descriptive Stats hint now says "in the
+  menu" instead of "in the sidebar"
 - **Headless keyring guidance**: `secure_credentials.keyring_backend_problem`
   detects a keyring backend that can't hold credentials safely: keyring's
   "fail" backend (headless Linux with no Secret Service) and plaintext file
