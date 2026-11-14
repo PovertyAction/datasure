@@ -55,7 +55,7 @@ showWidgetBorder = true
 developmentMode = false
 
 [client]
-toolbarMode = "viewer"
+toolbarMode = "minimal"
 showErrorDetails = false
 
 [browser]
