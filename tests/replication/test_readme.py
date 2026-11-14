@@ -100,7 +100,31 @@ class TestGenerateReadme:
         assert "└── 4_output/" in readme
 
     def test_contains_how_to_run_section(self, readme):
-        assert "HOW TO RUN" in readme
+        assert "How to Run" in readme
 
     def test_contains_data_pipeline_summary(self, readme):
-        assert "DATA PIPELINE SUMMARY" in readme
+        assert "Data Pipeline Summary" in readme
+
+    def test_mentions_data_dict_yaml(self, readme):
+        assert "data-dict.yaml" in readme
+
+    def test_mentions_parquet(self, readme):
+        assert ".parquet" in readme
+
+    def test_mentions_python_scripts(self, readme):
+        assert "0_main.py" in readme
+        assert "3_prepare_data.py" in readme
+        assert "4_corrections.py" in readme
+
+    def test_no_python_import_script(self, readme):
+        assert "2_import_data.py" not in readme
+
+    def test_contains_python_how_to_run_section(self, readme):
+        assert "How to Run (Python" in readme
+
+    def test_is_markdown_with_h1_title(self, readme):
+        assert readme.startswith("# ")
+
+    def test_folder_tree_is_fenced(self, readme):
+        assert "```text" in readme
+        assert readme.count("```") >= 2

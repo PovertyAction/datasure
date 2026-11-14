@@ -9,6 +9,11 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Python replication scripts**: replication packages include Polars
+  scripts, Parquet copies of the datasets and `data-dict.yaml` alongside the
+  Stata do-files, and the package README is Markdown (`README.md`). A step
+  the Python generator cannot translate gets a `NOTE` instead of stopping
+  the build
 - **Headless keyring guidance**: `secure_credentials.keyring_backend_problem`
   detects a keyring backend that can't hold credentials safely: keyring's
   "fail" backend (headless Linux with no Secret Service) and plaintext file
