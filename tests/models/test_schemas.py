@@ -798,6 +798,16 @@ class TestGPSColumnConfig:
                 longitude_column=None,
             )
 
+    def test_separate_columns_same_latitude_and_longitude_raises(self):
+        """One column for both latitude and longitude raises ValidationError."""
+        with pytest.raises(ValidationError, match="must be different columns"):
+            GPSColumnConfig(
+                alias="gps1",
+                format_type=GPSFormatType.SEPARATE_COLUMNS,
+                latitude_column="gps",
+                longitude_column="gps",
+            )
+
     def test_empty_alias_raises(self):
         """Empty alias raises ValidationError (min_length=1)."""
         with pytest.raises(ValidationError):

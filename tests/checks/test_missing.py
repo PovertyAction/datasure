@@ -24,6 +24,7 @@ from datasure.checks.missing import (
     compute_missing_over_time,
     compute_missing_summary,
     get_null_list,
+    mask_missing_codes,
     missing_columns,
     missing_compare,
     missing_correlation,
@@ -201,9 +202,6 @@ def patched_missing():
         ),
         patch("datasure.checks.missing.add_missing_code"),
         patch("datasure.checks.missing.duckdb_save_table"),
-        patch("datasure.checks.missing.load_check_settings", return_value={}),
-        patch("datasure.checks.missing.save_check_settings"),
-        patch("datasure.checks.missing.trigger_save"),
         patch("datasure.checks.missing.demo_callout"),
         patch("datasure.utils.onboarding_utils.is_demo_project", return_value=False),
     ):
@@ -411,6 +409,120 @@ def test_get_all_missing_codes_empty_df():
     assert result == []
 
 
+def test_mask_missing_codes_nulls_numeric_codes(
+    land_area_data, land_area_missing_codes
+):
+    """Numeric codes become null; the text code `.d` is skipped, not an error."""
+    result = mask_missing_codes(land_area_data, ["land_area"], land_area_missing_codes)
+
+    assert result["land_area"].to_list() == [
+        2, 3, 3.5, 4, 4, 5, 6, 7, None, None, None, 60,
+    ]  # fmt: skip
+
+
+def test_missing_data_still_counts_each_code_under_its_label(
+    land_area_data, land_area_missing_codes
+):
+    """Missing Data reads the raw codes: 2 is Don't know, 3 is Refused."""
+    result = _compute_missing_data_paired(
+        land_area_data.select("land_area"), land_area_missing_codes
+    )
+
+    assert result["land_area"].to_list() == [0] * 8 + [2, 2, 3, 0]
+
+
+def test_mask_missing_codes_matches_in_the_column_type():
+    """A Float32 -99.9 is masked; integers next to a code are kept."""
+    data = pl.DataFrame(
+        {
+            "f32": pl.Series([-99.9, 1.5, 2.5], dtype=pl.Float32),
+            "big": pl.Series([2**53, 2**53 + 1, 7], dtype=pl.Int64),
+        }
+    )
+    codes = pl.DataFrame({"label": ["Don't know"], "codes": [f"-99.9, {2**53}"]})
+
+    result = mask_missing_codes(data, ["f32", "big"], codes)
+
+    assert result["f32"].to_list() == [None, 1.5, 2.5]
+    assert result["big"].to_list() == [None, 2**53 + 1, 7]
+    assert result.schema == data.schema
+
+
+@pytest.fixture
+def decimal_codes():
+    """Codes from a survey that used `.999`, `-999` and `999` for refusals."""
+    return pl.DataFrame({"label": ["Refused"], "codes": [".999, -99.9, -999.0, 999"]})
+
+
+@pytest.fixture
+def mixed_code_data():
+    """An integer column with real zeros and -99s, and a float column."""
+    return pl.DataFrame(
+        {
+            "children": pl.Series([0, -99, -999, 999, 3], dtype=pl.Int64),
+            "plot_ha": pl.Series([0.999, -99.9, -999.0, 0.0, 1.5], dtype=pl.Float64),
+        }
+    )
+
+
+def test_decimal_codes_do_not_truncate_in_integer_columns(
+    mixed_code_data, decimal_codes
+):
+    """`.999` must not flag a real 0, nor `-99.9` a real -99, in an integer column."""
+    masked = mask_missing_codes(mixed_code_data, ["children"], decimal_codes)
+    paired = _compute_missing_data_paired(
+        mixed_code_data.select("children"), decimal_codes
+    )
+
+    assert masked["children"].to_list() == [0, -99, None, None, 3]
+    assert paired["children"].to_list() == [0, 0, 2, 2, 0]
+
+
+def test_decimal_codes_still_match_float_columns(mixed_code_data, decimal_codes):
+    """Decimal codes stay supported: they match float columns on both tabs."""
+    masked = mask_missing_codes(mixed_code_data, ["plot_ha"], decimal_codes)
+    paired = _compute_missing_data_paired(
+        mixed_code_data.select("plot_ha"), decimal_codes
+    )
+
+    assert masked["plot_ha"].to_list() == [None, None, None, 0.0, 1.5]
+    assert paired["plot_ha"].to_list() == [2, 2, 2, 0, 0]
+
+
+@pytest.mark.parametrize(
+    ("code", "dtype", "expected"),
+    [
+        ("-999.0", pl.Int64, (-999, True)),
+        (".999", pl.Int64, (None, False)),
+        ("-99.9", pl.Int32, (None, False)),
+        ("-99", pl.UInt8, (None, False)),
+        (str(2**53 + 1), pl.Int64, (2**53 + 1, True)),
+        (".999", pl.Float64, (0.999, True)),
+    ],
+)
+def test_try_convert_code_matches_mask_parsing(code, dtype, expected):
+    """The Missing Data tab parses a code exactly as `mask_missing_codes` does."""
+    assert _try_convert_code_to_column_type(code, dtype, "col") == expected
+
+
+def test_mask_missing_codes_leaves_text_columns_alone(land_area_missing_codes):
+    """Codes are only masked in numeric columns."""
+    data = pl.DataFrame({"name": ["-99", "Ama"]})
+
+    result = mask_missing_codes(data, ["name"], land_area_missing_codes)
+
+    assert result["name"].to_list() == ["-99", "Ama"]
+
+
+def test_mask_missing_codes_without_codes(land_area_data):
+    """No configured codes leaves the data unchanged."""
+    no_codes = pl.DataFrame(schema={"label": pl.Utf8, "codes": pl.Utf8})
+
+    result = mask_missing_codes(land_area_data, ["land_area"], no_codes)
+
+    assert result.equals(land_area_data)
+
+
 def test_get_missing_code_pairs():
     """Test _get_missing_code_pairs creates correct mapping."""
     missing_codes_df = pl.DataFrame(
@@ -540,6 +652,19 @@ def test_compute_missing_summary_some_missing():
 
 
 @patch("datasure.checks.missing.st.cache_data", lambda f: f)
+def test_compute_missing_summary_counts_all_missing_columns():
+    """The all-missing count sits beside its percentage."""
+    missing_data = pl.DataFrame(
+        {"age": [1, 1], "gender": [0, 1], "income": [2, 1], "x": [0, 0]}
+    )
+
+    result = compute_missing_summary(missing_data)
+
+    assert (result.all_missing_count, result.column_count) == (2, 4)
+    assert result.all_missing_pct == 50.0
+
+
+@patch("datasure.checks.missing.st.cache_data", lambda f: f)
 def test_compute_missing_summary_all_missing():
     """Test compute_missing_summary with DataFrame having all missing values."""
     missing_data = pl.DataFrame(
@@ -598,6 +723,20 @@ def test_compute_missing_summary_single_column():
 
 
 # ----------------------- compute_missing_columns Tests -----------------------
+
+
+def test_compute_missing_columns_zero_rows():
+    """Zero-row data reports 0 missing values and 0% for every column."""
+    missing_data = pl.DataFrame(schema={"age": pl.Int32, "gender": pl.Int32})
+    missing_codes_df = pl.DataFrame({"label": ["DontKnow"], "codes": ["-999"]})
+
+    result = compute_missing_columns(missing_data, missing_codes_df)
+
+    assert result["Column"].tolist() == ["age", "gender"]
+    assert result["Total Missing"].tolist() == [0, 0]
+    assert result["% Total Missing"].tolist() == [0.0, 0.0]
+    assert result["% Null Values"].tolist() == [0.0, 0.0]
+    assert result["% DontKnow"].tolist() == [0.0, 0.0]
 
 
 @patch("datasure.checks.missing.st.cache_data", lambda f: f)

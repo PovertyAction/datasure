@@ -10,17 +10,22 @@ from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
-from keyring.errors import KeyringError
+from keyring.errors import KeyringError, PasswordDeleteError
 
 from datasure.utils.secure_credentials import (
+    NO_KEYRING_HINT,
+    PLAINTEXT_KEYRING_HINT,
     SecureCredentialError,
     _get_metadata_path,
     _get_service_name,
     delete_stored_credentials,
     has_scto_credentials,
+    keyring_backend_problem,
     list_stored_credentials,
     migrate_plaintext_credentials,
+    retrieve_mapbox_token,
     retrieve_scto_credentials,
+    store_mapbox_token,
     store_scto_credentials,
     test_keyring_availability,
 )
@@ -480,6 +485,7 @@ class TestCrossPlatformCompatibility:
         assert result["success"] is True
         assert result["backend"] == "PlaintextKeyring"
         # Should still work but with warning that it's not secure
+        assert result["warning"] == PLAINTEXT_KEYRING_HINT
 
     @patch("datasure.utils.secure_credentials.Path.chmod")
     def test_permission_setting_cross_platform(self, mock_chmod):
@@ -812,6 +818,9 @@ class TestDeleteCredentials:
 
             assert result["success"] is True
             assert "deleted successfully" in result["message"]
+            mock_keyring.delete_password.assert_called_once_with(
+                service_name, "test@example.com"
+            )
 
             # Verify service was removed from metadata
             with open(metadata_file, encoding="utf-8") as f:
@@ -831,8 +840,10 @@ class TestDeleteCredentials:
 
     @patch("datasure.utils.secure_credentials._get_metadata_path")
     @patch("datasure.utils.secure_credentials.keyring")
-    def test_delete_credentials_keyring_warning(self, mock_keyring, mock_metadata_path):
-        """Test deletion with keyring warning."""
+    def test_delete_credentials_keyring_error_is_failure(
+        self, mock_keyring, mock_metadata_path
+    ):
+        """A keyring failure is reported as a failure, not success."""
         with tempfile.TemporaryDirectory() as temp_dir:
             metadata_file = Path(temp_dir) / "metadata.json"
             service_name = "datasure_scto_login_testserver_test_project"
@@ -851,8 +862,99 @@ class TestDeleteCredentials:
 
             result = delete_stored_credentials("test_project", "testserver")
 
-            # Should still succeed but log warning
+            assert result["success"] is False
+            assert "Access denied" in result["error"]
+            assert result["error_type"] == "keyring_error"
+            mock_keyring.delete_password.assert_called_once_with(
+                service_name, "test@example.com"
+            )
+
+            # Metadata is kept so the entry stays listed and can be retried
+            with open(metadata_file, encoding="utf-8") as f:
+                assert service_name in json.load(f)
+
+    @patch("datasure.utils.secure_credentials._get_metadata_path")
+    @patch("datasure.utils.secure_credentials.keyring")
+    def test_delete_credentials_already_removed_from_keyring(
+        self, mock_keyring, mock_metadata_path
+    ):
+        """A password already gone from the keyring still clears the entry."""
+        with tempfile.TemporaryDirectory() as temp_dir:
+            metadata_file = Path(temp_dir) / "metadata.json"
+            service_name = "datasure_scto_login_testserver_test_project"
+            metadata = {
+                service_name: {
+                    "server": "testserver",
+                    "username": "test@example.com",
+                    "credential_type": "scto_login",
+                }
+            }
+            with open(metadata_file, "w", encoding="utf-8") as f:
+                json.dump(metadata, f)
+
+            mock_metadata_path.return_value = metadata_file
+            mock_keyring.delete_password.side_effect = PasswordDeleteError(
+                "Password not found"
+            )
+            mock_keyring.get_password.return_value = None
+
+            result = delete_stored_credentials("test_project", "testserver")
+
             assert result["success"] is True
+            mock_keyring.get_password.assert_called_once_with(
+                service_name, "test@example.com"
+            )
+            with open(metadata_file, encoding="utf-8") as f:
+                assert service_name not in json.load(f)
+
+    @pytest.mark.parametrize(
+        ("get_password_kwargs", "case"),
+        [
+            ({"return_value": "still-stored"}, "password_retained"),
+            (
+                {"side_effect": KeyringError("Keychain locked")},
+                "verification_error",
+            ),
+        ],
+    )
+    @patch("datasure.utils.secure_credentials._get_metadata_path")
+    @patch("datasure.utils.secure_credentials.keyring")
+    def test_delete_credentials_password_delete_error_not_confirmed(
+        self, mock_keyring, mock_metadata_path, get_password_kwargs, case
+    ):
+        """PasswordDeleteError is a failure unless the password is confirmed gone.
+
+        The macOS Keychain and KWallet backends raise PasswordDeleteError for
+        access errors and cancelled unlocks, not only for missing passwords.
+        """
+        with tempfile.TemporaryDirectory() as temp_dir:
+            metadata_file = Path(temp_dir) / "metadata.json"
+            service_name = "datasure_scto_login_testserver_test_project"
+            metadata = {
+                service_name: {
+                    "server": "testserver",
+                    "username": "test@example.com",
+                    "credential_type": "scto_login",
+                }
+            }
+            with open(metadata_file, "w", encoding="utf-8") as f:
+                json.dump(metadata, f)
+
+            mock_metadata_path.return_value = metadata_file
+            mock_keyring.delete_password.side_effect = PasswordDeleteError(
+                "Can't delete password in keychain: access denied"
+            )
+            mock_keyring.get_password.configure_mock(**get_password_kwargs)
+
+            result = delete_stored_credentials("test_project", "testserver")
+
+            assert result["success"] is False, case
+            assert result["error_type"] == "keyring_error"
+            assert "access denied" in result["error"]
+
+            # Metadata is kept so the entry stays listed and can be retried
+            with open(metadata_file, encoding="utf-8") as f:
+                assert service_name in json.load(f)
 
     @patch("datasure.utils.secure_credentials._get_metadata_path")
     def test_delete_credentials_unexpected_error(self, mock_metadata_path):
@@ -951,3 +1053,104 @@ class TestListCredentialsExtended:
             keys = list(creds.keys())
             assert any("server1" in key for key in keys)
             assert any("server2" in key for key in keys)
+
+
+class TestMapboxToken:
+    """The Mapbox token is kept in the keyring, one per machine."""
+
+    def test_a_saved_token_is_retrieved(self):
+        store = {}
+        with patch("datasure.utils.secure_credentials.keyring") as mock_keyring:
+            mock_keyring.set_password.side_effect = lambda s, u, p: store.update(
+                {(s, u): p}
+            )
+            mock_keyring.get_password.side_effect = lambda s, u: store.get((s, u))
+
+            store_mapbox_token("pk.first")
+            assert retrieve_mapbox_token() == "pk.first"
+
+            store_mapbox_token("pk.second")
+            assert retrieve_mapbox_token() == "pk.second"
+        assert len(store) == 1
+
+    @patch("datasure.utils.secure_credentials.keyring")
+    def test_no_saved_token_is_none(self, mock_keyring):
+        mock_keyring.get_password.return_value = None
+        assert retrieve_mapbox_token() is None
+
+    @patch("datasure.utils.secure_credentials.keyring")
+    def test_a_keyring_read_failure_is_none(self, mock_keyring):
+        mock_keyring.get_password.side_effect = KeyringError("locked")
+        assert retrieve_mapbox_token() is None
+
+    @patch("datasure.utils.secure_credentials.keyring")
+    def test_a_keyring_write_failure_raises(self, mock_keyring):
+        mock_keyring.set_password.side_effect = KeyringError("no backend")
+        with pytest.raises(SecureCredentialError, match="Mapbox token"):
+            store_mapbox_token("pk.token")
+
+    @pytest.mark.parametrize("token", ["", "   "])
+    @patch("datasure.utils.secure_credentials.keyring")
+    def test_a_blank_token_is_rejected(self, mock_keyring, token):
+        with pytest.raises(SecureCredentialError, match="blank"):
+            store_mapbox_token(token)
+        mock_keyring.set_password.assert_not_called()
+
+    @patch("datasure.utils.secure_credentials.keyring")
+    def test_surrounding_whitespace_is_stripped(self, mock_keyring):
+        store_mapbox_token("  pk.token\n")
+        assert mock_keyring.set_password.call_args.args[2] == "pk.token"
+
+
+class TestKeyringBackendProblem:
+    """keyring_backend_problem flags backends that can't hold credentials safely."""
+
+    def _backend(self, mock_keyring, name, module="keyring.backends.Windows", **attrs):
+        cls = type(name, (), {"__module__": module, **attrs})
+        mock_keyring.get_keyring.return_value = cls()
+
+    @patch("datasure.utils.secure_credentials.keyring")
+    def test_os_keyring_is_fine(self, mock_keyring):
+        self._backend(mock_keyring, "WinVaultKeyring", priority=5)
+        assert keyring_backend_problem() is None
+
+    @patch("datasure.utils.secure_credentials.keyring")
+    def test_fail_backend_means_no_keyring(self, mock_keyring):
+        self._backend(mock_keyring, "Keyring", module="keyring.backends.fail")
+        assert keyring_backend_problem() == NO_KEYRING_HINT
+
+    @patch("datasure.utils.secure_credentials.keyring")
+    def test_zero_priority_means_no_keyring(self, mock_keyring):
+        self._backend(mock_keyring, "NullKeyring", module="x.y", priority=0)
+        assert keyring_backend_problem() == NO_KEYRING_HINT
+
+    @patch("datasure.utils.secure_credentials.keyring")
+    def test_plaintext_backend_is_flagged(self, mock_keyring):
+        self._backend(mock_keyring, "PlaintextKeyring", module="keyrings.alt.file")
+        assert keyring_backend_problem() == PLAINTEXT_KEYRING_HINT
+
+    @patch("datasure.utils.secure_credentials.keyring")
+    def test_store_error_explains_missing_keyring(self, mock_keyring):
+        self._backend(mock_keyring, "Keyring", module="keyring.backends.fail")
+        mock_keyring.set_password.side_effect = KeyringError("No recommended backend")
+
+        result = store_scto_credentials(
+            project_id="test_project",
+            server="testserver",
+            username="test@example.com",
+            password="secret123",
+        )
+
+        assert result["error_type"] == "keyring_error"
+        assert "No recommended backend" in result["error"]
+        assert NO_KEYRING_HINT in result["error"]
+
+    @patch("datasure.utils.secure_credentials.keyring")
+    def test_availability_error_explains_missing_keyring(self, mock_keyring):
+        self._backend(mock_keyring, "Keyring", module="keyring.backends.fail")
+        mock_keyring.set_password.side_effect = KeyringError("No recommended backend")
+
+        result = test_keyring_availability()
+
+        assert result["success"] is False
+        assert NO_KEYRING_HINT in result["error"]

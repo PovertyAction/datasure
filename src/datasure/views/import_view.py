@@ -7,6 +7,8 @@ from datasure.connectors.scto import (
     SurveyCTOUI,
     download_forms,
 )
+from datasure.processing.corrections import CorrectionProcessor
+from datasure.processing.prep import prep_apply_action
 from datasure.utils.duckdb_utils import (
     duckdb_delete_rows,
     duckdb_get_aliases,
@@ -28,6 +30,7 @@ from datasure.utils.onboarding_utils import (
     ImportDemoInfo,
     is_demo_project,
 )
+from datasure.utils.reapply_utils import ReapplyFailure, warn_reapply_failures
 from datasure.utils.secure_credentials import (
     delete_stored_credentials,
     list_stored_credentials,
@@ -109,20 +112,47 @@ def _get_filtered_import_log(project_id: str) -> pl.DataFrame:
 
 def _process_import_log(project_id: str, import_log: pl.DataFrame) -> None:
     """Process all rows in import log with status updates."""
+    all_failures: list[ReapplyFailure] = []
     with st.status("Loading datasets ...", expanded=True) as status:
         for row in import_log.iter_rows(named=True):
-            _process_single_import(project_id, row)
+            all_failures.extend(_process_single_import(project_id, row))
         status.update(
             label="Data loaded successfully!", state="complete", expanded=True
         )
+    warn_reapply_failures(
+        all_failures,
+        "Some downstream data could not be fully reapplied after import",
+    )
 
 
-def _process_single_import(project_id: str, row: dict) -> None:
+def _process_single_import(project_id: str, row: dict) -> list[ReapplyFailure]:
     """Process a single import configuration row."""
+    failures: list[ReapplyFailure] = []
     if row["refresh"]:
         _load_dataset_by_source(project_id, row)
+        failures = _refresh_downstream_data(project_id, row["alias"])
 
     _add_to_session_state(row["alias"])
+    return failures
+
+
+def _refresh_downstream_data(project_id: str, alias: str) -> list[ReapplyFailure]:
+    """Rebuild prep and corrected data after a raw dataset refresh.
+
+    Without this, the Prep and Correction pages keep showing data derived
+    from the previous import, since both stages are cached copies that are
+    otherwise only rebuilt when their own logs change.
+    """
+    failures: list[ReapplyFailure] = []
+
+    if duckdb_table_exists(project_id, alias=alias, db_name="prep"):
+        failures.extend(prep_apply_action(project_id, alias))
+
+    failures.extend(
+        CorrectionProcessor(project_id).refresh_existing_corrected_data(alias)
+    )
+
+    return failures
 
 
 def _load_dataset_by_source(project_id: str, row: dict) -> None:
@@ -230,11 +260,7 @@ def update_import_log(import_log: pl.DataFrame) -> None:
 
 # --- Credential Manager --- #
 if is_demo_project():
-    demo_callout(
-        "The sections below (credentials and import configuration) are for setting up "
-        "real data sources. For this demo, your data is already configured — scroll down "
-        "to **Preview Imported Data** to explore it."
-    )
+    demo_callout(ImportDemoInfo.get_info_message("surveycto_info"))
 with st.container(border=True):
     section_header("Manage Credentials", icon=":material/key:")
     st.write("Import and manage your credentials for data import.")
@@ -255,7 +281,7 @@ with st.container(border=True):
         st.write("**Remove Credentials**")
         saved_credentials = list_stored_credentials(project_id).get("credentials", {})
         select_credentials = st.selectbox(
-            "Select Crendetials to Deleted",
+            "Select Credentials to Delete",
             options=saved_credentials.keys(),
             index=None,
         )
@@ -266,13 +292,23 @@ with st.container(border=True):
             disabled=not select_credentials,
         ):
             selected_server = saved_credentials[select_credentials].get("server", "")
-            selected_type = saved_credentials[select_credentials].get("type", "")
-            delete_stored_credentials(
+            selected_type = saved_credentials[select_credentials].get(
+                "credential_type", "scto_login"
+            )
+            result = delete_stored_credentials(
                 project_id=project_id,
-                server=selected_type,
+                server=selected_server,
                 credential_type=selected_type,
             )
-            st.success(f"Credentials for {select_credentials} deleted successfully.")
+            if result["success"]:
+                st.success(
+                    f"Credentials for {select_credentials} deleted successfully."
+                )
+            else:
+                st.error(
+                    f"Could not delete credentials for {select_credentials}: "
+                    f"{result['error']}"
+                )
 
     with (
         kc3,
@@ -286,6 +322,8 @@ with st.container(border=True):
                     f":material/check: Keyring working: {keyring_status['backend']}"
                 )
                 st.info(keyring_status["message"])
+                if keyring_status.get("warning"):
+                    st.warning(keyring_status["warning"])
             else:
                 st.error(f":material/close: Keyring issue: {keyring_status['error']}")
                 st.info("**Troubleshooting Tips:**")
@@ -293,6 +331,8 @@ with st.container(border=True):
                 - **Windows**: Ensure Windows Credential Manager is accessible
                 - **macOS**: Check Keychain Access permissions
                 - **Linux**: Install and configure a keyring backend (gnome-keyring, kwallet)
+                - **Headless server or container**: select an encrypted backend with
+                  `PYTHON_KEYRING_BACKEND` (see "Running on a server" in the README)
                 """)
 
 with st.container(border=True):

@@ -1,10 +1,10 @@
 [build-system]
-requires = ["uv_build>=0.7.19,<0.12.0"]
+requires = ["uv_build>=0.7.19,<0.14.0"]
 build-backend = "uv_build"
 
 [project]
 name = "DataSure"
-version = "1.0.0.post1"
+version = "1.2.2a1"
 description = "IPA Data Management System Dashboard"
 readme = "README.md"
 license = "MIT"
@@ -24,7 +24,7 @@ classifiers = [
 ]
 requires-python = ">=3.11"
 dependencies = [
-    "streamlit>=1.52.0",
+    "streamlit>=1.65.0,<2",
     "pandas>=2.2.2,<3.0",
     "plotly>=6.2.0",
     "numpy>=2.2.3",
@@ -38,9 +38,13 @@ dependencies = [
     # polars interop; floor at the CVE-fixed release (see issue #186)
     "pyarrow>=23.0.1",
     "matplotlib>=3.10.0",
-    # Floor at the CVE-fixed release (see issue #186).
-    "polars>=1.30.0",
-    "duckdb>=1.3.1",
+    # Floor at the tested major: polars 1.43.2 crashes the app with a native
+    # access violation (see issue #426). Capped below the next major, which
+    # may remove APIs as 2.0 did.
+    "polars>=2.0.0,<3",
+    # Capped below the next major, which may change the Python API as 2.0
+    # did (see utils/duckdb_utils.py).
+    "duckdb>=1.3.1,<3",
     "pydantic>=2.11.7",
     "keyring>=25.6.0",
     "polars-readstat>=0.5.1",

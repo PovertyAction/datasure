@@ -12,6 +12,7 @@ Thank you for your interest in contributing to DataSure! This guide will help yo
 - [Version Management](#version-management)
 - [Release Process](#release-process)
 - [Submitting Changes](#submitting-changes)
+- [Issue Types and Labels](#issue-types-and-labels)
 
 ## Development Setup
 
@@ -128,9 +129,52 @@ specific exception the code can actually raise, and follow these rules:
    traceback (`logger.exception(...)`) and show the user a message
    (`st.error(...)`). Add a short comment marking the boundary.
 
+   **Deferred display.** When the handler runs before the place where the
+   user sees the result, it may return the error as data instead of calling
+   `st.error` itself, provided the caller always renders that data with
+   `st.error` (or an error marker plus reason). Example: `guarded_status` in
+   `utils/nav_ui.py` returns an error status that `render_empty_state` shows,
+   and `health_rows` in `checks/health.py` stores the error on the row that
+   `render_health_rows` shows. The handler must still call
+   `logger.exception(...)`, and its boundary comment must name where the
+   error is displayed.
+
 4. **Streamlit control flow**: never call `st.rerun()` inside a `try` block
    with a broad except - it raises a control-flow exception that the handler
    would swallow. Put it in the `else:` clause instead.
+
+### View UI Consistency
+
+Every Streamlit view must render its chrome through the shared helpers in
+`src/datasure/utils/ui_utils.py` so pages stay uniform as new ones are added:
+
+- `page_header(title, subtitle)` for the page heading. The `title` must match
+  the view's `st.Page(title=...)` nav label in `app.py` word-for-word
+  (`start_view`'s "Welcome to DataSure" hero is the one intentional
+  exception). Put the one-line "what this page does" prose in `subtitle`, not
+  a loose `st.markdown`.
+- `section_header(text, icon=None)` for section subheadings — no trailing
+  colons; use a `:material/...:` icon shortcode, never emoji.
+- `metric_row([(label, value[, help]), ...])` for metric rows so they align
+  across pages; do not hand-build `st.columns` + `st.metric`.
+- `confirm_dialog(title, body, on_confirm=...)` for every destructive action
+  (delete/remove/restart) — do not invent per-view confirm flows with
+  session-state flags, expanders, or inline warnings.
+- `queue_notice(scope, level, message)` for any success/warning/error message
+  or toast raised just before an `st.rerun()` (including a `confirm_dialog`
+  callback, which reruns), with `show_queued_notices(scope)` where it should
+  appear on the next run. Rendering it directly gets cleared by the rerun.
+- Render a pandas Styler with `styled_dataframe`, or call
+  `ensure_styler_limit(cells)` before rendering it. Never set
+  `styler.render.max_elements` with `pd.set_option`: the option is shared by
+  every session, and lowering it can break another session's styled table.
+- Use `st.divider()` for horizontal rules, never `st.write("---")`.
+- Icons are Material shortcodes (`:material/check_circle:`), not emoji
+  shortcodes (`:white_check_mark:`).
+
+`ui_utils` imports `streamlit` inside each helper rather than at module top so
+it honors the view-test harness's `sys.modules` swap regardless of import
+order — keep that pattern when adding helpers.
 
 ## Testing
 
@@ -167,6 +211,35 @@ tests/
 ├── utils/                      # Tests for utility functions
 └── views/                      # Tests for Streamlit page scripts
 ```
+
+Coverage is enforced at `fail_under = 80` (`[tool.coverage.report]` in
+`pyproject.toml`). Registered markers are `slow`, `integration`, and `unit`
+(`-m "not slow"` skips the slow ones).
+
+### Shared Fixtures
+
+`tests/conftest.py` provides the shared fixtures — including
+`sample_dataframe`, `sample_gps_data`, `missing_data`, `date_format_data`,
+`backcheck_survey_data`/`backcheck_data`, `mock_streamlit_session`, `mock_st`,
+and `settings_file` — plus the autouse fixtures `mock_database_functions` (so
+tests need no real DB files) and `cleanup_test_cache`.
+
+### Testing Views
+
+`tests/views/` has its own conftest that installs a module-level Streamlit mock
+so view page scripts can be imported at all. Follow the pattern in
+`tests/views/test_prep_view.py`: configure the shared mock, patch utils at
+their source during import, then test the module functions directly.
+
+When a view calls a `utils`/connector function at module import that itself
+calls `st.*` (for example `SurveyCTOUI(...).render_login_form()`), the view
+test must patch that symbol at its source in `_module_patches()` before
+importing the view (see `tests/views/test_import_view.py`), or collection
+fails in bare mode.
+
+On Windows the suite must run cleanly under plain `uv run python -m pytest`.
+If pytest dies with INTERNALERROR, a test is patching `os.name` or `pathlib`
+without context-managed cleanup.
 
 ## Dependency Management
 
@@ -327,6 +400,14 @@ Before making any release, developers must update both technical and user-facing
 - Describe features in terms of data quality outcomes
 - Avoid technical jargon and implementation details
 
+#### Known Issues (KNOWN_ISSUES.md)
+
+- Move entries whose fix ships in this release to "Recently fixed", with the
+  version and a link to its changelog section
+- Remove fixed entries older than 2–3 releases
+- Follow the rules in the file's
+  [Maintaining this file](KNOWN_ISSUES.md#maintaining-this-file) section
+
 ### Automated Release Steps
 
 ```bash
@@ -373,11 +454,12 @@ alone cannot detect.
 
 ```bash
 # Install the pre-release from Test PyPI
-# Dependencies are resolved from PyPI; the datasure package itself comes
-# from Test PyPI.
+# Only the datasure package comes from Test PyPI (via --find-links);
+# dependencies are resolved from PyPI. Do not add Test PyPI with --index:
+# uv's default first-index strategy would then take any dependency that
+# also exists on Test PyPI from there.
 uv tool install "datasure==X.Y.ZrcN" \
-    --index https://test.pypi.org/simple/ \
-    --index https://pypi.org/simple/
+    --find-links https://test.pypi.org/simple/datasure/
 
 # Verify the entry point and version
 datasure --version
@@ -397,6 +479,11 @@ datasure
 Only proceed to the final stable release (pushing a `vX.Y.Z` tag without a
 pre-release suffix) once at least one developer has confirmed the above on
 the Test PyPI build.
+
+For a release candidate, run the full
+[release test plan](docs/testing/release-test-plan.md) on Windows and macOS,
+and send it to early-access testers. Update its release-specific section from
+the new RELEASENOTES.md section first.
 
 ### Quality Gates
 
@@ -540,6 +627,10 @@ For emergency releases only:
 
 ### Pull Request Guidelines
 
+- **Template**: Always open pull requests using
+  [`.github/pull_request_template.md`](.github/pull_request_template.md). Fill
+  in every section and complete the checklist; do not delete sections (write
+  "N/A" where a section does not apply)
 - **Title**: Use clear, descriptive titles
 - **Description**: Explain what changes you made and why
 - **Tests**: Include tests for new functionality
@@ -553,49 +644,84 @@ For emergency releases only:
 - Keep pull requests focused and reasonably sized
 - Ensure CI/CD checks pass before requesting review
 
+## Issue Types and Labels
+
+Every issue except a usage question gets one **Issue Type**, which records the
+kind of work:
+
+| Issue Type | Use for |
+| --- | --- |
+| Bug | Something that is broken or behaves unexpectedly |
+| Feature | A new capability or an improvement to an existing one |
+| Task | Refactoring, cleanup, tests, docs, or other maintenance |
+
+Questions from the Question form keep the `question` label and no Issue Type.
+If a question turns out to be a bug or a feature request, set the Issue Type
+and remove `question`.
+
+Labels record where the work is and any cross-cutting concern. Add as many as
+apply.
+
+| Label | Use for |
+| --- | --- |
+| `area/checks` | Check pages and `src/datasure/checks/` (name the page in the issue title) |
+| `area/corrections` | Corrections and the correction log (`src/datasure/processing/correction*.py`) |
+| `area/connectors` | SurveyCTO and local data import (`src/datasure/connectors/`) |
+| `area/replication` | Replication package builder (`src/datasure/replication/`) |
+| `area/ui` | Layout, views, and shared UI helpers |
+| `area/docs` | Documentation |
+| `area/testing` | Test coverage and test infrastructure |
+| `area/ci-cd` | Build, release, and CI/CD pipeline |
+| `security` | Security hardening, in any area |
+| `performance` | Delays, lags, and slow pages, in any area |
+| `needs-triage` | Applied by the issue forms; remove once the issue has its Issue Type (if any) and area labels |
+| `question` | A usage question rather than a change request |
+| `good first issue` | Small, well-scoped work suitable for newcomers |
+| `help wanted` | Work the maintainers would welcome outside help with |
+| `dependencies` | Dependency updates (applied by Dependabot) |
+
+When triaging a bug, check [KNOWN_ISSUES.md](KNOWN_ISSUES.md) first. If the
+bug is already listed, close the new issue as a duplicate of the linked issue.
+If it is a confirmed, user-visible bug in a released version, add an entry.
+
+Releases are tracked with milestones (for example `v1.0.0`), not labels.
+Duplicate or out-of-scope issues are closed with GitHub's "Close as duplicate"
+or "Close as not planned" options rather than a label. Dependabot's labels are
+set explicitly in [`.github/dependabot.yml`](.github/dependabot.yml); update
+that file if you rename `dependencies` or `area/ci-cd`.
+
 ## Development Architecture
 
-### Project Structure
-
-```text
-src/datasure/                   # Main package (source layout)
-├── app.py                  # Main Streamlit application entry point
-├── cli.py                  # Command-line interface
-├── checks/                 # 9 modular data quality check modules
-├── connectors/             # Data source connectors
-├── processing/             # Data preparation utilities
-├── utils/                  # Shared utilities
-└── views/                  # Streamlit page components
-```
-
-### Key Patterns
-
-- **Session State Management**: Extensive use of Streamlit session state
-- **Configuration System**: JSON-based configuration files
-- **Asset Management**: Package-aware path resolution
-- **Error Handling**: Comprehensive exception handling
+The package layout, data flow, storage and cache locations, session-state
+conventions, generated output views, and credential handling are documented in
+[docs/ARCHITECTURE.md](docs/ARCHITECTURE.md). Read that before making
+structural changes.
 
 ### Adding New Features
 
 #### Adding a New Data Quality Check
 
-1. Create new module in `src/datasure/checks/`
-2. Implement standardized interface with report function
-3. Create corresponding test file in `tests/checks/`
+1. Create the module in `src/datasure/checks/`, following an existing one
+   (e.g. `missing.py`): a report function that takes prepared data plus
+   settings and renders Streamlit output
+2. Wire it into check configuration (`views/config_view.py` /
+   `utils/config_utils.py`) and the output view template if needed
+3. Add `tests/checks/test_<name>.py` using the conftest fixtures
 4. Update navigation in `src/datasure/app.py` if needed
 
 #### Adding a New Data Connector
 
-1. Create new module in `src/datasure/connectors/`
-2. Implement data loading and form functions
-3. Update import view to include new connector
-4. Add appropriate tests and documentation
+1. Create the module in `src/datasure/connectors/` — see `local.py` for the
+   pattern: Pydantic validation, a render form, and a load function that saves
+   via `duckdb_save_table`
+2. Add it to the import-type options in `views/import_view.py`
+3. Add tests in `tests/connectors/` and update documentation
 
 ## Getting Help
 
 - **Documentation**: Check the [docs/](docs/) directory for development guides (changelog, release notes, etc.)
-- **Issues**: Report bugs or request features on GitHub Issues
-- **Discussions**: Use GitHub Discussions for questions and ideas
+- **Issues**: Report bugs, request features, or ask questions using the
+  [issue forms](https://github.com/PovertyAction/datasure/issues/new/choose)
 - **Code Quality**: Monitor [SonarQube Dashboard](https://sonarcloud.io/project/overview?id=PovertyAction_datasure)
 
 ## Code of Conduct

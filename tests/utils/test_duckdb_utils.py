@@ -7,14 +7,60 @@ import polars as pl
 import pytest
 
 from datasure.utils.duckdb_utils import (
+    CHECK_TABLE_PREFIXES,
     _validate_column_name,
     _validate_table_name,
+    check_table_name,
     duckdb_delete_rows,
     duckdb_get_aliases,
     duckdb_get_imported_datasets,
     duckdb_get_table,
     duckdb_save_table,
+    missing_codes_table_name,
+    name_id,
 )
+
+
+class TestNameId:
+    """name_id gives the shared identifier of a page or dataset name."""
+
+    @pytest.mark.parametrize(
+        ("name", "expected"),
+        [
+            ("Household Survey", "household_survey"),
+            ("Follow-up 2", "follow_up_2"),
+            ("already_an_id", "already_an_id"),
+        ],
+    )
+    def test_lowercases_and_replaces_spaces_and_hyphens(self, name, expected):
+        assert name_id(name) == expected
+
+    def test_settings_file_uses_the_same_id(self):
+        from datasure.utils.settings_utils import page_settings_file
+
+        path = page_settings_file("abcd1234", "Follow-up 2")
+        assert path.name == f"page_{name_id('Follow-up 2')}_settings.json"
+
+
+class TestCheckTableNames:
+    """Check table names are built in one place for checks and exports."""
+
+    @pytest.mark.parametrize("page", ["Follow-up 2", "follow_up_2"])
+    def test_check_table_name_accepts_page_name_or_id(self, page):
+        assert check_table_name("duplicates", page) == "duplicates_follow_up_2"
+
+    def test_registered_prefixes(self):
+        assert set(CHECK_TABLE_PREFIXES) == {
+            "duplicates",
+            "outliers",
+            "gps_columns",
+            "backchecks",
+            "descriptive_columns",
+            "bc_attribution",
+        }
+
+    def test_missing_codes_table_name(self):
+        assert missing_codes_table_name("abcd1234") == "missing_codes_abcd1234"
 
 
 class TestValidateTableName:
@@ -82,7 +128,7 @@ class TestDuckdbSaveTable:
         mock_connect.return_value.__enter__.return_value = mock_conn
 
         # Mock table doesn't exist initially
-        mock_conn.execute.return_value.fetchone.return_value = [0]
+        mock_conn.execute.return_value.fetchall.return_value = [(0,)]
 
         test_df = pl.DataFrame({"col1": [1, 2, 3], "col2": ["a", "b", "c"]})
 
@@ -110,7 +156,7 @@ class TestDuckdbSaveTable:
         mock_connect.return_value.__enter__.return_value = mock_conn
 
         # Mock table exists
-        mock_conn.execute.return_value.fetchone.return_value = [1]
+        mock_conn.execute.return_value.fetchall.return_value = [(1,)]
 
         test_df = pd.DataFrame({"col1": [1, 2, 3], "col2": ["a", "b", "c"]})
 
@@ -135,7 +181,7 @@ class TestDuckdbSaveTable:
 
         mock_conn = MagicMock()
         mock_connect.return_value.__enter__.return_value = mock_conn
-        mock_conn.execute.return_value.fetchone.return_value = [0]
+        mock_conn.execute.return_value.fetchall.return_value = [(0,)]
 
         test_df = pl.DataFrame({"col1": [1, 2, 3]})
 
@@ -161,11 +207,11 @@ class TestDuckdbGetTable:
         mock_connect.return_value.__enter__.return_value = mock_conn
 
         # Mock table exists
-        mock_conn.execute.return_value.fetchone.return_value = [1]
+        mock_conn.execute.return_value.fetchall.return_value = [(1,)]
 
         # Mock the table data
         expected_df = pl.DataFrame({"col1": [1, 2, 3], "col2": ["a", "b", "c"]})
-        mock_conn.execute.return_value.pl.return_value = expected_df
+        mock_conn.sql.return_value.pl.return_value = expected_df
 
         duckdb_get_table("test_project", "test_alias", "logs")
 
@@ -177,7 +223,7 @@ class TestDuckdbGetTable:
         # Verify the SELECT query was called
         select_calls = [
             call
-            for call in mock_conn.execute.call_args_list
+            for call in mock_conn.sql.call_args_list
             if "SELECT * FROM" in str(call)
         ]
         assert len(select_calls) > 0
@@ -193,7 +239,7 @@ class TestDuckdbGetTable:
         mock_connect.return_value.__enter__.return_value = mock_conn
 
         # Mock table doesn't exist
-        mock_conn.execute.return_value.fetchone.return_value = [0]
+        mock_conn.execute.return_value.fetchall.return_value = [(0,)]
 
         result = duckdb_get_table("test_project", "nonexistent_alias", "data")
 
@@ -210,10 +256,10 @@ class TestDuckdbGetTable:
 
         mock_conn = MagicMock()
         mock_connect.return_value.__enter__.return_value = mock_conn
-        mock_conn.execute.return_value.fetchone.return_value = [1]
+        mock_conn.execute.return_value.fetchall.return_value = [(1,)]
 
         expected_df = pl.DataFrame({"col1": [1, 2, 3]})
-        mock_conn.execute.return_value.pl.return_value = expected_df
+        mock_conn.sql.return_value.pl.return_value = expected_df
 
         duckdb_get_table("test_project", "test_alias", "raw")
 

@@ -3,7 +3,7 @@ import logging
 import os
 import re
 from dataclasses import dataclass
-from datetime import datetime
+from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
 
@@ -61,7 +61,11 @@ class SurveyCTOConfig:
     max_retries: int = 3
     timeout: int = 30
     chunk_size: int = 1000
-    default_date: datetime = datetime(2024, 1, 1, 13, 40, 40)
+    # Lower bound for the API `date` filter, earlier than any SurveyCTO data.
+    # Not 0: SurveyCTO throttles `date=0` (full pull) requests to one per
+    # licensed quiet period (HTTP 417), and every refresh is currently a full
+    # pull. Revisit once incremental refresh works (#340).
+    default_date: datetime = datetime(2010, 1, 1, tzinfo=UTC)
     date_format: str = "%b %d, %Y %I:%M:%S %p"
 
 
@@ -270,9 +274,17 @@ class DataProcessor:
     ) -> pl.DataFrame:
         """Convert a single column based on its field type."""
         try:
-            if field_type in ["date", "datetime", "time"]:
+            # The wide JSON sends dates as "Mar 7, 2025" and datetimes as
+            # "Mar 7, 2025 4:06:12 PM". Strict: a value in another format
+            # raises below and the column stays text, instead of turning null.
+            # `time` stays text: its wide-JSON format is not confirmed.
+            if field_type == "date":
                 return data.with_columns(
-                    pl.col(col).str.strptime(pl.Datetime, format="%+", strict=False)
+                    pl.col(col).str.strptime(pl.Date, format="%b %d, %Y")
+                )
+            elif field_type == "datetime":
+                return data.with_columns(
+                    pl.col(col).str.strptime(pl.Datetime, format=self.date_format)
                 )
             elif field_type in ["integer", "decimal"]:
                 return data.with_columns(pl.col(col).cast(pl.Float64, strict=False))

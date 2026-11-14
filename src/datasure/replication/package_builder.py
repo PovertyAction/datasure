@@ -10,6 +10,11 @@ from collections.abc import Callable
 
 import polars as pl
 
+from datasure.processing.correction_log import (
+    CORRECTION_LOG_SCHEMA,
+    Action,
+    ensure_log_columns,
+)
 from datasure.replication.codebook import generate_codebook
 from datasure.replication.data_dict import generate_data_dict
 from datasure.replication.prep_script_generator import (
@@ -82,7 +87,9 @@ def _load_prep_log(project_id: str, alias: str) -> pl.DataFrame:
 
 def _load_correction_log(project_id: str, alias: str) -> pl.DataFrame:
     try:
-        return duckdb_get_table(project_id, f"corr_log_{alias}", "logs")
+        return ensure_log_columns(
+            duckdb_get_table(project_id, f"corr_log_{alias}", "logs")
+        )
     except Exception:
         logger.warning(
             "Correction log for %s not found; returning empty DataFrame", alias
@@ -90,7 +97,27 @@ def _load_correction_log(project_id: str, alias: str) -> pl.DataFrame:
         return pl.DataFrame()
 
 
+def _applied_corrections(correction_log: pl.DataFrame) -> pl.DataFrame:
+    """Return the log rows that change data, dropping "accept" review records."""
+    if "action" not in correction_log.columns:
+        return correction_log
+    return correction_log.filter(pl.col("action") != Action.ACCEPT)
+
+
+def _blank_reviewer_names(correction_log: pl.DataFrame) -> pl.DataFrame:
+    """Return a copy of *correction_log* with every ``user`` value set to null.
+
+    The column is kept so the export still matches ``CORRECTION_LOG_SCHEMA``.
+    """
+    if "user" not in correction_log.columns:
+        return correction_log
+    return correction_log.with_columns(
+        pl.lit(None, dtype=CORRECTION_LOG_SCHEMA["user"]).alias("user")
+    )
+
+
 def _action_summary(correction_log: pl.DataFrame) -> dict[str, int]:
+    correction_log = _applied_corrections(correction_log)
     if correction_log.is_empty():
         return {}
     counts = (
@@ -158,6 +185,8 @@ def build_replication_package(
     form_def: dict | None = None,
     form_id: str = "",
     on_progress: Callable[[str], None] | None = None,
+    exclude_reviewer_names: bool = False,
+    on_warning: Callable[[str], None] | None = None,
 ) -> bytes:
     """Build the Stata replication package and return it as zip bytes.
 
@@ -186,6 +215,14 @@ def build_replication_package(
         Optional callback invoked with a human-readable status message at each
         major step.  Callers can pass ``st.write`` to stream progress into a
         Streamlit status block.
+    exclude_reviewer_names : bool
+        When ``True``, blank the ``user`` column in the exported
+        ``correction_log.csv``. The column is kept, and the project's stored
+        correction log is not modified.
+    on_warning : Callable[[str], None] | None
+        Optional callback invoked with a message for each problem that does
+        not stop the build, such as a prep step that could not be translated
+        to Stata. Callers can pass ``st.warning``.
 
     Returns
     -------
@@ -244,6 +281,7 @@ def build_replication_package(
         project_name=project_name,
         survey_name=survey_name,
         datasure_version=datasure_version,
+        on_warning=on_warning,
     )
     _step("`prepare_data.do` generated")
 
@@ -294,7 +332,7 @@ def build_replication_package(
         project_name=project_name,
         survey_name=survey_name,
         datasure_version=datasure_version,
-        correction_count=correction_log.height,
+        correction_count=_applied_corrections(correction_log).height,
         prep_count=prep_log.height,
         raw_rows=raw_df.height,
         prepped_rows=prepped_df.height if not prepped_df.is_empty() else 0,
@@ -332,10 +370,14 @@ def build_replication_package(
     _step("Parquet exports generated")
 
     # Audit logs as CSV
+    exported_log = correction_log
+    if exclude_reviewer_names:
+        exported_log = _blank_reviewer_names(correction_log)
+        _step("Reviewer names removed from `correction_log.csv`")
     correction_log_csv = (
-        correction_log.write_csv()
-        if not correction_log.is_empty()
-        else "date,KEY,ID,action,column,current_value,new_value,reason\n"
+        exported_log.write_csv()
+        if not exported_log.is_empty()
+        else ",".join(CORRECTION_LOG_SCHEMA) + "\n"
     )
     prep_log_csv = (
         prep_log.with_columns(

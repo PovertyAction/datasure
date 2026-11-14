@@ -1,0 +1,29 @@
+name: Feature request
+description: Suggest a new check, page, or improvement
+type: Feature
+labels: ["needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Check the [roadmap](https://github.com/PovertyAction/datasure/blob/main/ROADMAP.md) and [existing issues](https://github.com/PovertyAction/datasure/issues?q=is%3Aissue%20sort%3Aupdated-desc) first.
+        If the request already exists, upvote it with a 👍 instead of opening a new one.
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem would this solve?
+      description: Describe the data quality task you are trying to do and what gets in the way today.
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      description: Describe what you would like DataSure to do.
+    validations:
+      required: true
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: Alternatives or workarounds
+      description: Anything you do today instead, such as a Stata or Python script.

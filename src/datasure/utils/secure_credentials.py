@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Any
 
 import keyring
-from keyring.errors import KeyringError
+from keyring.errors import KeyringError, PasswordDeleteError
 
 from .cache_utils import get_cache_path
 
@@ -19,10 +19,53 @@ logger = logging.getLogger(__name__)
 # Service identifiers for keyring
 SCTO_SERVICE_PREFIX = "datasure"
 CREDENTIAL_METADATA_FILE = "credential_metadata.json"
+# The Mapbox token is shared by every project on the machine.
+MAPBOX_SERVICE_NAME = f"{SCTO_SERVICE_PREFIX}_mapbox"
+MAPBOX_USERNAME = "mapbox_token"
 
 
 class SecureCredentialError(Exception):
     """Exception raised when credential operations fail."""
+
+
+NO_KEYRING_HINT = (
+    "No secure credential store is available on this machine. On a headless "
+    "Linux server or container, install an encrypted keyring backend and "
+    "select it with the PYTHON_KEYRING_BACKEND environment variable; see "
+    "'Running on a server' in the README."
+)
+PLAINTEXT_KEYRING_HINT = (
+    "The active keyring backend stores passwords unencrypted on disk, which "
+    "DataSure does not support. Select an encrypted backend with "
+    "PYTHON_KEYRING_BACKEND; see 'Running on a server' in the README."
+)
+
+
+def keyring_backend_problem() -> str | None:
+    """Explain why the active keyring backend can't safely hold credentials.
+
+    Returns None for a usable backend. Detects keyring's "fail" backend (what
+    a headless Linux machine without a Secret Service gets) and plaintext
+    file backends, which would put passwords on disk unencrypted.
+    """
+    cls = type(keyring.get_keyring())
+    priority = getattr(cls, "priority", None)
+    no_backend = isinstance(priority, (int, float)) and priority <= 0
+    if cls.__module__ == "keyring.backends.fail" or no_backend:
+        return NO_KEYRING_HINT
+    if "plaintext" in cls.__name__.lower():
+        return PLAINTEXT_KEYRING_HINT
+    return None
+
+
+def _with_backend_hint(message: str) -> str:
+    """Append the backend explanation to a keyring error, when there is one."""
+    # A hint must never mask the real keyring error.
+    try:
+        problem = keyring_backend_problem()
+    except Exception:
+        problem = None
+    return f"{message} {problem}" if problem else message
 
 
 def _get_service_name(
@@ -52,6 +95,41 @@ def _get_metadata_path(project_id: str) -> Path:
         Path to metadata file
     """
     return get_cache_path(project_id, "settings", CREDENTIAL_METADATA_FILE)
+
+
+def store_mapbox_token(token: str) -> None:
+    """Save the Mapbox API token in the system keyring.
+
+    The token replaces any saved before it and persists until another is
+    saved.
+
+    Raises
+    ------
+    SecureCredentialError
+        If the token is blank or the keyring can't store it.
+    """
+    token = token.strip() if token else ""
+    if not token:
+        raise SecureCredentialError("The Mapbox token is blank")
+    try:
+        keyring.set_password(MAPBOX_SERVICE_NAME, MAPBOX_USERNAME, token)
+    except KeyringError as e:
+        raise SecureCredentialError(
+            f"Could not save the Mapbox token in the system keyring: {e}"
+        ) from e
+
+
+def retrieve_mapbox_token() -> str | None:
+    """Return the Mapbox API token saved in the system keyring, if any.
+
+    A keyring that can't be read is logged and treated as having no token,
+    so the page still renders and asks for one.
+    """
+    try:
+        return keyring.get_password(MAPBOX_SERVICE_NAME, MAPBOX_USERNAME)
+    except KeyringError:
+        logger.warning("Could not read the Mapbox token from the system keyring")
+        return None
 
 
 def store_scto_credentials(
@@ -131,7 +209,9 @@ def store_scto_credentials(
             logger.info(f"Stored {type} credentials for project {project_id}")
 
     except KeyringError as e:
-        error_msg = f"Failed to store credentials in system keyring: {e}"
+        error_msg = _with_backend_hint(
+            f"Failed to store credentials in system keyring: {e}"
+        )
         logger.exception(error_msg)
         return {
             "success": False,
@@ -254,6 +334,14 @@ def retrieve_scto_credentials(
         }
 
 
+def _keyring_password_absent(service_name: str, username: str) -> bool:
+    """Return True only if the keyring confirms no password is stored."""
+    try:
+        return keyring.get_password(service_name, username) is None
+    except KeyringError:
+        return False
+
+
 def delete_stored_credentials(
     project_id: str, server: str, credential_type: str = "scto_login"
 ) -> dict[str, Any]:
@@ -279,10 +367,9 @@ def delete_stored_credentials(
         with open(metadata_path, encoding="utf-8") as f:
             metadata = json.load(f)
 
-        service_name = metadata.get(
-            "service_name", _get_service_name(project_id, server, credential_type)
-        )
-        username = metadata.get("username")
+        # Metadata is keyed by service name (see store_scto_credentials)
+        service_name = _get_service_name(project_id, server, credential_type)
+        username = metadata.get(service_name, {}).get("username")
 
         # Delete from keyring
         if username:
@@ -292,7 +379,24 @@ def delete_stored_credentials(
                     f"Deleted password from keyring for {service_name}/{username}"
                 )
             except KeyringError as e:
-                logger.warning(f"Could not delete password from keyring: {e}")
+                # PasswordDeleteError usually means the password is already
+                # gone, but the macOS Keychain and KWallet backends also raise
+                # it for access errors or a cancelled unlock. Only clear the
+                # metadata entry once the password is confirmed absent.
+                if isinstance(e, PasswordDeleteError) and _keyring_password_absent(
+                    service_name, username
+                ):
+                    logger.info(
+                        f"No keyring password found for {service_name}/{username}"
+                    )
+                else:
+                    error_msg = f"Could not delete password from keyring: {e}"
+                    logger.warning(error_msg)
+                    return {
+                        "success": False,
+                        "error": error_msg,
+                        "error_type": "keyring_error",
+                    }
 
         # Delete metadata file
         try:
@@ -408,12 +512,17 @@ def test_keyring_availability() -> dict[str, Any]:
 
         if retrieved_password == test_password:
             backend_name = keyring.get_keyring().__class__.__name__
-            return {
+            result = {
                 "success": True,
                 "available": True,
                 "backend": backend_name,
                 "message": "Keyring is working correctly",
             }
+            # Works, but may not be safe (e.g. a plaintext file backend).
+            problem = keyring_backend_problem()
+            if problem:
+                result["warning"] = problem
+            return result
         else:
             return {
                 "success": False,
@@ -426,7 +535,7 @@ def test_keyring_availability() -> dict[str, Any]:
         return {
             "success": False,
             "available": False,
-            "error": f"Keyring error: {e}",
+            "error": _with_backend_hint(f"Keyring error: {e}"),
             "error_type": "keyring_error",
         }
 

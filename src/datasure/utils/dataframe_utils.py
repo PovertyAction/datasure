@@ -1,11 +1,42 @@
 import logging
+from enum import Enum
 
 import pandas as pd
 import polars as pl
+import polars.selectors as cs
 
 from datasure.models.schemas import ColumnByType
 
 logger = logging.getLogger(__name__)
+
+
+class TableState(Enum):
+    """What a table loaded from DuckDB holds."""
+
+    # No columns: the table was never imported.
+    MISSING = "missing"
+    # Columns but no rows: a prep step or correction removed every record.
+    NO_ROWS = "no_rows"
+    HAS_ROWS = "has_rows"
+
+
+def get_table_state(df: pl.DataFrame) -> TableState:
+    """Classify a loaded table as missing, emptied, or holding rows.
+
+    PARAMS:
+    -------
+    df: pl.DataFrame : Table as returned by `duckdb_get_table`, which gives a
+        DataFrame with no columns when the table does not exist.
+
+    Returns
+    -------
+    TableState: The state of the table
+    """
+    if df.width == 0:
+        return TableState.MISSING
+    if df.height == 0:
+        return TableState.NO_ROWS
+    return TableState.HAS_ROWS
 
 
 def get_df_columns(df: pl.DataFrame | pd.DataFrame) -> ColumnByType:
@@ -35,10 +66,8 @@ def get_df_columns(df: pl.DataFrame | pd.DataFrame) -> ColumnByType:
     else:  # get info from polars dataframe
         all_columns = df.columns
         string_columns = df.select(pl.col(pl.Utf8)).columns
-        integer_columns = df.select(
-            pl.col(pl.Int64, pl.Int32, pl.Int16, pl.Int8)
-        ).columns
-        numeric_columns = df.select(pl.col(pl.NUMERIC_DTYPES)).columns
+        integer_columns = df.select(cs.integer()).columns
+        numeric_columns = df.select(cs.numeric()).columns
         datetime_columns = df.select(pl.col(pl.Date, pl.Datetime)).columns
         categorical_columns = list(
             set(
@@ -181,7 +210,7 @@ def convert_series_to_numeric(series: pl.Series) -> pl.Series:
     ValueError
         If conversion fails.
     """
-    if series.dtype in pl.NUMERIC_DTYPES:
+    if series.dtype.is_numeric():
         return series.cast(pl.Float64)
 
     try:
@@ -212,7 +241,7 @@ def convert_dataframe_column_to_numeric(df: pl.DataFrame, column: str) -> pl.Dat
     ValueError
         If conversion fails.
     """
-    if df[column].dtype in pl.NUMERIC_DTYPES:
+    if df[column].dtype.is_numeric():
         return df.with_columns(pl.col(column).cast(pl.Float64).alias(column))
 
     try:
@@ -258,3 +287,26 @@ def safe_to_numeric(
         return convert_dataframe_column_to_numeric(data, column)
 
     raise TypeError("Input data must be a Polars DataFrame or Series.")
+
+
+def no_rows_message(data_name: str, task: str) -> str:
+    """
+    Explain that a dataset has no rows because a step or correction emptied it.
+
+    Parameters
+    ----------
+    data_name : str
+        The alias of the dataset.
+    task : str
+        What the page would do with the data, such as "check" or "analyze".
+
+    Returns
+    -------
+    str
+        The message to show.
+    """
+    return (
+        f"**{data_name}** has no rows, so there is nothing to {task}. A step on "
+        "the Prepare Data page or a correction on the Correct Data page removed "
+        "every record. Remove that step or correction to restore the data."
+    )

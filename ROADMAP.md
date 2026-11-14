@@ -45,9 +45,24 @@ For feature requests and bug reports, see our [GitHub Issues](https://github.com
 | **Package Distribution** | Available via PyPI (`uv tool install datasure`) | Launched |
 | **Replication Package Export** | Bundle and export full analysis packages | Launched |
 
+### Check-Page Corrections ([#295](https://github.com/PovertyAction/datasure/issues/295))
+
+**Status:** Launched (v1.2.0)
+
+Correct flagged data, or accept it as valid, from the check pages that flag it.
+Check pages and the Correct Data page write to the same correction log.
+
+- Correct or accept outliers, constraint violations and GPS outliers from the
+  flagged tables, with accepted flags hidden behind a "Show reviewed" toggle
+- Resolve duplicate and unmatched survey and back check IDs on per-ID cards
+- Attribute back check mismatches to the enumerator, back checker or
+  respondent, with an adjusted error rate next to the regular one
+- Correction log audit trail: who made each entry, from which page, filterable
+  by source and action
+
 ---
 
-## Near-Term (Q2-Q3 2026)
+## Near-Term (Q4 2026 – Q1 2027)
 
 Features currently in development or planned for the next release cycle.
 
@@ -94,19 +109,19 @@ Features under exploration for future releases. These are not yet committed to t
 
 | Feature | Description | Status |
 | ------- | ----------- | ------ |
+| **Debrief** | A check in the **Field team** group of the check page that collects the issues to discuss at the morning field team meeting | Exploring |
 | **Consent and Refusal Rates** | Track and flag unusual refusal or incomplete interview rates by enumerator | Exploring |
 | **Time-to-Complete Analysis** | Identify implausibly short or long interview durations | Exploring |
 | **Longitudinal Tracking** | Compare data quality metrics across survey rounds | Exploring |
 | **Automated Correction Suggestions** | ML-assisted flagging and correction recommendations | Exploring |
 | **Report Export** | Generate printable PDF or Word summary reports for project managers | Exploring |
-| **Audit Trail** | Log all corrections with timestamps and reviewer attribution | Exploring |
 | **API Mode** | Programmatic access to check results for integration with other tools | Exploring |
 
 ---
 
 ## How to Influence the Roadmap
 
-- **Request a feature**: [Open an issue](https://github.com/PovertyAction/datasure/issues/new) on GitHub with the `enhancement` label
+- **Request a feature**: [Open a feature request](https://github.com/PovertyAction/datasure/issues/new?template=feature_request.yml) on GitHub
 - **Vote on priorities**: Upvote existing issues to signal demand
 - **Contribute**: See [CONTRIBUTING.md](CONTRIBUTING.md) to contribute code or documentation
 - **Contact the team**: Reach out at <researchsupport@poverty-action.org>

@@ -11,6 +11,7 @@ from pydantic import ValidationError
 
 from datasure.connectors.local import (
     VALID_FILE_TYPES,
+    XLS_NOT_SUPPORTED_MESSAGE,
     FileConfig,
     ImportLogEntry,
     get_excel_sheet_names,
@@ -36,7 +37,7 @@ class TestValidFileTypes:
 
     def test_valid_file_types_constant(self):
         """Test that VALID_FILE_TYPES contains expected file extensions."""
-        expected_types = {".csv", ".xlsx", ".xls", ".json", ".dta", ".parquet"}
+        expected_types = {".csv", ".xlsx", ".json", ".dta", ".parquet"}
         assert expected_types == VALID_FILE_TYPES
 
 
@@ -119,6 +120,16 @@ class TestFileConfig:
 
         assert "Invalid file type" in str(exc_info.value)
         assert ".csv" in str(exc_info.value)
+
+    def test_filename_validation_legacy_xls(self, tmp_path):
+        """Legacy .xls files are rejected with a save-as-.xlsx instruction."""
+        test_file = tmp_path / "test.xls"
+        test_file.write_bytes(b"\xd0\xcf\x11\xe0")
+
+        with pytest.raises(ValidationError) as exc_info:
+            FileConfig(alias="test", filename=str(test_file))
+
+        assert XLS_NOT_SUPPORTED_MESSAGE in str(exc_info.value)
 
 
 class TestImportLogEntry:
@@ -432,6 +443,22 @@ class TestRenderLocalFileForm:
 
         # Verify form submission was handled
         mock_handle_submission.assert_called_once()
+
+    @patch("datasure.connectors.local.validate_file_accessibility", return_value=True)
+    @patch("datasure.connectors.local.get_excel_sheet_names")
+    @patch("datasure.connectors.local.st")
+    def test_render_form_legacy_xls_shows_error(
+        self, mock_st, mock_get_sheets, mock_accessible
+    ):
+        """A .xls path shows the save-as-.xlsx error instead of a sheet list."""
+        mock_st.text_input.side_effect = ["test_alias", "/path/to/file.xls"]
+        mock_st.button.return_value = False
+
+        render_local_file_form("test_project_id")
+
+        mock_st.error.assert_called_once_with(XLS_NOT_SUPPORTED_MESSAGE)
+        mock_get_sheets.assert_not_called()
+        mock_st.selectbox.assert_not_called()
 
 
 class TestHandleFormSubmission:

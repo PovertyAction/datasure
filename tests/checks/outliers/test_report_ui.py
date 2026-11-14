@@ -1,0 +1,1376 @@
+"""Tests for datasure.checks.outliers.report_ui."""
+
+import importlib
+import sys
+from typing import ClassVar
+from unittest.mock import MagicMock, patch
+
+import polars as pl
+import pytest
+from pydantic import ValidationError
+
+from datasure.checks.headline import CheckHeadline
+from datasure.checks.outliers.models import (
+    ConstraintBounds,
+    OutlierMethod,
+    OutlierOptionsConfig,
+    OutlierSettings,
+    SearchType,
+)
+from datasure.checks.outliers.report_ui import (
+    _create_search_type_info,
+    _delete_outlier_column,
+    _ensure_column_formats,
+    _format_constraint_validation_error,
+    _format_outlier_validation_error,
+    _load_outlier_settings,
+    _render_column_grouping_options,
+    _render_constraint_metrics,
+    _render_constraint_options,
+    _render_constraint_violations_table,
+    _render_outlier_column_actions,
+    _render_outlier_column_inspection,
+    _render_outlier_metrics,
+    _render_outlier_options,
+    _render_outlier_settings_table,
+    _render_search_type_selection,
+    _update_outlier_column_config,
+    _validate_constraint_settings,
+    _validate_outlier_settings,
+    outliers_headline,
+    outliers_report,
+)
+from datasure.utils.dataframe_utils import get_df_columns
+from tests.checks.outliers.conftest import _columns_side_effect, _make_st_mock
+
+# ============================================================================
+# REPORT_UI_MOD FIXTURE (reload compute/settings_ui/report_ui with mocked
+# streamlit for @st.dialog decorator tests)
+# ============================================================================
+
+
+@pytest.fixture
+def report_ui_mod():
+    """Reload the outliers submodules with mocked Streamlit for decorator tests."""
+    mock_st = _make_st_mock()
+    original_st = sys.modules.get("streamlit")
+    sys.modules["streamlit"] = mock_st
+
+    import datasure.checks.outliers.compute as compute_module
+    import datasure.checks.outliers.report_ui as report_ui_module
+    import datasure.checks.outliers.settings_ui as settings_ui_module
+
+    try:
+        with patch(
+            "datasure.utils.onboarding_utils.demo_output_onboarding",
+            lambda tab: lambda f: f,
+        ):
+            # Reload in dependency order so decorators pick up the mocked st and
+            # cross-module references (report_ui imports from settings_ui) stay wired.
+            importlib.reload(compute_module)
+            importlib.reload(settings_ui_module)
+            importlib.reload(report_ui_module)
+        yield report_ui_module
+    finally:
+        if original_st is not None:
+            sys.modules["streamlit"] = original_st
+        else:
+            sys.modules.pop("streamlit", None)
+        importlib.reload(compute_module)
+        importlib.reload(settings_ui_module)
+        importlib.reload(report_ui_module)
+
+
+# ============================================================================
+# FIXTURES
+# ============================================================================
+
+
+@pytest.fixture
+def sample_violation_data():
+    """Create sample constraint violation data."""
+    return pl.DataFrame(
+        {
+            "survey_key": ["K001", "K002", "K003"],
+            "column name": ["col1", "col1", "col2"],
+            "violation reason": [
+                "below hard minimum",
+                "above soft maximum",
+                "no violation",
+            ],
+        }
+    )
+
+
+@pytest.fixture
+def sample_outlier_data():
+    """Create sample outlier data."""
+    return pl.DataFrame(
+        {
+            "survey_key": ["K001", "K002"],
+            "column name": ["col1", "col1"],
+            "outlier reason": ["Value is below lower bound 5.00", "no outlier"],
+            "enumerator": ["E001", "E001"],
+        }
+    )
+
+
+@pytest.fixture
+def base_survey_data():
+    """Create base survey data for rendering tests."""
+    return pl.DataFrame(
+        {
+            "survey_key": ["K001", "K002"],
+            "survey_id": ["S001", "S002"],
+            "survey_date": ["2024-01-01", "2024-01-02"],
+            "enumerator": ["E001", "E002"],
+            "team": ["T1", "T2"],
+        }
+    )
+
+
+@pytest.fixture
+def survey_columns_mock():
+    """Create a mock ColumnByType for outliers_report tests."""
+    from datasure.utils.dataframe_utils import ColumnByType
+
+    return ColumnByType(
+        all_columns=[
+            "survey_key",
+            "survey_id",
+            "survey_date",
+            "enumerator",
+            "team",
+            "col1",
+        ],
+        categorical_columns=["survey_key", "survey_id", "enumerator", "team"],
+        datetime_columns=["survey_date"],
+        numeric_columns=["col1"],
+        boolean_columns=[],
+    )
+
+
+@pytest.fixture
+def outlier_config_dict():
+    """Create a default outlier config dict for outliers_report tests."""
+    return {
+        "survey_key": "survey_key",
+        "survey_id": "survey_id",
+        "survey_date": "survey_date",
+        "enumerator": "enumerator",
+        "team": "team",
+    }
+
+
+# ============================================================================
+# TESTS: _validate_constraint_settings
+# ============================================================================
+
+
+class TestValidateConstraintSettings:
+    """Test _validate_constraint_settings function."""
+
+    def test_valid_settings_returns_bounds_and_true(self):
+        result, valid = _validate_constraint_settings(
+            {"soft_min": 0.0, "soft_max": 100.0}
+        )
+        assert valid is True
+        assert result is not None
+
+    def test_invalid_hierarchy_returns_none_and_false(self):
+        with patch("datasure.checks.outliers.report_ui.st") as st_mock:
+            result, valid = _validate_constraint_settings(
+                {"hard_min": 50.0, "soft_min": 10.0}
+            )
+        assert valid is False
+        assert result is None
+        st_mock.error.assert_called_once()
+
+    def test_all_none_settings_valid(self):
+        _result, valid = _validate_constraint_settings(
+            {"hard_min": None, "soft_min": None, "soft_max": None, "hard_max": None}
+        )
+        assert valid is True
+
+
+# ============================================================================
+# TESTS: _validate_outlier_settings
+# ============================================================================
+
+
+class TestValidateOutlierSettings:
+    """Test _validate_outlier_settings function."""
+
+    def test_valid_settings_returns_config_and_true(self):
+        result, valid = _validate_outlier_settings(
+            {
+                "outlier_method": OutlierMethod.IQR.value,
+                "outlier_multiplier": 1.5,
+                "outlier_threshold": 20,
+            }
+        )
+        assert valid is True
+        assert result is not None
+
+    def test_invalid_multiplier_returns_none_and_false(self):
+        with patch("datasure.checks.outliers.report_ui.st") as st_mock:
+            result, valid = _validate_outlier_settings(
+                {
+                    "outlier_method": OutlierMethod.IQR.value,
+                    "outlier_multiplier": 0.0,
+                    "outlier_threshold": 20,
+                }
+            )
+        assert valid is False
+        assert result is None
+        st_mock.error.assert_called_once()
+
+
+# ============================================================================
+# TESTS: _format_constraint_validation_error
+# ============================================================================
+
+
+class TestFormatConstraintValidationError:
+    """Test _format_constraint_validation_error function."""
+
+    def test_value_error_type(self):
+        try:
+            ConstraintBounds(hard_min=50.0, soft_min=10.0)
+        except ValidationError as e:
+            msg = _format_constraint_validation_error(e)
+        assert "Invalid constraint configuration" in msg
+
+    def test_float_not_finite_type(self):
+        """Test float_not_finite error type produces finite-number message."""
+        mock_error = MagicMock()
+        mock_error.errors.return_value = [
+            {
+                "loc": ("hard_min",),
+                "msg": "value is not a finite number",
+                "type": "float_not_finite",
+            }
+        ]
+        msg = _format_constraint_validation_error(mock_error)
+        assert "Invalid constraint configuration" in msg
+        assert "finite number" in msg
+
+    def test_value_error_type_uses_msg(self):
+        """Test value_error type includes the custom validation message."""
+        mock_error = MagicMock()
+        mock_error.errors.return_value = [
+            {
+                "loc": ("hard_min",),
+                "msg": "Bounds must follow hierarchy",
+                "type": "value_error",
+            }
+        ]
+        msg = _format_constraint_validation_error(mock_error)
+        assert "Bounds must follow hierarchy" in msg
+
+    def test_other_error_type(self):
+        """Test other error types fall through to field: msg format."""
+        try:
+            ConstraintBounds(hard_min="not_a_number")
+        except ValidationError as e:
+            msg = _format_constraint_validation_error(e)
+        assert "Invalid constraint configuration" in msg
+
+
+# ============================================================================
+# TESTS: _format_outlier_validation_error
+# ============================================================================
+
+
+class TestFormatOutlierValidationError:
+    """Test _format_outlier_validation_error function."""
+
+    def test_formats_error_message(self):
+        """Test that a ValidationError is formatted into a user-friendly string."""
+        try:
+            OutlierOptionsConfig(
+                outlier_method=OutlierMethod.IQR.value,
+                outlier_multiplier=0.0,
+                outlier_threshold=20,
+            )
+        except ValidationError as e:
+            msg = _format_outlier_validation_error(e)
+        assert "Invalid outlier configuration" in msg
+
+    def test_includes_field_name(self):
+        """Test that the field name appears in the formatted error."""
+        try:
+            OutlierOptionsConfig(
+                outlier_method=OutlierMethod.IQR.value,
+                outlier_multiplier=0.0,
+                outlier_threshold=20,
+            )
+        except ValidationError as e:
+            msg = _format_outlier_validation_error(e)
+        assert "outlier_multiplier" in msg
+
+    def test_value_error_number_not_ge_branch(self):
+        """Test the value_error.number.not_ge branch via mocked error."""
+        mock_error = MagicMock()
+        mock_error.errors.return_value = [
+            {
+                "loc": ("outlier_multiplier",),
+                "msg": "value must be greater than 0",
+                "type": "value_error.number.not_ge",
+            }
+        ]
+        msg = _format_outlier_validation_error(mock_error)
+        assert "Invalid outlier configuration" in msg
+        assert "greater than or equal" in msg
+
+    def test_value_error_number_not_le_branch(self):
+        """Test the value_error.number.not_le branch via mocked error."""
+        mock_error = MagicMock()
+        mock_error.errors.return_value = [
+            {
+                "loc": ("outlier_multiplier",),
+                "msg": "value must be less than or equal to 10",
+                "type": "value_error.number.not_le",
+            }
+        ]
+        msg = _format_outlier_validation_error(mock_error)
+        assert "Invalid outlier configuration" in msg
+        assert "less than or equal" in msg
+
+
+# ============================================================================
+# TESTS: _ensure_column_formats
+# ============================================================================
+
+
+class TestEnsureColumnFormats:
+    """Test _ensure_column_formats function."""
+
+    def test_returns_polars_dataframe(self, outlier_column_config):
+        result = _ensure_column_formats(outlier_column_config)
+        assert isinstance(result, pl.DataFrame)
+
+    def test_preserves_column_names(self, outlier_column_config):
+        result = _ensure_column_formats(outlier_column_config)
+        assert set(outlier_column_config.columns) == set(result.columns)
+
+    def test_casts_types_correctly(self, outlier_column_config):
+        result = _ensure_column_formats(outlier_column_config)
+        assert result.schema["outlier_multiplier"] == pl.Float64
+        assert result.schema["outlier_threshold"] == pl.Int64
+
+
+# ============================================================================
+# TESTS: _render_constraint_metrics
+# ============================================================================
+
+
+class TestRenderConstraintMetrics:
+    """Test _render_constraint_metrics function."""
+
+    def test_calls_st_metric(self, sample_violation_data):
+        with patch("datasure.checks.outliers.report_ui.st") as st_mock:
+            st_mock.columns.side_effect = _columns_side_effect
+            _render_constraint_metrics(sample_violation_data)
+        assert st_mock.metric.called or st_mock.columns.called
+
+
+# ============================================================================
+# TESTS: _render_outlier_metrics
+# ============================================================================
+
+
+class TestRenderOutlierMetrics:
+    """Test _render_outlier_metrics function."""
+
+    def test_with_enumerator(self, sample_outlier_data, outlier_settings):
+        with patch("datasure.checks.outliers.report_ui.st") as st_mock:
+            st_mock.columns.side_effect = _columns_side_effect
+            _render_outlier_metrics(sample_outlier_data, outlier_settings)
+        assert st_mock.metric.called or st_mock.columns.called
+
+    def test_without_enumerator(self, sample_outlier_data):
+        settings = OutlierSettings(
+            survey_key="survey_key",
+            survey_id="survey_id",
+            survey_date=None,
+            enumerator=None,
+            team=None,
+        )
+        with patch("datasure.checks.outliers.report_ui.st") as st_mock:
+            st_mock.columns.side_effect = _columns_side_effect
+            _render_outlier_metrics(sample_outlier_data, settings)
+        assert st_mock.columns.called
+
+
+# ============================================================================
+# TESTS: _render_constraint_violations_table
+# ============================================================================
+
+
+class TestRenderConstraintViolationsTable:
+    """Test _render_constraint_violations_table function."""
+
+    def test_empty_data_shows_info(self, base_survey_data, outlier_settings):
+        with patch("datasure.checks.outliers.report_ui.st") as st_mock:
+            _render_constraint_violations_table(
+                base_survey_data,
+                pl.DataFrame(),
+                outlier_settings,
+                "settings.json",
+            )
+        st_mock.info.assert_called_once()
+
+    def test_non_empty_data_shows_dataframe(self, base_survey_data, outlier_settings):
+        violation_data = pl.DataFrame(
+            {
+                "survey_key": ["K001"],
+                "column name": ["col1"],
+                "violation reason": ["below soft minimum"],
+            }
+        )
+        with (
+            patch("datasure.checks.outliers.report_ui.st") as st_mock,
+        ):
+            st_mock.columns.side_effect = _columns_side_effect
+            st_mock.multiselect.return_value = []
+            _render_constraint_violations_table(
+                base_survey_data,
+                violation_data,
+                outlier_settings,
+                "settings.json",
+            )
+        st_mock.dataframe.assert_called_once()
+
+    def test_non_empty_with_extra_display_cols(
+        self, base_survey_data, outlier_settings
+    ):
+        violation_data = pl.DataFrame(
+            {
+                "survey_key": ["K001"],
+                "violation reason": ["above hard maximum"],
+            }
+        )
+        with (
+            patch("datasure.checks.outliers.report_ui.st") as st_mock,
+        ):
+            st_mock.columns.side_effect = _columns_side_effect
+            st_mock.multiselect.return_value = []
+            _render_constraint_violations_table(
+                base_survey_data,
+                violation_data,
+                outlier_settings,
+                "settings.json",
+            )
+        st_mock.dataframe.assert_called_once()
+
+
+# ============================================================================
+# TESTS: _render_outlier_column_inspection
+# ============================================================================
+
+
+class TestRenderOutlierColumnInspection:
+    """Test _render_outlier_column_inspection function."""
+
+    def test_empty_outlier_data_shows_info(self, base_survey_data, outlier_settings):
+        with patch("datasure.checks.outliers.report_ui.st") as st_mock:
+            _render_outlier_column_inspection(
+                base_survey_data, pl.DataFrame(), outlier_settings, "settings.json"
+            )
+        st_mock.info.assert_called_once()
+
+    def test_no_selected_col_returns_early(self, base_survey_data, outlier_settings):
+        outliers_data = pl.DataFrame(
+            {"survey_key": ["K001"], "column name": ["survey_key"]}
+        )
+        with (
+            patch("datasure.checks.outliers.report_ui.st") as st_mock,
+        ):
+            st_mock.columns.side_effect = _columns_side_effect
+            st_mock.selectbox.return_value = None
+            _render_outlier_column_inspection(
+                base_survey_data, outliers_data, outlier_settings, "settings.json"
+            )
+        st_mock.info.assert_called()
+
+    def test_col_not_in_data_raises(self, base_survey_data, outlier_settings):
+        outliers_data = pl.DataFrame(
+            {"survey_key": ["K001"], "column name": ["nonexistent_col"]}
+        )
+        with (
+            patch("datasure.checks.outliers.report_ui.st") as st_mock,
+        ):
+            st_mock.columns.side_effect = _columns_side_effect
+            st_mock.selectbox.return_value = "nonexistent_col"
+            with pytest.raises(ValueError, match="not present in the data"):
+                _render_outlier_column_inspection(
+                    base_survey_data,
+                    outliers_data,
+                    outlier_settings,
+                    "settings.json",
+                )
+
+    def test_normal_path_renders_chart_and_table(self, outlier_settings):
+        data = pl.DataFrame(
+            {
+                "survey_key": ["K001", "K002"],
+                "survey_id": ["S001", "S002"],
+                "survey_date": ["2024-01-01", "2024-01-02"],
+                "enumerator": ["E001", "E002"],
+                "team": ["T1", "T2"],
+                "numeric_col1": [1.0, 100.0],
+            }
+        )
+        outliers_data = pl.DataFrame(
+            {
+                "survey_key": ["K001"],
+                "column name": ["numeric_col1"],
+                "outlier reason": ["Value is above upper bound 50.00"],
+            }
+        )
+        with (
+            patch("datasure.checks.outliers.report_ui.st") as st_mock,
+            patch(
+                "datasure.checks.outliers.report_ui._create_descriptive_stats"
+            ) as mock_desc,
+            patch("datasure.checks.outliers.report_ui._create_box_plot") as mock_box,
+        ):
+            st_mock.columns.side_effect = _columns_side_effect
+            st_mock.selectbox.return_value = "numeric_col1"
+            st_mock.multiselect.return_value = []
+            mock_desc.return_value = pl.DataFrame(
+                {"statistic": ["count"], "value": ["2"]}
+            )
+            mock_box.return_value = MagicMock()
+            _render_outlier_column_inspection(
+                data, outliers_data, outlier_settings, "settings.json"
+            )
+        st_mock.dataframe.assert_called()
+
+    def test_missing_codes_are_left_out_of_the_statistics(
+        self, land_area_data, land_area_missing_codes
+    ):
+        """Issue #379: the column's minimum is 2, not the -99 code."""
+        outliers_data = pl.DataFrame(
+            {
+                "key": ["k11"],
+                "column name": ["land_area"],
+                "outlier reason": ["Value is above upper bound 9.75"],
+            }
+        )
+        with (
+            patch("datasure.checks.outliers.report_ui.st") as st_mock,
+            patch("datasure.checks.outliers.report_ui.styled_dataframe"),
+        ):
+            st_mock.columns.side_effect = _columns_side_effect
+            st_mock.selectbox.return_value = "land_area"
+            st_mock.multiselect.return_value = []
+            _render_outlier_column_inspection(
+                land_area_data,
+                outliers_data,
+                OutlierSettings(survey_key="key"),
+                "settings.json",
+                missing_codes=land_area_missing_codes,
+            )
+
+        desc_stats = st_mock.dataframe.call_args_list[0].args[0]
+        stats = dict(desc_stats.iter_rows())
+        assert stats["Number of Values"] == 9
+        assert stats["Minimum Value"] == 2
+        st_mock.warning.assert_called_once_with(
+            "3 values were excluded because they are specified as missing "
+            "values: -99 (2), -88 (1)"
+        )
+
+    def test_text_column_codes_are_left_out_of_the_statistics(
+        self, land_area_missing_codes
+    ):
+        """Codes in a text column are masked once it is converted to numbers."""
+        data = pl.DataFrame({"key": ["k1", "k2", "k3"], "age": ["30", "-99", "40"]})
+        outliers_data = pl.DataFrame(
+            {"key": ["k1"], "column name": ["age"], "outlier reason": ["x"]}
+        )
+        with (
+            patch("datasure.checks.outliers.report_ui.st") as st_mock,
+            patch("datasure.checks.outliers.report_ui.styled_dataframe"),
+        ):
+            st_mock.columns.side_effect = _columns_side_effect
+            st_mock.selectbox.return_value = "age"
+            st_mock.multiselect.return_value = []
+            _render_outlier_column_inspection(
+                data,
+                outliers_data,
+                OutlierSettings(survey_key="key"),
+                "settings.json",
+                missing_codes=land_area_missing_codes,
+            )
+
+        stats = dict(st_mock.dataframe.call_args_list[0].args[0].iter_rows())
+        assert stats["Number of Values"] == 2
+        assert stats["Minimum Value"] == 30
+        st_mock.warning.assert_called_once_with(
+            "1 value was excluded because it is specified as missing: -99 (1)"
+        )
+
+    def test_no_warning_without_missing_codes_in_column(self, land_area_missing_codes):
+        data = pl.DataFrame({"key": ["k1", "k2"], "age": [30, 40]})
+        outliers_data = pl.DataFrame(
+            {"key": ["k1"], "column name": ["age"], "outlier reason": ["x"]}
+        )
+        with (
+            patch("datasure.checks.outliers.report_ui.st") as st_mock,
+            patch("datasure.checks.outliers.report_ui.styled_dataframe"),
+        ):
+            st_mock.columns.side_effect = _columns_side_effect
+            st_mock.selectbox.return_value = "age"
+            st_mock.multiselect.return_value = []
+            _render_outlier_column_inspection(
+                data,
+                outliers_data,
+                OutlierSettings(survey_key="key"),
+                "settings.json",
+                missing_codes=land_area_missing_codes,
+            )
+
+        st_mock.warning.assert_not_called()
+
+
+# ============================================================================
+# TESTS: _create_search_type_info
+# ============================================================================
+
+
+class TestCreateSearchTypeInfo:
+    """Test _create_search_type_info function."""
+
+    def test_exact_search_type(self):
+        with patch("datasure.checks.outliers.report_ui.st") as st_mock:
+            _create_search_type_info(SearchType.EXACT.value)
+        st_mock.info.assert_called_once()
+
+    def test_startswith_search_type(self):
+        with patch("datasure.checks.outliers.report_ui.st") as st_mock:
+            _create_search_type_info(SearchType.STARTSWITH.value)
+        st_mock.info.assert_called_once()
+
+    def test_endswith_search_type(self):
+        with patch("datasure.checks.outliers.report_ui.st") as st_mock:
+            _create_search_type_info(SearchType.ENDSWITH.value)
+        st_mock.info.assert_called_once()
+
+    def test_contains_search_type(self):
+        with patch("datasure.checks.outliers.report_ui.st") as st_mock:
+            _create_search_type_info(SearchType.CONTAINS.value)
+        st_mock.info.assert_called_once()
+
+    def test_regex_search_type(self):
+        with patch("datasure.checks.outliers.report_ui.st") as st_mock:
+            _create_search_type_info(SearchType.REGEX.value)
+        st_mock.info.assert_called_once()
+
+    def test_unknown_type(self):
+        with patch("datasure.checks.outliers.report_ui.st") as st_mock:
+            _create_search_type_info("unknown_type")
+        st_mock.info.assert_called_once()
+
+
+# ============================================================================
+# TESTS: _render_search_type_selection
+# ============================================================================
+
+
+class TestRenderSearchTypeSelection:
+    """Test _render_search_type_selection function."""
+
+    def test_exact_search_type(self):
+        with patch("datasure.checks.outliers.report_ui.st") as st_mock:
+            st_mock.columns.side_effect = _columns_side_effect
+            st_mock.selectbox.return_value = SearchType.EXACT.value
+            st_mock.multiselect.return_value = ["col1"]
+            search_type, pattern, cols, _lock = _render_search_type_selection(
+                ["col1", "col2"]
+            )
+        assert search_type == SearchType.EXACT.value
+        assert pattern is None
+        assert cols == ["col1"]
+
+    def test_pattern_search_type_with_pattern(self):
+        with patch("datasure.checks.outliers.report_ui.st") as st_mock:
+            st_mock.selectbox.return_value = SearchType.STARTSWITH.value
+            st_mock.text_input.return_value = "num"
+            search_type, pattern, cols, _lock = _render_search_type_selection(
+                ["num_col1", "num_col2", "other"]
+            )
+        assert search_type == SearchType.STARTSWITH.value
+        assert pattern == "num"
+        assert "num_col1" in cols
+
+    def test_pattern_search_type_no_pattern(self):
+        with patch("datasure.checks.outliers.report_ui.st") as st_mock:
+            st_mock.selectbox.return_value = SearchType.CONTAINS.value
+            st_mock.text_input.return_value = ""
+            _search_type, _pattern, cols, lock = _render_search_type_selection(
+                ["col1", "col2"]
+            )
+        assert cols == []
+        assert lock is None
+
+
+# ============================================================================
+# TESTS: _render_column_grouping_options
+# ============================================================================
+
+
+class TestRenderColumnGroupingOptions:
+    """Test _render_column_grouping_options function."""
+
+    def test_basic_render(self):
+        with patch("datasure.checks.outliers.report_ui.st") as st_mock:
+            st_mock.columns.side_effect = _columns_side_effect
+            st_mock.toggle.return_value = False
+            group_cols, lock_cols = _render_column_grouping_options(
+                ["col1", "col2"], SearchType.EXACT.value
+            )
+        assert isinstance(group_cols, bool)
+        assert isinstance(lock_cols, bool)
+
+    def test_returns_toggle_values(self):
+        with patch("datasure.checks.outliers.report_ui.st") as st_mock:
+            st_mock.columns.side_effect = _columns_side_effect
+            st_mock.toggle.side_effect = [True, False]
+            group_cols, lock_cols = _render_column_grouping_options(
+                ["col1", "col2"], SearchType.STARTSWITH.value
+            )
+        assert group_cols is True
+        assert lock_cols is False
+
+
+# ============================================================================
+# TESTS: _render_outlier_options
+# ============================================================================
+
+
+class TestRenderOutlierOptions:
+    """Test _render_outlier_options function."""
+
+    def test_outliers_enabled_returns_settings(self):
+        with patch("datasure.checks.outliers.report_ui.st") as st_mock:
+            st_mock.columns.side_effect = _columns_side_effect
+            st_mock.toggle.return_value = True
+            st_mock.selectbox.return_value = OutlierMethod.IQR.value
+            st_mock.number_input.side_effect = [1.5, 20]
+            enabled, settings, valid = _render_outlier_options()
+        assert enabled is True
+        assert settings is not None
+        assert valid is True
+
+    def test_outliers_enabled_sd_method(self):
+        with patch("datasure.checks.outliers.report_ui.st") as st_mock:
+            st_mock.columns.side_effect = _columns_side_effect
+            st_mock.toggle.return_value = True
+            st_mock.selectbox.return_value = OutlierMethod.SD.value
+            st_mock.number_input.side_effect = [3.0, 30]
+            enabled, _settings, valid = _render_outlier_options()
+        assert enabled is True
+        assert valid is True
+
+    def test_outliers_disabled_returns_none(self):
+        with patch("datasure.checks.outliers.report_ui.st") as st_mock:
+            st_mock.columns.side_effect = _columns_side_effect
+            st_mock.toggle.return_value = False
+            enabled, settings, valid = _render_outlier_options()
+        assert enabled is False
+        assert settings is None
+        assert valid is True
+
+
+# ============================================================================
+# TESTS: _render_constraint_options
+# ============================================================================
+
+
+class TestRenderConstraintOptions:
+    """Test _render_constraint_options function."""
+
+    def test_valid_settings_returns_true(self):
+        with patch("datasure.checks.outliers.report_ui.st") as st_mock:
+            st_mock.columns.side_effect = _columns_side_effect
+            st_mock.number_input.return_value = None
+            _settings, valid = _render_constraint_options()
+        assert valid is True
+
+    def test_invalid_settings_calls_error(self):
+        with patch("datasure.checks.outliers.report_ui.st") as st_mock:
+            st_mock.columns.side_effect = _columns_side_effect
+            st_mock.number_input.side_effect = [50.0, 10.0, None, None]
+            _settings, valid = _render_constraint_options()
+        assert valid is False
+        st_mock.error.assert_called_once()
+
+
+# ============================================================================
+# TESTS: _render_outlier_settings_table
+# ============================================================================
+
+
+class TestRenderOutlierSettingsTable:
+    """Test _render_outlier_settings_table function."""
+
+    def test_renders_dataframe(self, outlier_column_config):
+        with patch("datasure.checks.outliers.report_ui.st") as st_mock:
+            _render_outlier_settings_table(outlier_column_config)
+        st_mock.dataframe.assert_called_once()
+
+
+# ============================================================================
+# TESTS: _render_outlier_column_actions
+# ============================================================================
+
+
+class TestRenderOutlierColumnActions:
+    """Test _render_outlier_column_actions function."""
+
+    def test_empty_settings_shows_info(self):
+        with (
+            patch("datasure.checks.outliers.report_ui.st") as st_mock,
+            patch(
+                "datasure.checks.outliers.report_ui.duckdb_get_table",
+                return_value=pl.DataFrame(),
+            ),
+        ):
+            st_mock.columns.side_effect = _columns_side_effect
+            _render_outlier_column_actions("proj1", "page1", ["col1"])
+        assert st_mock.info.call_count >= 1
+
+    def test_non_empty_settings_calls_render_table(self, outlier_column_config):
+        with (
+            patch("datasure.checks.outliers.report_ui.st") as st_mock,
+            patch(
+                "datasure.checks.outliers.report_ui.duckdb_get_table",
+                return_value=outlier_column_config,
+            ),
+            patch(
+                "datasure.checks.outliers.report_ui._render_outlier_settings_table"
+            ) as mock_render,
+            patch("datasure.checks.outliers.report_ui._delete_outlier_column"),
+        ):
+            st_mock.columns.side_effect = _columns_side_effect
+            _render_outlier_column_actions("proj1", "page1", ["col1"])
+        mock_render.assert_called_once()
+
+
+# ============================================================================
+# TESTS: _update_outlier_column_config
+# ============================================================================
+
+
+class TestUpdateOutlierColumnConfig:
+    """Test _update_outlier_column_config function."""
+
+    def test_empty_existing_config_saves_new(self):
+        settings = OutlierOptionsConfig(
+            outlier_method=OutlierMethod.IQR,
+            outlier_multiplier=1.5,
+            outlier_threshold=20,
+        )
+        bounds = ConstraintBounds(soft_min=0.0, soft_max=100.0)
+        with (
+            patch(
+                "datasure.checks.outliers.report_ui.duckdb_get_table",
+                return_value=pl.DataFrame(),
+            ),
+            patch("datasure.checks.outliers.report_ui.duckdb_save_table") as mock_save,
+        ):
+            _update_outlier_column_config(
+                "proj1",
+                "page1",
+                "exact",
+                None,
+                ["col1"],
+                False,
+                False,
+                True,
+                settings,
+                bounds,
+            )
+        mock_save.assert_called_once()
+
+    def test_non_empty_existing_config_concatenates(self, outlier_column_config):
+        settings = OutlierOptionsConfig(
+            outlier_method=OutlierMethod.IQR,
+            outlier_multiplier=1.5,
+            outlier_threshold=20,
+        )
+        bounds = ConstraintBounds(soft_min=0.0, soft_max=100.0)
+        with (
+            patch(
+                "datasure.checks.outliers.report_ui.duckdb_get_table",
+                return_value=outlier_column_config,
+            ),
+            patch("datasure.checks.outliers.report_ui.duckdb_save_table") as mock_save,
+        ):
+            _update_outlier_column_config(
+                "proj1",
+                "page1",
+                "exact",
+                None,
+                ["col2"],
+                False,
+                False,
+                True,
+                settings,
+                bounds,
+            )
+        mock_save.assert_called_once()
+        saved_df = mock_save.call_args[0][1]
+        assert len(saved_df) == 2
+
+    def test_existing_config_with_index_column(self, outlier_column_config):
+        """Settings saved with the helper `index` column by older versions."""
+        bounds = ConstraintBounds(soft_min=0.0, soft_max=100.0)
+        with (
+            patch(
+                "datasure.checks.outliers.report_ui.duckdb_get_table",
+                return_value=outlier_column_config.with_row_index(),
+            ),
+            patch("datasure.checks.outliers.report_ui.duckdb_save_table") as mock_save,
+        ):
+            _update_outlier_column_config(
+                "proj1",
+                "page1",
+                "exact",
+                None,
+                ["col2"],
+                False,
+                False,
+                False,
+                None,
+                bounds,
+            )
+        saved_df = mock_save.call_args[0][1]
+        assert saved_df.columns == outlier_column_config.columns
+        assert len(saved_df) == 2
+
+    def test_outlier_settings_none(self):
+        bounds = ConstraintBounds(soft_min=0.0, soft_max=100.0)
+        with (
+            patch(
+                "datasure.checks.outliers.report_ui.duckdb_get_table",
+                return_value=pl.DataFrame(),
+            ),
+            patch("datasure.checks.outliers.report_ui.duckdb_save_table") as mock_save,
+        ):
+            _update_outlier_column_config(
+                "proj1",
+                "page1",
+                "exact",
+                None,
+                ["col1"],
+                False,
+                False,
+                False,
+                None,
+                bounds,
+            )
+        mock_save.assert_called_once()
+
+
+# ============================================================================
+# TESTS: _delete_outlier_column
+# ============================================================================
+
+
+class TestDeleteOutlierColumn:
+    """Test _delete_outlier_column function."""
+
+    def test_empty_settings_shows_info(self):
+        with patch("datasure.checks.outliers.report_ui.st") as st_mock:
+            _delete_outlier_column("proj1", "page1", pl.DataFrame())
+        st_mock.info.assert_called_once()
+
+    def test_non_empty_shows_selectbox_and_button(self, outlier_column_config):
+        with patch("datasure.checks.outliers.report_ui.st") as st_mock:
+            st_mock.selectbox.return_value = "0 - exact - "
+            st_mock.button.return_value = False
+            _delete_outlier_column("proj1", "page1", outlier_column_config)
+        st_mock.selectbox.assert_called_once()
+
+    def test_delete_on_button_click(self, outlier_column_config):
+        with (
+            patch("datasure.checks.outliers.report_ui.st") as st_mock,
+            patch("datasure.checks.outliers.report_ui.duckdb_save_table") as mock_save,
+        ):
+            st_mock.selectbox.return_value = "0 - exact - "
+            st_mock.button.return_value = True
+            _delete_outlier_column("proj1", "page1", outlier_column_config)
+        mock_save.assert_called_once()
+
+    def test_delete_saves_only_settings_columns(self, outlier_column_config):
+        """Deleting doesn't persist the dropdown's helper columns."""
+        settings = pl.concat([outlier_column_config, outlier_column_config])
+        with (
+            patch("datasure.checks.outliers.report_ui.st") as st_mock,
+            patch("datasure.checks.outliers.report_ui.duckdb_save_table") as mock_save,
+        ):
+            st_mock.selectbox.return_value = "0 - exact - "
+            st_mock.button.return_value = True
+            _delete_outlier_column("proj1", "page1", settings)
+        saved = mock_save.call_args.args[1]
+        assert saved.columns == outlier_column_config.columns
+        assert saved.height == 1
+
+    def test_settings_saved_with_index_column_render(self, outlier_column_config):
+        """Settings saved with the helper `index` column by older versions load."""
+        settings = pl.concat(
+            [outlier_column_config, outlier_column_config]
+        ).with_row_index()
+        with (
+            patch(
+                "datasure.checks.outliers.report_ui.duckdb_get_table",
+                return_value=settings,
+            ),
+            patch("datasure.checks.outliers.report_ui.st") as st_mock,
+            patch("datasure.checks.outliers.report_ui.duckdb_save_table") as mock_save,
+        ):
+            st_mock.selectbox.return_value = "1 - exact - "
+            st_mock.button.return_value = True
+            _delete_outlier_column(
+                "proj1", "page1", _load_outlier_settings("proj1", "page1")
+            )
+        options = st_mock.selectbox.call_args.kwargs["options"]
+        assert options == ["0 - exact - ", "1 - exact - "]
+        saved = mock_save.call_args.args[1]
+        assert saved.columns == outlier_column_config.columns
+        assert saved.height == 1
+
+
+# ============================================================================
+# TESTS: _load_outlier_settings
+# ============================================================================
+
+
+class TestLoadOutlierSettings:
+    """Test _load_outlier_settings function."""
+
+    def test_drops_saved_index_column(self, outlier_column_config):
+        """The `index` helper column older versions saved is dropped."""
+        with patch(
+            "datasure.checks.outliers.report_ui.duckdb_get_table",
+            return_value=outlier_column_config.with_row_index(),
+        ):
+            loaded = _load_outlier_settings("proj1", "page1")
+        assert loaded.columns == outlier_column_config.columns
+
+    def test_missing_table_loads_empty(self):
+        with patch(
+            "datasure.checks.outliers.report_ui.duckdb_get_table",
+            return_value=pl.DataFrame(),
+        ):
+            assert _load_outlier_settings("proj1", "page1").is_empty()
+
+
+# ============================================================================
+# TESTS: _add_outlier_column (via reimport)
+# ============================================================================
+
+
+class TestAddOutlierColumn:
+    """Test _add_outlier_column function."""
+
+    def test_no_cols_selected_does_not_save(self, report_ui_mod):
+        """When no columns selected, skip grouping/options rendering."""
+        mock_sel = MagicMock(return_value=(SearchType.EXACT.value, None, [], None))
+        with patch.object(report_ui_mod, "_render_search_type_selection", mock_sel):
+            report_ui_mod._add_outlier_column("proj1", "page1", ["col1", "col2"])
+        mock_sel.assert_called_once()
+
+    def test_with_cols_selected_renders_options(self, report_ui_mod):
+        """When columns are selected, all option panels are rendered."""
+        settings = OutlierOptionsConfig(
+            outlier_method=OutlierMethod.IQR,
+            outlier_multiplier=1.5,
+            outlier_threshold=20,
+        )
+        mock_sel = MagicMock(
+            return_value=(SearchType.EXACT.value, None, ["col1"], None)
+        )
+        mock_grp = MagicMock(return_value=(False, False))
+        mock_out = MagicMock(return_value=(True, settings, True))
+        mock_con = MagicMock(return_value=(ConstraintBounds(), True))
+        with (
+            patch.object(report_ui_mod, "_render_search_type_selection", mock_sel),
+            patch.object(report_ui_mod, "_render_column_grouping_options", mock_grp),
+            patch.object(report_ui_mod, "_render_outlier_options", mock_out),
+            patch.object(report_ui_mod, "_render_constraint_options", mock_con),
+        ):
+            report_ui_mod.st.button.return_value = False
+            report_ui_mod._add_outlier_column("proj1", "page1", ["col1", "col2"])
+        mock_grp.assert_called_once()
+        mock_out.assert_called_once()
+        mock_con.assert_called_once()
+
+
+# ============================================================================
+# TESTS: outliers_report (main function)
+# ============================================================================
+
+
+class TestOutliersReport:
+    """Test outliers_report main function."""
+
+    def test_empty_column_config_returns_early(
+        self, base_survey_data, survey_columns_mock, outlier_config_dict
+    ):
+        settings = OutlierSettings(**outlier_config_dict)
+        with (
+            patch("datasure.checks.outliers.report_ui.st") as st_mock,
+            patch(
+                "datasure.checks.outliers.report_ui.outliers_report_settings",
+                return_value=settings,
+            ),
+            patch("datasure.checks.outliers.report_ui._render_outlier_column_actions"),
+            patch(
+                "datasure.checks.outliers.report_ui.duckdb_get_table",
+                return_value=pl.DataFrame(),
+            ),
+        ):
+            st_mock.columns.side_effect = _columns_side_effect
+            outliers_report(
+                "proj1",
+                "page1",
+                base_survey_data,
+                "settings.json",
+                outlier_config_dict,
+                survey_columns_mock,
+            )
+        st_mock.title.assert_called()
+
+    def test_with_constraint_violations(
+        self,
+        base_survey_data,
+        survey_columns_mock,
+        outlier_config_dict,
+        outlier_column_config,
+    ):
+        settings = OutlierSettings(**outlier_config_dict)
+        constraint_violations = pl.DataFrame(
+            {
+                "survey_key": ["K001"],
+                "column name": ["col1"],
+                "violation reason": ["below soft minimum"],
+            }
+        )
+        with (
+            patch("datasure.checks.outliers.report_ui.st") as st_mock,
+            patch(
+                "datasure.checks.outliers.report_ui.outliers_report_settings",
+                return_value=settings,
+            ),
+            patch("datasure.checks.outliers.report_ui._render_outlier_column_actions"),
+            patch(
+                "datasure.checks.outliers.report_ui.duckdb_get_table",
+                return_value=outlier_column_config,
+            ),
+            patch("datasure.checks.outliers.report_ui.duckdb_save_table"),
+            patch(
+                "datasure.checks.outliers.report_ui.compute_constraint_violations",
+                return_value=constraint_violations,
+            ),
+            patch(
+                "datasure.checks.outliers.report_ui.compute_outlier_output",
+                return_value=pl.DataFrame(),
+            ),
+            patch("datasure.checks.outliers.report_ui._render_constraint_metrics"),
+            patch(
+                "datasure.checks.outliers.report_ui._render_constraint_violations_table"
+            ),
+        ):
+            st_mock.columns.side_effect = _columns_side_effect
+            outliers_report(
+                "proj1",
+                "page1",
+                base_survey_data,
+                "settings.json",
+                outlier_config_dict,
+                survey_columns_mock,
+            )
+        st_mock.info.assert_called()
+
+    def test_with_outliers(
+        self,
+        base_survey_data,
+        survey_columns_mock,
+        outlier_config_dict,
+        outlier_column_config,
+    ):
+        settings = OutlierSettings(**outlier_config_dict)
+        outlier_data = pl.DataFrame(
+            {
+                "survey_key": ["K001"],
+                "column name": ["col1"],
+                "outlier reason": ["Value is above upper bound 50.00"],
+            }
+        )
+        with (
+            patch("datasure.checks.outliers.report_ui.st") as st_mock,
+            patch(
+                "datasure.checks.outliers.report_ui.outliers_report_settings",
+                return_value=settings,
+            ),
+            patch("datasure.checks.outliers.report_ui._render_outlier_column_actions"),
+            patch(
+                "datasure.checks.outliers.report_ui.duckdb_get_table",
+                return_value=outlier_column_config,
+            ),
+            patch("datasure.checks.outliers.report_ui.duckdb_save_table"),
+            patch(
+                "datasure.checks.outliers.report_ui.compute_constraint_violations",
+                return_value=pl.DataFrame(),
+            ),
+            patch(
+                "datasure.checks.outliers.report_ui.compute_outlier_output",
+                return_value=outlier_data,
+            ),
+            patch("datasure.checks.outliers.report_ui._render_outlier_metrics"),
+            patch(
+                "datasure.checks.outliers.report_ui._render_outlier_column_inspection"
+            ),
+        ):
+            st_mock.columns.side_effect = _columns_side_effect
+            outliers_report(
+                "proj1",
+                "page1",
+                base_survey_data,
+                "settings.json",
+                outlier_config_dict,
+                survey_columns_mock,
+            )
+        st_mock.info.assert_called()
+
+
+class TestOutliersHeadlineSavedSettings:
+    """The Summary check health row's outlier count when saved settings drift."""
+
+    CONFIG: ClassVar[dict] = {
+        "survey_key": "survey_key",
+        "survey_id": "survey_id",
+        "enumerator": "enumerator",
+        "team": "team",
+        "survey_date": "survey_date",
+    }
+    # numeric_col1 is [1, 2, 3, 100, 5]: 1 of the 5 checked values is flagged.
+    FLAGGED = CheckHeadline(
+        "2",
+        "1 outlier (20.0% of values), 1 constraint violation",
+        outstanding=2,
+        resolved=0,
+    )
+
+    def _headline(self, data, column_config, tmp_path, alias="s"):
+        from datasure.processing.correction_log import empty_correction_log
+
+        with (
+            patch(
+                "datasure.checks.outliers.report_ui.duckdb_get_table",
+                return_value=column_config,
+            ),
+            patch(
+                "datasure.checks.outliers.report_ui.CorrectionProcessor"
+            ) as processor,
+        ):
+            processor.return_value.get_active_acceptances.return_value = (
+                empty_correction_log()
+            )
+            processor.return_value.get_active_corrections.return_value = (
+                empty_correction_log()
+            )
+            return outliers_headline(
+                "project",
+                "page",
+                data,
+                get_df_columns(data),
+                str(tmp_path / "settings.json"),
+                self.CONFIG,
+                alias,
+            )
+
+    def test_without_alias_counts_every_flag(
+        self, sample_polars_df, outlier_column_config, tmp_path
+    ):
+        # numeric_col1 is [1, 2, 3, 100, 5]: 100 is an outlier and breaks a
+        # constraint.
+        assert (
+            self._headline(sample_polars_df, outlier_column_config, tmp_path, None)
+            == self.FLAGGED
+        )
+
+    def test_a_saved_option_that_is_invalid_raises(
+        self, sample_polars_df, outlier_column_config, tmp_path
+    ):
+        # Summary shows the row as an error, not as having no issues.
+        column_config = outlier_column_config.with_columns(
+            pl.lit(-1.0).alias("outlier_multiplier")
+        )
+        with pytest.raises(ValueError, match="no longer fit the data"):
+            self._headline(sample_polars_df, column_config, tmp_path)
+
+    def test_ignores_a_saved_team_column_that_is_gone(
+        self, sample_polars_df, outlier_column_config, tmp_path
+    ):
+        # The settings panel shows a missing column as unset, so the tab
+        # still reports; the health row must too.
+        data = sample_polars_df.drop("team")
+        assert self._headline(data, outlier_column_config, tmp_path) == self.FLAGGED
+
+    def test_a_configured_column_that_is_gone_raises(
+        self, sample_polars_df, outlier_column_config, tmp_path
+    ):
+        data = sample_polars_df.drop("numeric_col1")
+        with pytest.raises(ValueError, match="numeric_col1"):
+            self._headline(data, outlier_column_config, tmp_path)
+
+    def test_missing_codes_are_not_counted(
+        self, sample_polars_df, outlier_column_config, tmp_path, monkeypatch
+    ):
+        # Issue #379: an added -99 "don't know" is below the soft minimum of 0
+        # and far from the rest, but it is missing, not a flagged value.
+        monkeypatch.setattr(
+            "datasure.checks.outliers.report_ui.load_missing_codes_from_db",
+            lambda _project_id: pl.DataFrame(
+                {"label": ["Don't know"], "codes": ["-99"]}
+            ),
+        )
+        extra = sample_polars_df.head(1).with_columns(
+            pl.lit("K006").alias("survey_key"), pl.lit(-99.0).alias("numeric_col1")
+        )
+        data = pl.concat([sample_polars_df, extra])
+
+        assert self._headline(data, outlier_column_config, tmp_path) == self.FLAGGED
+
+
+# ============================================================================
+# TESTS: saved view state of the table toggles
+# ============================================================================
+
+
+def _toggles_app(settings_file):
+    from datasure.checks.outliers.report_ui import _render_table_toggles
+    from datasure.checks.outliers.review import OUTLIERS
+
+    _render_table_toggles(OUTLIERS, None, settings_file)
+
+
+class TestTableTogglesViewState:
+    def test_a_toggle_is_restored_in_a_new_session(self, tmp_path):
+        from streamlit.testing.v1 import AppTest
+
+        settings_file = str(tmp_path / "page_settings.json")
+        at = AppTest.from_function(_toggles_app, args=(settings_file,)).run()
+        assert at.toggle[0].value is True
+        at.toggle[0].set_value(False).run()
+
+        new_session = AppTest.from_function(_toggles_app, args=(settings_file,)).run()
+
+        assert not new_session.exception
+        assert new_session.toggle[0].value is False

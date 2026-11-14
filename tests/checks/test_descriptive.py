@@ -1,7 +1,9 @@
 """Tests for descriptive statistics computation functions."""
 
 import importlib
+import json
 import sys
+from types import SimpleNamespace
 from unittest.mock import MagicMock, patch
 
 import pandas as pd
@@ -17,14 +19,16 @@ from datasure.checks.descriptive import (
     _empty_col_stats,
     _get_column_type_label,
     _missing_pct,
-    _modify_column_selection_df,
     compute_histogram_data,
     compute_summary_stats,
     compute_value_counts,
     get_column_selection_df,
+    save_column_selection,
 )
 from datasure.models.schemas import ColumnByType
 from datasure.utils.dataframe_utils import get_df_columns
+from datasure.utils.duckdb_utils import duckdb_get_table, duckdb_save_table
+from datasure.utils.view_state import ViewState
 
 # =============================================================================
 # Fixtures
@@ -91,9 +95,9 @@ def mixed_type_df() -> pl.DataFrame:
         {
             "num_col": [1.0, 2.0, 3.0],
             "cat_col": ["a", "b", "c"],
-            "date_col": pl.Series(["2021-01-01", "2021-01-02", "2021-01-03"]).cast(
-                pl.Date
-            ),
+            "date_col": pl.Series(
+                ["2021-01-01", "2021-01-02", "2021-01-03"]
+            ).str.to_date(),
             "str_col": ["x", "y", "z"],
             "bool_col": [True, False, True],
         }
@@ -110,6 +114,19 @@ def mixed_columns() -> ColumnByType:
         categorical_columns=["cat_col"],
         string_columns=["str_col"],
     )
+
+
+@pytest.fixture
+def fake_session(monkeypatch):
+    """A fresh Streamlit session for widgets bound to saved view state."""
+    fake_st = SimpleNamespace(session_state={})
+    monkeypatch.setitem(sys.modules, "streamlit", fake_st)
+    return fake_st.session_state
+
+
+@pytest.fixture
+def settings_file(tmp_path):
+    return tmp_path / "page_hfcs_settings.json"
 
 
 @pytest.fixture(scope="module")
@@ -354,6 +371,19 @@ class TestComputeSummaryStats:
         assert row["min"] == pytest.approx(1.0)
         assert row["max"] == pytest.approx(5.0)
 
+    def test_missing_codes_are_not_values(
+        self, land_area_data, land_area_missing_codes
+    ):
+        """Issue #379: -99 and -88 count as missing, not in the mean or minimum."""
+        result = compute_summary_stats(
+            land_area_data, ["land_area"], missing_codes=land_area_missing_codes
+        )
+        row = result.iloc[0]
+        assert row["count"] == 9
+        assert row["missing"] == 3
+        assert row["mean"] == pytest.approx(10.5)
+        assert row["min"] == pytest.approx(2.0)
+
 
 # =============================================================================
 # compute_histogram_data
@@ -395,6 +425,16 @@ class TestComputeHistogramData:
     def test_default_n_bins_is_20(self, sample_df):
         result = compute_histogram_data(sample_df, "age")
         assert len(result) == 20
+
+    def test_missing_codes_are_not_binned(
+        self, land_area_data, land_area_missing_codes
+    ):
+        """Issue #379: the histogram starts at 2, not at the -99 code."""
+        result = compute_histogram_data(
+            land_area_data, "land_area", missing_codes=land_area_missing_codes
+        )
+        assert result["count"].sum() == 9
+        assert result["bin_start"].min() == pytest.approx(2.0)
 
 
 # =============================================================================
@@ -586,118 +626,156 @@ class TestCreateNewColumnSelectionDf:
 
 
 # =============================================================================
-# _modify_column_selection_df
+# Column selection: saved per page in the logs database
 # =============================================================================
 
+PROJECT_ID = "descproj01"
 
-class TestModifyColumnSelectionDf:
-    """Tests for _modify_column_selection_df helper."""
 
-    def test_returns_dataframe_when_no_changes_needed(self, sample_df, sample_columns):
-        df_sel = _create_new_column_selection_df(sample_df, sample_columns)
-        current_cols = set(sample_df.columns)
-        result = _modify_column_selection_df(df_sel.clone(), current_cols)
-        assert isinstance(result, pl.DataFrame)
+@pytest.fixture
+def cache_dir(tmp_path):
+    """Point every DuckDB database at a temporary cache directory."""
 
-    def test_unchanged_when_cols_match(self, sample_df, sample_columns):
-        df_sel = _create_new_column_selection_df(sample_df, sample_columns)
-        current_cols = set(sample_df.columns)
-        result = _modify_column_selection_df(df_sel.clone(), current_cols)
-        assert set(result["column"].to_list()) == set(sample_df.columns)
+    def fake_cache_path(*parts):
+        path = tmp_path.joinpath(*map(str, parts))
+        path.parent.mkdir(parents=True, exist_ok=True)
+        return path
 
-    def test_remove_drops_columns_not_in_current(self):
-        """Columns absent from current_cols are removed from the selection df."""
-        df_sel = pl.DataFrame(
-            {
-                "Selected": [False],
-                "column": ["old_col"],
-                "type": ["other"],
-            }
+    with patch("datasure.utils.duckdb_utils.get_cache_path", fake_cache_path):
+        yield tmp_path
+
+
+def _selected(selection: pl.DataFrame) -> set[str]:
+    return set(selection.filter(pl.col("Selected").cast(pl.Boolean))["column"])
+
+
+def _with_selected(selection: pl.DataFrame, columns: set[str]) -> pl.DataFrame:
+    return selection.with_columns(
+        pl.col("column").is_in(list(columns)).alias("Selected")
+    )
+
+
+@pytest.mark.usefixtures("cache_dir")
+class TestColumnSelectionPerPage:
+    """The descriptive column selection is saved per page."""
+
+    def test_new_page_starts_with_nothing_selected(self, sample_df, sample_columns):
+        selection = get_column_selection_df(
+            PROJECT_ID, "page_a", sample_df, sample_columns
         )
-        result = _modify_column_selection_df(df_sel, set())
-        assert len(result) == 0
 
-    def test_remove_keeps_columns_in_current(self):
-        """Columns present in current_cols are retained."""
-        df_sel = pl.DataFrame(
-            {
-                "Selected": [False, False],
-                "column": ["keep_col", "remove_col"],
-                "type": ["numeric", "other"],
-            }
+        assert selection["column"].to_list() == sample_df.columns
+        assert _selected(selection) == set()
+
+    def test_saved_selection_is_returned_for_the_page(self, sample_df, sample_columns):
+        selection = get_column_selection_df(
+            PROJECT_ID, "page_a", sample_df, sample_columns
         )
-        result = _modify_column_selection_df(df_sel, {"keep_col"})
-        assert set(result["column"].to_list()) == {"keep_col"}
-
-    def test_cols_to_add_branch_raises_on_buggy_api(self):
-        """cols_to_add branch raises because Polars DataFrame.append doesn't
-        accept a dict — known bug in the implementation.
-        """
-        df_sel = pl.DataFrame(
-            {
-                "Selected": [False],
-                "column": ["age"],
-                "type": ["numeric"],
-            }
+        save_column_selection(
+            PROJECT_ID, "page_a", _with_selected(selection, {"age", "region"})
         )
-        # cols_to_add = {"new_col"}, cols_to_remove = {} → add branch executed
-        with pytest.raises(AttributeError):
-            _modify_column_selection_df(df_sel, {"age", "new_col"})
 
-
-# =============================================================================
-# get_column_selection_df
-# =============================================================================
-
-
-class TestGetColumnSelectionDf:
-    """Tests for get_column_selection_df helper."""
-
-    def test_creates_new_when_table_not_found(self, sample_df, sample_columns):
-        with patch(
-            "datasure.checks.descriptive.duckdb_get_table",
-            side_effect=Exception("table not found"),
-        ):
-            result = get_column_selection_df("proj123", sample_df, sample_columns)
-        assert isinstance(result, pl.DataFrame)
-        assert set(result.columns) == {"Selected", "column", "type"}
-
-    def test_returns_existing_when_columns_subset(self, sample_df, sample_columns):
-        existing_df = pl.DataFrame(
-            {
-                "Selected": [False] * 4,
-                "column": sample_df.columns,
-                "type": ["numeric", "numeric", "categorical", "categorical"],
-            }
+        reloaded = get_column_selection_df(
+            PROJECT_ID, "page_a", sample_df, sample_columns
         )
-        with patch(
-            "datasure.checks.descriptive.duckdb_get_table", return_value=existing_df
-        ):
-            result = get_column_selection_df("proj123", sample_df, sample_columns)
-        assert result.equals(existing_df)
 
-    def test_calls_modify_when_columns_mismatch(self, sample_df, sample_columns):
-        """Modify is called when saved columns are not a subset of current df."""
-        existing_df = pl.DataFrame(
-            {
-                "Selected": [False, False],
-                "column": ["age", "nonexistent_col"],
-                "type": ["numeric", "other"],
-            }
+        assert _selected(reloaded) == {"age", "region"}
+
+    def test_two_pages_keep_independent_selections(self, sample_df, sample_columns):
+        base = get_column_selection_df(PROJECT_ID, "page_a", sample_df, sample_columns)
+        save_column_selection(PROJECT_ID, "page_a", _with_selected(base, {"age"}))
+        save_column_selection(PROJECT_ID, "page_b", _with_selected(base, {"gender"}))
+
+        page_a = get_column_selection_df(
+            PROJECT_ID, "page_a", sample_df, sample_columns
         )
-        sentinel = _create_new_column_selection_df(sample_df, sample_columns)
-        with (
-            patch(
-                "datasure.checks.descriptive.duckdb_get_table", return_value=existing_df
-            ),
-            patch(
-                "datasure.checks.descriptive._modify_column_selection_df",
-                return_value=sentinel,
-            ) as mock_modify,
-        ):
-            result = get_column_selection_df("proj123", sample_df, sample_columns)
-            mock_modify.assert_called_once()
-        assert result.equals(sentinel)
+        page_b = get_column_selection_df(
+            PROJECT_ID, "page_b", sample_df, sample_columns
+        )
+
+        assert _selected(page_a) == {"age"}
+        assert _selected(page_b) == {"gender"}
+
+
+@pytest.mark.usefixtures("cache_dir")
+class TestColumnSelectionMigration:
+    """Projects saved before per-page selections seed each page once."""
+
+    LEGACY = pl.DataFrame(
+        {
+            "Selected": [True, True, False, True],
+            "column": ["age", "region", "income", "other_page_col"],
+            "type": ["numeric", "categorical", "numeric", "numeric"],
+        }
+    )
+
+    def _save_legacy(self, selection: pl.DataFrame | None = None) -> None:
+        duckdb_save_table(
+            PROJECT_ID,
+            self.LEGACY if selection is None else selection,
+            "selected_columns_df",
+            "intermediate",
+        )
+
+    def test_page_without_a_selection_carries_over_the_legacy_selection(
+        self, sample_df, sample_columns
+    ):
+        self._save_legacy()
+
+        selection = get_column_selection_df(
+            PROJECT_ID, "page_a", sample_df, sample_columns
+        )
+
+        assert selection["column"].to_list() == sample_df.columns
+        assert _selected(selection) == {"age", "region"}
+
+    def test_each_page_keeps_only_its_own_columns(self, sample_columns, sample_df):
+        self._save_legacy()
+        other_data = pl.DataFrame({"other_page_col": [1, 2], "gender": ["M", "F"]})
+
+        page_a = get_column_selection_df(
+            PROJECT_ID, "page_a", sample_df, sample_columns
+        )
+        page_b = get_column_selection_df(
+            PROJECT_ID, "page_b", other_data, get_df_columns(other_data)
+        )
+
+        assert _selected(page_a) == {"age", "region"}
+        assert _selected(page_b) == {"other_page_col"}
+
+    def test_seeded_selection_is_saved_for_the_page(self, sample_df, sample_columns):
+        self._save_legacy()
+        get_column_selection_df(PROJECT_ID, "page_a", sample_df, sample_columns)
+        # The legacy table changing later does not reseed the page.
+        self._save_legacy(self.LEGACY.with_columns(pl.lit(False).alias("Selected")))
+
+        selection = get_column_selection_df(
+            PROJECT_ID, "page_a", sample_df, sample_columns
+        )
+
+        assert _selected(selection) == {"age", "region"}
+
+    def test_page_with_its_own_selection_ignores_the_legacy_selection(
+        self, sample_df, sample_columns
+    ):
+        self._save_legacy()
+        cleared = _create_new_column_selection_df(sample_df, sample_columns)
+        save_column_selection(PROJECT_ID, "page_a", cleared)
+
+        selection = get_column_selection_df(
+            PROJECT_ID, "page_a", sample_df, sample_columns
+        )
+
+        assert _selected(selection) == set()
+
+    def test_legacy_table_is_left_in_place(self, sample_df, sample_columns):
+        self._save_legacy()
+
+        get_column_selection_df(PROJECT_ID, "page_a", sample_df, sample_columns)
+
+        assert duckdb_get_table(
+            PROJECT_ID, "selected_columns_df", "intermediate"
+        ).equals(self.LEGACY)
 
 
 # =============================================================================
@@ -810,7 +888,7 @@ class TestRenderColumnSelector:
         mod.st.reset_mock()
         mod.st.pills.return_value = None
         mod.st.button.return_value = False
-        result = mod._render_column_selector("proj1", sel_df)
+        result = mod._render_column_selector("proj1", "page1", sel_df)
         assert isinstance(result, mod.ColumnByType)
 
     def test_select_all_marks_all_selected(
@@ -829,7 +907,7 @@ class TestRenderColumnSelector:
             return df
 
         mod.st.data_editor.side_effect = capture_editor
-        mod._render_column_selector("proj1", sel_df)
+        mod._render_column_selector("proj1", "page1", sel_df)
         assert received["df"]["Selected"].to_list() == [True] * len(sample_df.columns)
 
     def test_clear_all_marks_none_selected(
@@ -847,7 +925,7 @@ class TestRenderColumnSelector:
             return df.with_columns(pl.col("Selected").cast(pl.Boolean))
 
         mod.st.data_editor.side_effect = capture_editor
-        mod._render_column_selector("proj1", sel_df)
+        mod._render_column_selector("proj1", "page1", sel_df)
         # all Selected should be False
         assert all(not v for v in received["df"]["Selected"].to_list())
 
@@ -865,7 +943,7 @@ class TestRenderColumnSelector:
             return df
 
         mod.st.data_editor.side_effect = capture_editor
-        mod._render_column_selector("proj1", sel_df)
+        mod._render_column_selector("proj1", "page1", sel_df)
         # Only numeric columns should be selected
         for row in received["df"].iter_rows(named=True):
             if row["type"] == "numeric":
@@ -888,11 +966,11 @@ class TestRenderColumnSelector:
             return df
 
         mod.st.data_editor.side_effect = capture_editor
-        mod._render_column_selector("proj1", sel_df)
+        mod._render_column_selector("proj1", "page1", sel_df)
         # No columns should be selected since no types were chosen
         assert all(not v for v in received["df"]["Selected"].to_list())
 
-    def test_apply_button_calls_duckdb_save(
+    def test_apply_button_saves_the_page_selection(
         self, descriptive_mod, sample_df, sample_columns, sel_df
     ):
         mod = descriptive_mod
@@ -901,22 +979,22 @@ class TestRenderColumnSelector:
         mod.st.pills.return_value = None
         mod.st.button.return_value = True  # Apply clicked
         mod.st.data_editor.side_effect = lambda *a, **kw: a[0]
-        with patch.object(mod, "duckdb_save_table") as mock_save:
-            mod._render_column_selector("proj1", sel_df)
+        with patch.object(mod, "save_column_selection") as mock_save:
+            mod._render_column_selector("proj1", "page1", sel_df)
             mock_save.assert_called_once()
+        project_id, page_name_id, saved = mock_save.call_args.args
+        assert (project_id, page_name_id) == ("proj1", "page1")
+        assert saved.equals(sel_df)
 
 
+@pytest.mark.usefixtures("fake_session")
 class TestRenderHistogram:
     """Tests for _render_histogram via mocked streamlit module."""
 
     def test_no_numeric_cols_calls_info(self, descriptive_mod, sample_df):
         mod = descriptive_mod
         mod.st.reset_mock()
-        with (
-            patch.object(mod, "load_check_settings", return_value={}),
-            patch.object(mod, "save_check_settings"),
-        ):
-            mod._render_histogram(sample_df, [], "settings.json")
+        mod._render_histogram(sample_df, [], "settings.json")
         mod.st.info.assert_called_once()
 
     def test_valid_cols_calls_plotly_chart(self, descriptive_mod, sample_df):
@@ -926,30 +1004,47 @@ class TestRenderHistogram:
         col_mock.selectbox.return_value = "age"
         bins_mock.slider.return_value = 10
         mod.st.columns.return_value = [col_mock, mid_mock, bins_mock]
-        with (
-            patch.object(mod, "load_check_settings", return_value={}),
-            patch.object(mod, "save_check_settings"),
-        ):
-            mod._render_histogram(sample_df, ["age", "income"], "settings.json")
+        mod._render_histogram(sample_df, ["age", "income"], "settings.json")
         mod.st.plotly_chart.assert_called_once()
 
-    def test_saved_settings_restore_defaults(self, descriptive_mod, sample_df):
-        """Saved col_to_plot and n_bins are used as widget defaults."""
+    def test_saved_view_state_restores_the_choices(
+        self, descriptive_mod, sample_df, settings_file, fake_session
+    ):
+        """Saved column and bins come back in a new session."""
         mod = descriptive_mod
         mod.st.reset_mock()
         col_mock, mid_mock, bins_mock = MagicMock(), MagicMock(), MagicMock()
         col_mock.selectbox.return_value = "income"
         bins_mock.slider.return_value = 15
         mod.st.columns.return_value = [col_mock, mid_mock, bins_mock]
-        saved = {"col_to_plot": "income", "n_bins": 15}
-        with (
-            patch.object(mod, "load_check_settings", return_value=saved),
-            patch.object(mod, "save_check_settings"),
-        ):
-            mod._render_histogram(sample_df, ["age", "income"], "settings.json")
-        # selectbox called with index=1 (income is at index 1)
-        call_kwargs = col_mock.selectbox.call_args
-        assert call_kwargs.kwargs.get("index") == 1
+        view = ViewState(settings_file, "descriptive")
+        view.save("desc_hist_col", "income")
+        view.save("desc_hist_bins", 15)
+
+        mod._render_histogram(sample_df, ["age", "income"], str(settings_file))
+
+        assert fake_session["desc_hist_col"] == "income"
+        assert fake_session["desc_hist_bins"] == 15
+        assert "index" not in col_mock.selectbox.call_args.kwargs
+
+    def test_choices_saved_by_older_versions_move_to_view_state(
+        self, descriptive_mod, sample_df, settings_file, fake_session
+    ):
+        """Old saves load as before but leave the check's exported settings."""
+        mod = descriptive_mod
+        mod.st.reset_mock()
+        col_mock, mid_mock, bins_mock = MagicMock(), MagicMock(), MagicMock()
+        col_mock.selectbox.return_value = "income"
+        bins_mock.slider.return_value = 15
+        mod.st.columns.return_value = [col_mock, mid_mock, bins_mock]
+        settings_file.write_text(
+            json.dumps({"descriptive_stats": {"col_to_plot": "income", "n_bins": 15}})
+        )
+
+        mod._render_histogram(sample_df, ["age", "income"], str(settings_file))
+
+        assert fake_session["desc_hist_col"] == "income"
+        assert json.loads(settings_file.read_text())["descriptive_stats"] == {}
 
     def test_all_null_column_calls_info(self, descriptive_mod, all_null_df):
         mod = descriptive_mod
@@ -959,11 +1054,7 @@ class TestRenderHistogram:
         bins_mock.slider.return_value = 10
         mod.st.columns.return_value = [col_mock, mid_mock, bins_mock]
         null_df = pl.DataFrame({"x": pl.Series([None, None], dtype=pl.Float64)})
-        with (
-            patch.object(mod, "load_check_settings", return_value={}),
-            patch.object(mod, "save_check_settings"),
-        ):
-            mod._render_histogram(null_df, ["x"], "settings.json")
+        mod._render_histogram(null_df, ["x"], "settings.json")
         mod.st.info.assert_called()
 
     def test_caption_shown_for_large_series(self, descriptive_mod, sample_df):
@@ -973,11 +1064,7 @@ class TestRenderHistogram:
         col_mock.selectbox.return_value = "age"
         bins_mock.slider.return_value = 10
         mod.st.columns.return_value = [col_mock, mid_mock, bins_mock]
-        with (
-            patch.object(mod, "load_check_settings", return_value={}),
-            patch.object(mod, "save_check_settings"),
-        ):
-            mod._render_histogram(sample_df, ["age"], "settings.json")
+        mod._render_histogram(sample_df, ["age"], "settings.json")
         mod.st.caption.assert_called_once()
 
     def test_no_vlines_when_series_empty_after_histogram(self, descriptive_mod):
@@ -991,8 +1078,6 @@ class TestRenderHistogram:
         fake_hist = pd.DataFrame({"bin_start": [0.0], "bin_end": [1.0], "count": [1]})
         null_df = pl.DataFrame({"age": pl.Series([None, None], dtype=pl.Float64)})
         with (
-            patch.object(mod, "load_check_settings", return_value={}),
-            patch.object(mod, "save_check_settings"),
             patch.object(mod, "compute_histogram_data", return_value=fake_hist),
         ):
             mod._render_histogram(null_df, ["age"], "settings.json")
@@ -1009,44 +1094,35 @@ class TestRenderHistogram:
         bins_mock.slider.return_value = 5
         mod.st.columns.return_value = [col_mock, mid_mock, bins_mock]
         two_val_df = pl.DataFrame({"num": [1.0, 2.0, None, None, None]})
-        with (
-            patch.object(mod, "load_check_settings", return_value={}),
-            patch.object(mod, "save_check_settings"),
-        ):
-            mod._render_histogram(two_val_df, ["num"], "settings.json")
+        mod._render_histogram(two_val_df, ["num"], "settings.json")
         mod.st.caption.assert_not_called()
 
     def test_saved_col_not_in_list_defaults_to_index_0(
-        self, descriptive_mod, sample_df
+        self, descriptive_mod, sample_df, settings_file
     ):
-        """When saved col_to_plot is not in numeric_cols, index defaults to 0."""
+        """A saved column that is gone falls back to the first and is removed."""
         mod = descriptive_mod
         mod.st.reset_mock()
         col_mock, mid_mock, bins_mock = MagicMock(), MagicMock(), MagicMock()
         col_mock.selectbox.return_value = "age"
         bins_mock.slider.return_value = 20
         mod.st.columns.return_value = [col_mock, mid_mock, bins_mock]
-        saved = {"col_to_plot": "nonexistent_col", "n_bins": 20}
-        with (
-            patch.object(mod, "load_check_settings", return_value=saved),
-            patch.object(mod, "save_check_settings"),
-        ):
-            mod._render_histogram(sample_df, ["age", "income"], "settings.json")
-        call_kwargs = col_mock.selectbox.call_args
-        assert call_kwargs.kwargs.get("index") == 0
+        ViewState(settings_file, "descriptive").save("desc_hist_col", "removed")
+
+        mod._render_histogram(sample_df, ["age", "income"], str(settings_file))
+
+        assert col_mock.selectbox.call_args.kwargs.get("index") == 0
+        assert ViewState(settings_file, "descriptive").values() == {}
 
 
+@pytest.mark.usefixtures("fake_session")
 class TestRenderValueCounts:
     """Tests for _render_value_counts via mocked streamlit module."""
 
     def test_no_columns_calls_info(self, descriptive_mod, sample_df):
         mod = descriptive_mod
         mod.st.reset_mock()
-        with (
-            patch.object(mod, "load_check_settings", return_value={}),
-            patch.object(mod, "save_check_settings"),
-        ):
-            mod._render_value_counts(sample_df, [], "settings.json")
+        mod._render_value_counts(sample_df, [], "settings.json")
         mod.st.info.assert_called_once()
 
     def test_table_view_calls_dataframe(self, descriptive_mod, sample_df):
@@ -1058,11 +1134,7 @@ class TestRenderValueCounts:
         topn_mock.slider.return_value = 10
         mod.st.columns.return_value = [col_mock, mid_mock, topn_mock]
         mod.st.pills.return_value = "table"
-        with (
-            patch.object(mod, "load_check_settings", return_value={}),
-            patch.object(mod, "save_check_settings"),
-        ):
-            mod._render_value_counts(sample_df, ["region", "gender"], "settings.json")
+        mod._render_value_counts(sample_df, ["region", "gender"], "settings.json")
         mod.st.dataframe.assert_called_once()
 
     def test_chart_view_count_agg_calls_plotly_chart(self, descriptive_mod, sample_df):
@@ -1076,11 +1148,7 @@ class TestRenderValueCounts:
         mod.st.columns.return_value = [col_mock, mid_mock, topn_mock]
         # First pills = view selector → "chart", second pills = agg → "count"
         mod.st.pills.side_effect = ["chart", "count"]
-        with (
-            patch.object(mod, "load_check_settings", return_value={}),
-            patch.object(mod, "save_check_settings"),
-        ):
-            mod._render_value_counts(sample_df, ["region", "gender"], "settings.json")
+        mod._render_value_counts(sample_df, ["region", "gender"], "settings.json")
         mod.st.plotly_chart.assert_called_once()
 
     def test_chart_view_pct_agg_calls_plotly_chart(self, descriptive_mod, sample_df):
@@ -1093,11 +1161,7 @@ class TestRenderValueCounts:
         mod.st.columns.return_value = [col_mock, mid_mock, topn_mock]
         # First pills = "chart", second pills = "pct"
         mod.st.pills.side_effect = ["chart", "pct"]
-        with (
-            patch.object(mod, "load_check_settings", return_value={}),
-            patch.object(mod, "save_check_settings"),
-        ):
-            mod._render_value_counts(sample_df, ["region", "gender"], "settings.json")
+        mod._render_value_counts(sample_df, ["region", "gender"], "settings.json")
         mod.st.plotly_chart.assert_called_once()
 
     def test_empty_value_counts_calls_info(self, descriptive_mod, sample_df):
@@ -1108,33 +1172,35 @@ class TestRenderValueCounts:
         topn_mock.slider.return_value = 10
         mod.st.columns.return_value = [col_mock, mid_mock, topn_mock]
         with (
-            patch.object(mod, "load_check_settings", return_value={}),
-            patch.object(mod, "save_check_settings"),
             patch.object(mod, "compute_value_counts", return_value=pd.DataFrame()),
         ):
             mod._render_value_counts(sample_df, ["region"], "settings.json")
         mod.st.info.assert_called()
 
-    def test_saved_settings_restore_col(self, descriptive_mod, sample_df):
+    def test_saved_view_state_restores_the_choices(
+        self, descriptive_mod, sample_df, settings_file, fake_session
+    ):
         mod = descriptive_mod
         mod.st.reset_mock()
         mod.st.pills.side_effect = None
         col_mock, mid_mock, topn_mock = MagicMock(), MagicMock(), MagicMock()
         col_mock.selectbox.return_value = "gender"
-        topn_mock.slider.return_value = 20
+        topn_mock.slider.return_value = 30
         mod.st.columns.return_value = [col_mock, mid_mock, topn_mock]
         mod.st.pills.return_value = "table"
-        saved = {"col_to_analyse": "gender", "top_n": 20}
-        with (
-            patch.object(mod, "load_check_settings", return_value=saved),
-            patch.object(mod, "save_check_settings"),
-        ):
-            mod._render_value_counts(sample_df, ["region", "gender"], "settings.json")
-        call_kwargs = col_mock.selectbox.call_args
-        assert call_kwargs.kwargs.get("index") == 1
+        view = ViewState(settings_file, "descriptive")
+        view.save("desc_vc_col", "gender")
+        view.save("desc_vc_topn", 30)
+        view.save("desc_vc_view_pills", "chart")
+
+        mod._render_value_counts(sample_df, ["region", "gender"], str(settings_file))
+
+        assert fake_session["desc_vc_col"] == "gender"
+        assert fake_session["desc_vc_topn"] == 30
+        assert fake_session["desc_vc_view_pills"] == "chart"
 
     def test_saved_col_not_in_list_defaults_to_index_0(
-        self, descriptive_mod, sample_df
+        self, descriptive_mod, sample_df, settings_file
     ):
         """Saved col_to_analyse not in list → index defaults to 0."""
         mod = descriptive_mod
@@ -1145,14 +1211,12 @@ class TestRenderValueCounts:
         topn_mock.slider.return_value = 20
         mod.st.columns.return_value = [col_mock, mid_mock, topn_mock]
         mod.st.pills.return_value = "table"
-        saved = {"col_to_analyse": "nonexistent", "top_n": 20}
-        with (
-            patch.object(mod, "load_check_settings", return_value=saved),
-            patch.object(mod, "save_check_settings"),
-        ):
-            mod._render_value_counts(sample_df, ["region", "gender"], "settings.json")
-        call_kwargs = col_mock.selectbox.call_args
-        assert call_kwargs.kwargs.get("index") == 0
+        ViewState(settings_file, "descriptive").save("desc_vc_col", "removed")
+
+        mod._render_value_counts(sample_df, ["region", "gender"], str(settings_file))
+
+        assert col_mock.selectbox.call_args.kwargs.get("index") == 0
+        assert ViewState(settings_file, "descriptive").values() == {}
 
 
 class TestDescriptiveReport:
@@ -1174,7 +1238,7 @@ class TestDescriptiveReport:
         mod.st.reset_mock()
         empty = pl.DataFrame()
         cols = ColumnByType(all_columns=[])
-        mod.descriptive_report("proj1", empty, "settings.json", cols)
+        mod.descriptive_report("proj1", "page1", empty, "settings.json", cols)
         mod.st.warning.assert_called_once()
 
     def test_no_columns_selected_calls_info(
@@ -1198,7 +1262,9 @@ class TestDescriptiveReport:
             ),
             patch.object(mod, "_render_column_selector", return_value=empty_cols),
         ):
-            mod.descriptive_report("proj1", sample_df, "settings.json", sample_columns)
+            mod.descriptive_report(
+                "proj1", "page1", sample_df, "settings.json", sample_columns
+            )
         mod.st.info.assert_called()
 
     def test_full_report_rendered_with_selections(
@@ -1213,10 +1279,15 @@ class TestDescriptiveReport:
         with (
             patch.object(mod, "get_column_selection_df", return_value=sel_df),
             patch.object(mod, "_render_column_selector", return_value=selected_cols),
+            patch.object(
+                mod, "load_missing_codes_from_db", return_value=pl.DataFrame()
+            ),
             patch.object(mod, "_render_summary_stats"),
             patch.object(mod, "_render_histogram"),
             patch.object(mod, "_render_value_counts"),
         ):
-            mod.descriptive_report("proj1", sample_df, "settings.json", sample_columns)
+            mod.descriptive_report(
+                "proj1", "page1", sample_df, "settings.json", sample_columns
+            )
         mod.st.title.assert_called_once()
         mod.st.subheader.assert_called()

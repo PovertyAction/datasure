@@ -90,6 +90,27 @@ uv tool upgrade datasure
 - **Storage**: 1GB free space for application and data cache
 - **Internet**: Required for SurveyCTO integration and updates
 
+### Running on a server
+
+DataSure keeps SurveyCTO passwords and the Mapbox token in the operating
+system's keyring and never writes them to disk unencrypted. Desktops provide a
+keyring (Windows Credential Manager, macOS Keychain, GNOME Keyring or KWallet).
+A headless Linux server or container usually has none, so saving credentials
+fails until you configure one:
+
+- Install an **encrypted** keyring backend that suits your environment, such
+  as `keyrings.cryptfile` (an encrypted file whose key comes from an
+  environment variable or secret store) or a backend for your platform's
+  secret manager, into the same environment as DataSure.
+- Select it with the `PYTHON_KEYRING_BACKEND` environment variable, for
+  example `PYTHON_KEYRING_BACKEND=keyrings.cryptfile.cryptfile.CryptFileKeyring`.
+- Plaintext file backends (such as `keyrings.alt.file.PlaintextKeyring`) are
+  not supported: **Import Data → Keyring Diagnostics** warns when one is
+  active.
+
+**Import Data → Keyring Diagnostics → Test Keyring Availability** shows which
+backend is active and whether it is usable.
+
 ## Data Quality Check Modules
 
 DataSure includes 9 specialized modules for comprehensive survey data quality monitoring:
@@ -150,7 +171,7 @@ The web interface will open in your default browser (typically at `http://localh
 
 - **Import Data Page**: Connect your data sources
 - **SurveyCTO Integration**: Connect to your SurveyCTO server with authentication
-- **Local Files**: Upload CSV, Excel (.xlsx/.xls), Stata (.dta), JSON, or Parquet files
+- **Local Files**: Upload CSV, Excel (.xlsx), Stata (.dta), JSON, or Parquet files
 - **Multiple Datasets**: Import and manage up to 10 datasets per project
 
 ### 4. Prepare Data
@@ -211,9 +232,23 @@ Cache directories are created automatically — no manual setup required.
 
 ## Support and Resources
 
+### Documentation Map
+
+| Document | What it covers |
+| --- | --- |
+| [docs/USER_GUIDE.md](docs/USER_GUIDE.md) | Step-by-step guide to using the application |
+| [KNOWN_ISSUES.md](KNOWN_ISSUES.md) | Known bugs, workarounds, and recent fixes |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | Development setup, code quality, testing, releases |
+| [docs/ARCHITECTURE.md](docs/ARCHITECTURE.md) | Package layout, data flow, storage, session state |
+| [docs/changelog_guide.md](docs/changelog_guide.md) | How to write CHANGELOG entries |
+| [docs/release_notes_guide.md](docs/release_notes_guide.md) | How to write release notes |
+| [ROADMAP.md](ROADMAP.md) | Planned features and priorities |
+| [SECURITY.md](SECURITY.md) | Reporting security issues |
+
 ### Getting Help
 
 - **Documentation**: [data.poverty-action.org/data-quality/datasure](https://data.poverty-action.org/data-quality/datasure/) - Full user guides, installation instructions, and workflow documentation
+- **Known Issues**: Check [KNOWN_ISSUES.md](KNOWN_ISSUES.md) for known bugs and workarounds before reporting a problem
 - **GitHub Issues**: [Report bugs and request features](https://github.com/PovertyAction/datasure/issues)
 - **Email Support**: <researchsupport@poverty-action.org>
 - **Release Notes**: See [RELEASENOTES.md](RELEASENOTES.md) for latest updates
@@ -230,7 +265,7 @@ We welcome contributions from the research community! DataSure is developed by I
 
 ### Ways to Contribute
 
-- **Report Issues**: Found a bug or have a feature request? [Open an issue](https://github.com/PovertyAction/datasure/issues)
+- **Report Issues**: Found a bug or have a feature request? Check [KNOWN_ISSUES.md](KNOWN_ISSUES.md), then [open an issue](https://github.com/PovertyAction/datasure/issues)
 - **Suggest Features**: Share ideas for new data quality checks or workflow improvements
 - **Share Use Cases**: Help us understand how DataSure fits into different research workflows
 - **Code Contributions**: Developers can contribute code improvements and new features
