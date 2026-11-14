@@ -161,6 +161,19 @@ registers them in `st.navigation`. The numbered files match the gitignore
 pattern `output_view_?.py` — never commit them and never edit them directly;
 edit the template instead.
 
+### Page menu position
+
+The page menu is in the sidebar unless the `DATASURE_NAV_POSITION` environment
+variable is `top` (`app.NAV_POSITION_ENV_VAR`), which a host sets when it shows
+DataSure inside a page that has its own side menu. `app.py` passes the position
+to every `st.navigation` call. The same pages are registered either way; only
+the last group changes its label, from the sidebar's `---` divider to
+"Corrections and export", because a top bar shows each group as a drop-down
+that needs a name. The sidebar keeps its other content (reviewer setting, demo
+help, version and links). On a narrow window Streamlit moves a top menu back
+into the sidebar by itself. Text that tells users where to click should say
+"the menu", not "the sidebar".
+
 ### Check navigation
 
 A check page draws its checks from the catalogue in `checks/catalogue.py`.

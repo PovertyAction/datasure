@@ -1,5 +1,6 @@
 import base64
 import logging
+import os
 from importlib.metadata import PackageNotFoundError, version
 from pathlib import Path
 
@@ -9,6 +10,9 @@ from datasure.utils.cache_utils import read_only_reason
 from datasure.utils.config_utils import ConfigurationService
 from datasure.utils.reviewer import render_reviewer_setting
 from datasure.utils.session_defaults import init_app_session_state
+
+# Set to "top" by a host to move the page menu out of the sidebar.
+NAV_POSITION_ENV_VAR = "DATASURE_NAV_POSITION"
 
 
 @st.cache_data
@@ -46,6 +50,19 @@ st.set_page_config(
 
 # initialize session states
 init_app_session_state()
+
+# Where the page menu goes. A host that shows DataSure inside its own page,
+# beside its own side menu, sets DATASURE_NAV_POSITION=top to move DataSure's
+# menu to a bar across the top. Every page stays reachable either way, and
+# the sidebar keeps the rest of its content.
+_nav_position = (
+    "top"
+    if os.environ.get(NAV_POSITION_ENV_VAR, "").strip().lower() == "top"
+    else "sidebar"
+)
+# The last group is a divider in the sidebar. A top bar shows each group as a
+# drop-down, which needs a name to be usable.
+_last_group = "---" if _nav_position == "sidebar" else "Corrections and export"
 
 # start page
 start_page = st.Page(
@@ -90,6 +107,7 @@ if not st.session_state.st_project_id:
         {
             "": [start_page],
         },
+        position=_nav_position,
     )
 else:
     # get list of current config page_names
@@ -132,8 +150,9 @@ else:
             {
                 "": [start_page, import_data_page, prep_data_page, config_checks_page],
                 "DQA Reports": st.session_state.st_output_pages,
-                "---": [corr_page, replication_page],
+                _last_group: [corr_page, replication_page],
             },
+            position=_nav_position,
         )
     else:
         # --- NAVIGATION MENU WITHOUT CHECK OUTPUTS AND CORRECTION PAGES--- #
@@ -141,6 +160,7 @@ else:
             {
                 "": [start_page, import_data_page, prep_data_page, config_checks_page],
             },
+            position=_nav_position,
         )
 
 

@@ -439,3 +439,48 @@ class TestReadOnlyNotice:
     def test_no_warning_when_writable(self):
         st_mock, _ = self._import(None)
         st_mock.warning.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Menu position
+# ---------------------------------------------------------------------------
+
+
+class TestNavPosition:
+    """A host can move the page menu to a top bar; nothing is lost either way."""
+
+    def _nav_call(self, monkeypatch, value):
+        if value is None:
+            monkeypatch.delenv("DATASURE_NAV_POSITION", raising=False)
+        else:
+            monkeypatch.setenv("DATASURE_NAV_POSITION", value)
+        st_mock, *_ = _import_app(
+            session_state={"st_project_id": "abc12345"},
+            page_names=["Page A", "Page B"],
+        )
+        return st_mock.navigation.call_args
+
+    @pytest.mark.parametrize("value", [None, "", "sidebar", "hidden", "left"])
+    def test_menu_stays_in_the_sidebar_by_default(self, monkeypatch, value):
+        call = self._nav_call(monkeypatch, value)
+        assert call.kwargs["position"] == "sidebar"
+        assert len(call.args[0]["---"]) == 2
+
+    @pytest.mark.parametrize("value", ["top", " TOP "])
+    def test_host_can_move_the_menu_to_the_top(self, monkeypatch, value):
+        call = self._nav_call(monkeypatch, value)
+        assert call.kwargs["position"] == "top"
+
+    def test_top_menu_keeps_every_page_and_names_the_last_group(self, monkeypatch):
+        sidebar = self._nav_call(monkeypatch, None).args[0]
+        top = self._nav_call(monkeypatch, "top").args[0]
+        assert "---" not in top
+        assert len(top["Corrections and export"]) == len(sidebar["---"]) == 2
+        assert [len(pages) for pages in top.values()] == [
+            len(pages) for pages in sidebar.values()
+        ]
+
+    def test_no_project_menu_follows_the_position_too(self, monkeypatch):
+        monkeypatch.setenv("DATASURE_NAV_POSITION", "top")
+        st_mock, *_ = _import_app(session_state={})
+        assert st_mock.navigation.call_args.kwargs["position"] == "top"

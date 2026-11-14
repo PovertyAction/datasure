@@ -765,7 +765,7 @@ def descriptive_report(
         "The next step is the **Correct Data** page, where you will learn how to "
         "apply targeted corrections to your survey data based on the quality "
         "findings from these checks.\n\n"
-        "To get there, click **Correct Data** in the sidebar or use the "
+        "To get there, click **Correct Data** in the menu or use the "
         "**Proceed to Correct Data** button below.",
         type="success",
     )

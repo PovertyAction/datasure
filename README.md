@@ -111,6 +111,12 @@ fails until you configure one:
 **Import Data → Keyring Diagnostics → Test Keyring Availability** shows which
 backend is active and whether it is usable.
 
+If you show DataSure inside another web page that has its own side menu, set
+the `DATASURE_NAV_POSITION` environment variable to `top` when you start
+DataSure. The page menu then runs across the top instead of down the side, so
+the two menus don't sit next to each other. Every page stays in the menu, and
+the sidebar keeps the reviewer setting, the demo help and the links.
+
 ## Data Quality Check Modules
 
 DataSure includes 9 specialized modules for comprehensive survey data quality monitoring:
