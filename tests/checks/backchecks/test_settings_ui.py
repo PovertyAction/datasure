@@ -1,0 +1,310 @@
+"""Tests for datasure.checks.backchecks.settings_ui."""
+
+import importlib
+import sys
+from unittest.mock import MagicMock, patch
+
+import pandas as pd
+import pytest
+
+from datasure.checks.backchecks.models import BackcheckSettings, StrCompareOptions
+from datasure.checks.backchecks.settings_ui import (
+    _get_default_index,
+    _render_additional_options,
+    _render_date_columns,
+    _render_selectbox_with_save,
+    _render_staff_identifiers,
+    _render_survey_identifiers,
+    _render_tracking_options,
+    _render_value_list_display,
+    backchecks_report_settings,
+)
+from datasure.utils.settings_utils import load_check_settings
+from tests.checks.backchecks.conftest import make_mock_st
+
+# ============================================
+# PATCHED_BC FIXTURE (patch st in settings_ui for non-fragment UI tests)
+# ============================================
+
+
+@pytest.fixture
+def patched_bc():
+    """Patch settings_ui module's st and utility deps for non-fragment UI tests."""
+    mock_st = make_mock_st()
+    with (
+        patch("datasure.checks.backchecks.settings_ui.st", mock_st),
+        patch("datasure.checks.backchecks.settings_ui.save_check_settings"),
+        patch(
+            "datasure.checks.backchecks.settings_ui.load_check_settings",
+            return_value={},
+        ),
+        patch("datasure.checks.backchecks.settings_ui.trigger_save"),
+    ):
+        yield mock_st
+
+
+# ============================================
+# BC FIXTURE (reload compute/settings_ui with mocked streamlit)
+# ============================================
+
+
+@pytest.fixture
+def bc():
+    """Reload settings_ui (and compute) with mocked Streamlit to strip fragments."""
+    mock_st = make_mock_st()
+    original_st = sys.modules.get("streamlit")
+    sys.modules["streamlit"] = mock_st
+
+    import datasure.checks.backchecks.compute as compute_module
+    import datasure.checks.backchecks.settings_ui as settings_ui_module
+
+    try:
+        # Reload in dependency order so decorators pick up the mocked st.
+        importlib.reload(compute_module)
+        importlib.reload(settings_ui_module)
+
+        settings_ui_module.load_check_settings = MagicMock(return_value={})
+        settings_ui_module.save_check_settings = MagicMock()
+        settings_ui_module.trigger_save = MagicMock()
+
+        yield settings_ui_module
+    finally:
+        if original_st is not None:
+            sys.modules["streamlit"] = original_st
+        else:
+            sys.modules.pop("streamlit", None)
+        importlib.reload(compute_module)
+        importlib.reload(settings_ui_module)
+
+
+# ============================================
+# SETTINGS UI TESTS
+# ============================================
+
+
+def test_get_default_index_valid():
+    """Test _get_default_index with valid default value."""
+    options = ["option1", "option2", "option3"]
+
+    result = _get_default_index("option2", options)
+
+    assert result == 1
+
+
+def test_get_default_index_invalid():
+    """Test _get_default_index with invalid default value."""
+    options = ["option1", "option2", "option3"]
+
+    result = _get_default_index("option4", options)
+
+    assert result is None
+
+
+def test_get_default_index_none():
+    """Test _get_default_index with None default value."""
+    options = ["option1", "option2", "option3"]
+
+    result = _get_default_index(None, options)
+
+    assert result is None
+
+
+def test_render_selectbox_with_save(patched_bc):
+    """_render_selectbox_with_save calls st.selectbox and returns selection."""
+    patched_bc.selectbox.return_value = "col_a"
+    result = _render_selectbox_with_save(
+        "Label", ["col_a", "col_b"], "key", "settings.json", "setting_key", None, "help"
+    )
+    assert result == "col_a"
+
+
+def test_render_survey_identifiers(patched_bc):
+    """_render_survey_identifiers returns (survey_key, survey_id) tuple."""
+    patched_bc.selectbox.return_value = "key_col"
+    result = _render_survey_identifiers(
+        "settings.json", BackcheckSettings(survey_key=None), ["key_col", "id_col"]
+    )
+    assert isinstance(result, tuple)
+    assert len(result) == 2
+
+
+def test_render_date_columns(patched_bc):
+    """_render_date_columns returns (survey_date, backcheck_date) tuple."""
+    patched_bc.selectbox.return_value = "date_col"
+    result = _render_date_columns(
+        "settings.json",
+        BackcheckSettings(survey_key=None),
+        ["date_col"],
+        ["bc_date_col"],
+    )
+    assert isinstance(result, tuple)
+    assert len(result) == 2
+
+
+def test_render_staff_identifiers(patched_bc):
+    """_render_staff_identifiers returns (enumerator, backchecker) tuple."""
+    patched_bc.selectbox.return_value = "enum_col"
+    result = _render_staff_identifiers(
+        "settings.json",
+        BackcheckSettings(survey_key=None),
+        ["enum_col"],
+        ["bc_enum_col"],
+    )
+    assert isinstance(result, tuple)
+    assert len(result) == 2
+
+
+def test_render_tracking_options(patched_bc):
+    """_render_tracking_options returns the backcheck and error rate targets."""
+    patched_bc.number_input.side_effect = [50, 5]
+    result = _render_tracking_options(
+        "settings.json", BackcheckSettings(survey_key=None)
+    )
+    assert result == (50, 5)
+
+
+def test_render_tracking_options_saves_error_rate_target(patched_bc):
+    """A cleared error rate target is saved as None, so nothing is highlighted."""
+    patched_bc.number_input.side_effect = [10, None]
+    with patch("datasure.checks.backchecks.settings_ui.save_check_settings") as save:
+        _, error_target = _render_tracking_options(
+            "settings.json", BackcheckSettings(survey_key=None)
+        )
+    assert error_target is None
+    saved = [call.args[2] for call in save.call_args_list]
+    assert {"error_rate_target_percent": None} in saved
+
+
+def test_render_value_list_display_with_values(patched_bc):
+    """_render_value_list_display shows info when values exist."""
+    _render_value_list_display(["val1", "val2"], "Has values", "No values", "help")
+    patched_bc.info.assert_called_once()
+
+
+def test_render_value_list_display_empty(patched_bc):
+    """_render_value_list_display shows warning when list is empty."""
+    _render_value_list_display([], "Has values", "No values configured", "help")
+    patched_bc.warning.assert_called_once()
+
+
+def test_render_additional_options(patched_bc):
+    """_render_additional_options returns 3-tuple of settings."""
+    with (
+        patch(
+            "datasure.checks.backchecks.settings_ui._render_no_differences_settings",
+            return_value=[],
+        ),
+        patch(
+            "datasure.checks.backchecks.settings_ui._render_exclude_values_settings",
+            return_value=[],
+        ),
+        patch(
+            "datasure.checks.backchecks.settings_ui._render_string_comparison_options",
+            return_value=StrCompareOptions(),
+        ),
+        patch(
+            "datasure.checks.backchecks.settings_ui.load_default_backchecks_settings",
+            return_value=BackcheckSettings(survey_key=None),
+        ),
+    ):
+        result = _render_additional_options(
+            "settings.json", BackcheckSettings(survey_key=None)
+        )
+
+    assert isinstance(result, tuple)
+    assert len(result) == 3
+
+
+def test_render_no_differences_settings_fragment(bc):
+    """_render_no_differences_settings runs without error and returns a list."""
+    result = bc._render_no_differences_settings("settings.json")
+    assert isinstance(result, list)
+
+
+def test_render_string_comparison_options_fragment(bc):
+    """_render_string_comparison_options returns a StrCompareOptions object."""
+    result = bc._render_string_comparison_options("settings.json")
+    assert hasattr(result, "case_option")
+    assert hasattr(result, "trimspaces_option")
+
+
+def test_render_exclude_values_settings_fragment(bc):
+    """_render_exclude_values_settings runs without error and returns a list."""
+    result = bc._render_exclude_values_settings("settings.json")
+    assert isinstance(result, list)
+
+
+# ============================================
+# backchecks_report_settings: user choices reach the returned settings
+# ============================================
+
+
+@pytest.fixture
+def report_settings_with_choices(patched_bc):
+    """Run backchecks_report_settings with non-default UI selections."""
+    module = "datasure.checks.backchecks.settings_ui"
+    with (
+        patch(
+            f"{module}.load_default_backchecks_settings",
+            return_value=BackcheckSettings(survey_key=None),
+        ),
+        patch(f"{module}._render_survey_identifiers", return_value=("key", "sid")),
+        patch(f"{module}._render_date_columns", return_value=(None, None)),
+        patch(f"{module}._render_staff_identifiers", return_value=(None, None)),
+        patch(f"{module}._render_tracking_options", return_value=(35, 4.5)),
+        patch(
+            f"{module}._render_additional_options",
+            return_value=([], [], StrCompareOptions()),
+        ),
+    ):
+        yield backchecks_report_settings(
+            "project",
+            "settings.json",
+            pd.DataFrame(),
+            pd.DataFrame(),
+            BackcheckSettings(survey_key=None),
+            [],
+            [],
+            [],
+            [],
+        )
+
+
+def test_report_settings_keeps_selected_target_percent(
+    report_settings_with_choices,
+):
+    """A non-default backcheck target is not replaced by the default."""
+    assert report_settings_with_choices.backcheck_target_percent == 35
+
+
+def test_report_settings_keeps_selected_error_rate_target(
+    report_settings_with_choices,
+):
+    """The error rate target reaches the returned settings."""
+    assert report_settings_with_choices.error_rate_target_percent == 4.5
+
+
+def test_render_tracking_options_persists_changed_target(tmp_path):
+    """A changed target passes the real save guard and reloads from disk."""
+    settings_file = str(tmp_path / "settings.json")
+    session_state: dict = {}
+    mock_st = make_mock_st()
+    mock_st.session_state = session_state
+
+    def change_target(*_args, key, on_change, **widget_kwargs):
+        if key != "backcheck_goal_backchecks":
+            return None
+        on_change(*widget_kwargs["args"])
+        return 35
+
+    mock_st.number_input.side_effect = change_target
+    with (
+        patch("datasure.checks.backchecks.settings_ui.st", mock_st),
+        patch("datasure.utils.settings_utils.st", mock_st),
+    ):
+        _render_tracking_options(settings_file, BackcheckSettings(survey_key=None))
+
+    assert (
+        load_check_settings(settings_file, "backchecks")["backcheck_target_percent"]
+        == 35
+    )

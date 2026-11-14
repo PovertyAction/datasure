@@ -3,7 +3,9 @@
 from __future__ import annotations
 
 import polars as pl
+import pytest
 
+from datasure.processing.row_index import parse_row_indices, resolve_row_positions
 from datasure.replication.prep_script_generator import (
     _col_list,
     _cols,
@@ -13,7 +15,9 @@ from datasure.replication.prep_script_generator import (
     _stata_redact_columns,
     _stata_remove_columns,
     _stata_remove_rows,
+    _stata_str_literal,
     _stata_transform_column,
+    _UntranslatableStepError,
     _val,
     _val_list,
     generate_prepare_data_script,
@@ -149,13 +153,72 @@ class TestStataRedactColumns:
 
 
 class TestStataRemoveRows:
-    def test_by_index_single(self):
-        lines = _stata_remove_rows({"method": "by row index", "value": [5]}, "")
-        assert lines == ["drop in 5"]
+    @pytest.mark.parametrize(
+        ("value", "expected"),
+        [
+            # DataSure counts rows from 0, Stata from 1
+            ([5], "drop if _n == 6"),
+            (["0"], "drop if _n == 1"),
+            (["0:30"], "drop if inrange(_n, 1, 31)"),
+            # Negative positions count back from _N
+            (["-1"], "drop if _n == _N"),
+            (["-5"], "drop if _n == _N - 4"),
+            (["5:-2"], "drop if inrange(_n, 6, _N - 1)"),
+            (["-3:-2"], "drop if inrange(_n, _N - 2, _N - 1)"),
+            # Several values all refer to positions before the step
+            ([1, 3], "drop if _n == 2 | _n == 4"),
+            (["1", "-1"], "drop if _n == 2 | _n == _N"),
+            (
+                ["2:4", "-3:-2"],
+                "drop if inrange(_n, 3, 5) | inrange(_n, _N - 2, _N - 1)",
+            ),
+            ([1, "7:-1"], "drop if _n == 2 | inrange(_n, 8, _N)"),
+            # Prep logs from earlier versions
+            (["0", ",", None, "2"], "drop if _n == 1 | _n == 3"),
+        ],
+    )
+    def test_by_index(self, value, expected):
+        lines = _stata_remove_rows({"method": "by row index", "value": value}, "")
+        assert lines == [expected]
 
-    def test_by_index_multiple(self):
-        lines = _stata_remove_rows({"method": "by row index", "value": [1, 3]}, "")
-        assert lines == ["drop if _n == 1 | _n == 3"]
+    @pytest.mark.parametrize(
+        ("value", "expected_drop"),
+        [
+            # Range past the end: DataSure keeps it to the rows it has
+            (["0:30"], set(range(10))),
+            (["100:99999"], set()),
+            # Mixed-sign span that resolves reversed: nothing
+            (["-3:5"], set()),
+            # Single value outside the data: nothing
+            (["-20"], set()),
+            (["20"], set()),
+            (["8:-1"], {8, 9}),
+        ],
+    )
+    def test_by_index_matches_datasure_out_of_range(self, value, expected_drop):
+        # Stata's `in` stops with r(198) on these; `drop if` must select the
+        # same rows DataSure does. Evaluate the emitted condition in Python.
+        n_rows = 10
+        assert resolve_row_positions(parse_row_indices(value), n_rows) == expected_drop
+        (line,) = _stata_remove_rows({"method": "by row index", "value": value}, "")
+        assert line.startswith("drop if ")
+        assert "drop in" not in line
+        expr = (
+            line.removeprefix("drop if ")
+            .replace("|", " or ")
+            .replace("_N", str(n_rows))
+            .replace("inrange", "_inrange")
+        )
+        dropped = {
+            n - 1
+            for n in range(1, n_rows + 1)
+            if eval(expr, {"_inrange": lambda x, a, b: a <= x <= b, "_n": n})
+        }
+        assert dropped == expected_drop
+
+    def test_by_index_no_values_is_note(self):
+        lines = _stata_remove_rows({"method": "by row index", "value": [","]}, "")
+        assert lines[0].startswith("* NOTE")
 
     def test_missing_condition(self):
         lines = _stata_remove_rows(
@@ -167,7 +230,7 @@ class TestStataRemoveRows:
         lines = _stata_remove_rows(
             {"source_columns": ["col"], "condition": "value is not missing"}, ""
         )
-        assert lines == ["keep if missing(col)"]
+        assert lines == ["drop if !missing(col)"]
 
     def test_like_condition(self):
         lines = _stata_remove_rows(
@@ -178,7 +241,7 @@ class TestStataRemoveRows:
             },
             "",
         )
-        assert 'regexm(name, "^test")' in lines[0]
+        assert lines == ['drop if regexm(name, "^test") & !missing(name)']
 
     def test_not_like_condition(self):
         lines = _stata_remove_rows(
@@ -189,7 +252,7 @@ class TestStataRemoveRows:
             },
             "",
         )
-        assert "keep if" in lines[0]
+        assert lines == ['drop if !regexm(name, "^test") & !missing(name)']
 
     def test_between_condition(self):
         lines = _stata_remove_rows(
@@ -200,7 +263,7 @@ class TestStataRemoveRows:
             },
             "",
         )
-        assert "inrange(age, 18, 65)" in lines[0]
+        assert lines == ["drop if inrange(age, 18, 65) & !missing(age)"]
 
     def test_not_between_condition(self):
         lines = _stata_remove_rows(
@@ -211,20 +274,31 @@ class TestStataRemoveRows:
             },
             "",
         )
-        assert "keep if inrange" in lines[0]
+        assert lines == ["drop if !inrange(age, 18, 65) & !missing(age)"]
 
-    def test_greater_than_condition(self):
+    @pytest.mark.parametrize(
+        ("condition", "op"),
+        [
+            ("value is greater than", ">"),
+            ("value is greater than or equal to", ">="),
+            ("value is less than", "<"),
+            ("value is less than or equal to", "<="),
+            ("value is equal to", "=="),
+            ("value is not equal to", "!="),
+        ],
+    )
+    def test_comparison_conditions(self, condition, op):
         lines = _stata_remove_rows(
             {
                 "source_columns": ["score"],
-                "condition": "value is greater than",
+                "condition": condition,
                 "value": [100],
             },
             "",
         )
-        assert "keep if score <= 100" in lines[0]
+        assert lines == [f"drop if score {op} 100 & !missing(score)"]
 
-    def test_equal_condition(self):
+    def test_equal_condition_text_value(self):
         lines = _stata_remove_rows(
             {
                 "source_columns": ["status"],
@@ -233,17 +307,60 @@ class TestStataRemoveRows:
             },
             "",
         )
-        assert "keep if status !=" in lines[0]
+        assert lines == ['drop if status == "active" & !missing(status)']
 
-    def test_no_cols_no_condition_returns_note(self):
-        lines = _stata_remove_rows({}, "")
-        assert "NOTE" in lines[0]
-
-    def test_unknown_condition_returns_note(self):
+    def test_equal_condition_several_values(self):
         lines = _stata_remove_rows(
-            {"source_columns": ["col"], "condition": "something weird"}, ""
+            {
+                "source_columns": ["code"],
+                "condition": "value is equal to",
+                "value": [1, 3],
+            },
+            "",
         )
-        assert "NOTE" in lines[0]
+        assert lines == ["drop if (code == 1 | code == 3) & !missing(code)"]
+
+    def test_not_equal_condition_several_values(self):
+        lines = _stata_remove_rows(
+            {
+                "source_columns": ["code"],
+                "condition": "value is not equal to",
+                "value": [1, 3],
+            },
+            "",
+        )
+        assert lines == ["drop if !(code == 1 | code == 3) & !missing(code)"]
+
+    def test_one_line_per_column(self):
+        lines = _stata_remove_rows(
+            {
+                "source_columns": ["a", "b"],
+                "condition": "value is greater than",
+                "value": [60],
+            },
+            "",
+        )
+        assert lines == [
+            "drop if a > 60 & !missing(a)",
+            "drop if b > 60 & !missing(b)",
+        ]
+
+    def test_one_line_per_column_missing(self):
+        lines = _stata_remove_rows(
+            {"source_columns": ["a", "b"], "condition": "value is not missing"},
+            "",
+        )
+        assert lines == ["drop if !missing(a)", "drop if !missing(b)"]
+
+    def test_no_cols_no_condition_is_untranslatable(self):
+        with pytest.raises(_UntranslatableStepError):
+            _stata_remove_rows({}, "")
+
+    def test_unknown_condition_is_untranslatable(self):
+        with pytest.raises(_UntranslatableStepError, match="something weird"):
+            _stata_remove_rows(
+                {"source_columns": ["col"], "condition": "something weird"}, ""
+            )
 
 
 class TestStataTransformColumn:
@@ -313,17 +430,104 @@ class TestStataTransformColumn:
         )
         assert "tabulate" in lines[0]
 
-    def test_unknown_method_returns_note(self):
-        lines = _stata_transform_column(
-            {"source_columns": ["col"], "method": "unknown_method"}, ""
-        )
-        assert "NOTE" in lines[0]
+    def test_unknown_method_is_untranslatable(self):
+        with pytest.raises(_UntranslatableStepError, match="unknown_method"):
+            _stata_transform_column(
+                {"source_columns": ["col"], "method": "unknown_method"}, ""
+            )
 
     def test_string_to_number(self):
         lines = _stata_transform_column(
             {"source_columns": ["col"], "method": "string to number"}, ""
         )
         assert "destring" in lines[0]
+
+    def test_to_string_drops_whole_float_suffix_in_text_columns(self):
+        # The CSV import keeps "12.0" as text; DataSure would show "12".
+        lines = _stata_transform_column(
+            {"source_columns": ["hhid"], "method": "to string"}, ""
+        )
+        assert lines[0] == "capture confirm string variable hhid"
+        assert "    quietly count if !missing(hhid) & missing(real(hhid))" in lines
+        assert (
+            "        quietly replace hhid = substr(hhid, 1, strlen(hhid) - 2) "
+            'if substr(hhid, -2, 2) == ".0"'
+        ) in lines
+
+    def test_to_string_does_not_destring_text_columns(self):
+        # destring would round IDs above 2^53 through a double.
+        text = "\n".join(
+            _stata_transform_column(
+                {"source_columns": ["hhid"], "method": "to string"}, ""
+            )
+        )
+        assert "destring" not in text
+
+    def test_to_string_formats_csv_datetimes_like_datasure(self):
+        # write_csv gives "2025-08-18T19:49:00.000000"; DataSure uses a space.
+        lines = _stata_transform_column(
+            {"source_columns": ["t"], "method": "to string"}, ""
+        )
+        assert (
+            "    quietly count if !missing(t) & "
+            '!ustrregexm(t, "^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]")'
+        ) in lines
+        assert (
+            '        quietly replace t = substr(t, 1, 10) + " " '
+            "+ substr(t, 12, .) if !missing(t)"
+        ) in lines
+
+    def test_to_string_avoids_global_macro_syntax(self):
+        # A do-file would expand "$..." as a global macro.
+        text = "\n".join(
+            _stata_transform_column(
+                {"source_columns": ["t"], "method": "to string"}, ""
+            )
+        )
+        assert "$" not in text
+
+    def test_to_string_formats_dates_like_datasure(self):
+        # SurveyCTO dates are datetimes in DataSure, not day counts.
+        text = "\n".join(
+            _stata_transform_column(
+                {"source_columns": ["d"], "method": "to string"}, ""
+            )
+        )
+        assert '"%tdCCYY-NN-DD") + " 00:00:00.000000"' in text
+        assert '"%tcCCYY-NN-DD_HH:MM:SS.sss") + "000"' in text
+
+    def test_to_string_keeps_missing_values_empty(self):
+        # tostring would turn missing into ".", which concat then joins.
+        text = "\n".join(
+            _stata_transform_column(
+                {"source_columns": ["n"], "method": "to string"}, ""
+            )
+        )
+        assert "tostring" not in text
+        assert 'string(n, "%17.0g") if !missing(n)' in text
+
+    def test_to_string_keeps_column_position(self):
+        lines = _stata_transform_column(
+            {"source_columns": ["n"], "method": "to string"}, ""
+        )
+        assert "    order `s', after(n)" in lines
+
+    def test_to_number_maps_true_false_text(self):
+        # The raw CSV holds booleans as "true"/"false" text.
+        lines = _stata_transform_column(
+            {"source_columns": ["consent"], "method": "to number"}, ""
+        )
+        assert lines[0] == "capture confirm string variable consent"
+        assert '    gen byte `n\' = 1 if consent == "true"' in lines
+        assert '    replace `n\' = 0 if consent == "false"' in lines
+
+    def test_to_number_keeps_column_name_and_position(self):
+        lines = _stata_transform_column(
+            {"source_columns": ["consent"], "method": "to number"}, ""
+        )
+        assert "    order `n', after(consent)" in lines
+        assert "    drop consent" in lines
+        assert "    rename `n' consent" in lines
 
     def test_floor(self):
         lines = _stata_transform_column(
@@ -336,6 +540,23 @@ class TestStataTransformColumn:
             {"source_columns": ["dob"], "method": "year"}, ""
         )
         assert "year(" in lines[0]
+
+
+class TestStataStrLiteral:
+    def test_plain_text(self):
+        assert _stata_str_literal("_") == '"_"'
+
+    def test_empty(self):
+        assert _stata_str_literal("") == '""'
+
+    def test_local_macro_syntax(self):
+        assert _stata_str_literal("`v'") == 'char(96) + "v\'"'
+
+    def test_global_macro_syntax(self):
+        assert _stata_str_literal("$raw") == 'char(36) + "raw"'
+
+    def test_quotes(self):
+        assert _stata_str_literal("a\"'b") == '"a" + char(34) + "\'b"'
 
 
 class TestStataAddColumn:
@@ -355,9 +576,50 @@ class TestStataAddColumn:
         lines = _stata_add_column({"column_names": "idx", "method": "index"}, "")
         assert "gen idx = _n" in lines[0]
 
-    def test_uuid_note(self):
-        lines = _stata_add_column({"column_names": "uid", "method": "uuid"}, "")
-        assert "NOTE" in lines[0]
+    def test_concat_joins_columns_skipping_empty_values(self):
+        lines = _stata_add_column(
+            {
+                "column_names": "uid",
+                "method": "concat",
+                "source_columns": ["region", "hhid"],
+                "value": "_",
+            },
+            "",
+        )
+        assert lines == [
+            'gen uid = ""',
+            "foreach v in region hhid {",
+            '    replace uid = uid + cond(uid == "" | `v\' == "", "", "_") + `v\'',
+            "}",
+        ]
+
+    def test_concat_without_separator(self):
+        lines = _stata_add_column(
+            {
+                "column_names": "uid",
+                "method": "concat",
+                "source_columns": ["a", "b"],
+                "value": None,
+            },
+            "",
+        )
+        assert 'cond(uid == "" | `v\' == "", "", "")' in lines[2]
+
+    def test_concat_separator_is_not_expanded_as_a_macro(self):
+        lines = _stata_add_column(
+            {
+                "column_names": "uid",
+                "method": "concat",
+                "source_columns": ["a", "b"],
+                "value": "`v'",
+            },
+            "",
+        )
+        assert 'cond(uid == "" | `v\' == "", "", char(96) + "v\'")' in lines[2]
+
+    def test_uuid_is_untranslatable(self):
+        with pytest.raises(_UntranslatableStepError, match="uid"):
+            _stata_add_column({"column_names": "uid", "method": "uuid"}, "")
 
     def test_random(self):
         lines = _stata_add_column({"column_names": "rnd", "method": "random"}, "")
@@ -413,9 +675,9 @@ class TestStataAddColumn:
         )
         assert "gen q = a / b" in lines[0]
 
-    def test_unknown_method_returns_note(self):
-        lines = _stata_add_column({"column_names": "nc", "method": "unknown"}, "")
-        assert "NOTE" in lines[0]
+    def test_unknown_method_is_untranslatable(self):
+        with pytest.raises(_UntranslatableStepError, match="unknown"):
+            _stata_add_column({"column_names": "nc", "method": "unknown"}, "")
 
     def test_min_aggregation(self):
         lines = _stata_add_column(
@@ -522,6 +784,98 @@ class TestGeneratePrepareDataScript:
         )
         result = generate_prepare_data_script(log, "P", "S", "0.1")
         assert "Removes old column" in result
+
+    def test_untranslatable_step_is_note_and_warning(self):
+        log = pl.DataFrame(
+            {
+                "action": ["remove row(s)", "remove column(s)"],
+                "description": ["Remove rows", "Drop col"],
+                "prep_args": [
+                    '{"method": "by row index", "value": ["abc"]}',
+                    '{"source_columns": ["x"]}',
+                ],
+                "action_index": [1, 2],
+            }
+        )
+        warnings: list[str] = []
+        result = generate_prepare_data_script(
+            log, "P", "S", "0.1", on_warning=warnings.append
+        )
+        assert "* NOTE: step 1 could not be translated" in result
+        assert "drop x" in result
+        assert len(warnings) == 1
+        assert "Step 1" in warnings[0]
+
+    @pytest.mark.parametrize(
+        ("action", "prep_args", "reason"),
+        [
+            (
+                "add new column",
+                '{"column_names": "uid", "method": "uuid"}',
+                "no direct Stata equivalent",
+            ),
+            (
+                "transform column(s)",
+                '{"source_columns": ["c"], "method": "unknown_method"}',
+                "not supported",
+            ),
+            (
+                "remove row(s)",
+                '{"source_columns": ["c"], "condition": "something weird"}',
+                "not supported",
+            ),
+            ("mystery action", "{}", "unknown action 'mystery action'"),
+        ],
+    )
+    def test_unsupported_step_without_error_still_warns(
+        self, action, prep_args, reason
+    ):
+        log = pl.DataFrame(
+            {
+                "action": [action, "remove column(s)"],
+                "description": ["Step one", "Drop col"],
+                "prep_args": [prep_args, '{"source_columns": ["x"]}'],
+                "action_index": [1, 2],
+            }
+        )
+        warnings: list[str] = []
+        result = generate_prepare_data_script(
+            log, "P", "S", "0.1", on_warning=warnings.append
+        )
+        assert "* NOTE: step 1 could not be translated" in result
+        assert reason in result
+        assert "drop x" in result
+        assert len(warnings) == 1
+        assert "Step 1 (Step one)" in warnings[0]
+        assert reason in warnings[0]
+
+    def test_empty_row_index_step_is_note_without_warning(self):
+        log = pl.DataFrame(
+            {
+                "action": ["remove row(s)"],
+                "description": ["Remove rows"],
+                "prep_args": ['{"method": "by row index", "value": [","]}'],
+                "action_index": [1],
+            }
+        )
+        warnings: list[str] = []
+        result = generate_prepare_data_script(
+            log, "P", "S", "0.1", on_warning=warnings.append
+        )
+        assert "NOTE: no row indices provided" in result
+        assert warnings == []
+
+    def test_range_step_end_to_end(self):
+        log = pl.DataFrame(
+            {
+                "action": ["remove row(s)"],
+                "description": ["Remove rows"],
+                "prep_args": ['{"method": "by row index", "value": ["0:30"]}'],
+                "action_index": [1],
+            }
+        )
+        result = generate_prepare_data_script(log, "P", "S", "0.1")
+        assert "drop if inrange(_n, 1, 31)" in result
 
     def test_returns_string(self):
         log = pl.DataFrame(

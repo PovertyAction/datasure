@@ -15,17 +15,42 @@ import plotly.graph_objects as go
 import polars as pl
 import streamlit as st
 
+from datasure.checks.missing import mask_missing_codes
 from datasure.models.schemas import ColumnByType
-from datasure.utils.duckdb_utils import duckdb_get_table, duckdb_save_table
-from datasure.utils.navigations_utils import demo_callout
-from datasure.utils.onboarding_utils import demo_output_onboarding
-from datasure.utils.settings_utils import (
-    load_check_settings,
-    save_check_settings,
-    trigger_save,
+from datasure.utils.duckdb_utils import (
+    DESCRIPTIVE_COLUMNS_TABLE,
+    LEGACY_DESCRIPTIVE_SELECTION_TABLE,
+    check_table_name,
+    duckdb_get_table,
+    duckdb_save_table,
+    duckdb_table_exists,
+    load_missing_codes_from_db,
 )
+from datasure.utils.navigations_utils import demo_callout, show_demo_next_action
+from datasure.utils.onboarding_utils import demo_output_onboarding
+from datasure.utils.view_state import reset_filters_beside, view_factory
 
 TAB_NAME: str = "descriptive_stats"
+
+# Saved view state scope: the check's catalogue slug. The histogram and value
+# counts choices are personal view state; older versions saved them in the
+# check's settings and they move on first load. The selected columns and the
+# quick-select pills are the check's setup.
+VIEW_SCOPE = "descriptive"
+check_view = view_factory(
+    VIEW_SCOPE,
+    legacy=(
+        TAB_NAME,
+        {
+            "desc_hist_col": "col_to_plot",
+            "desc_hist_bins": "n_bins",
+            "desc_vc_col": "col_to_analyse",
+            "desc_vc_topn": "top_n",
+            "desc_vc_view_pills": "view",
+            "desc_vc_agg_pills": "agg_option",
+        },
+    ),
+)
 
 # Colour constants
 _ORANGE_HEX = "#f26529"
@@ -83,7 +108,11 @@ def _col_stats(col: str, s: pl.Series, n_missing: int, n_total: int) -> dict:
     }
 
 
-def compute_summary_stats(df: pl.DataFrame, numeric_cols: list[str]) -> pd.DataFrame:
+def compute_summary_stats(
+    df: pl.DataFrame,
+    numeric_cols: list[str],
+    missing_codes: pl.DataFrame | None = None,
+) -> pd.DataFrame:
     """Compute per-column summary statistics for numeric columns.
 
     Parameters
@@ -92,6 +121,8 @@ def compute_summary_stats(df: pl.DataFrame, numeric_cols: list[str]) -> pd.DataF
         Input data.
     numeric_cols : list[str]
         Numeric column names to analyse.
+    missing_codes : pl.DataFrame | None
+        The project's missing codes. Values matching them count as missing.
 
     Returns
     -------
@@ -102,6 +133,8 @@ def compute_summary_stats(df: pl.DataFrame, numeric_cols: list[str]) -> pd.DataF
     if not numeric_cols or df.is_empty():
         return pd.DataFrame()
 
+    if missing_codes is not None:
+        df = mask_missing_codes(df, numeric_cols, missing_codes)
     n_total = len(df)
     rows = []
     for col in numeric_cols:
@@ -116,7 +149,10 @@ def compute_summary_stats(df: pl.DataFrame, numeric_cols: list[str]) -> pd.DataF
 
 
 def compute_histogram_data(
-    df: pl.DataFrame, column: str, n_bins: int = 20
+    df: pl.DataFrame,
+    column: str,
+    n_bins: int = 20,
+    missing_codes: pl.DataFrame | None = None,
 ) -> pd.DataFrame:
     """Compute histogram bin counts for a numeric column.
 
@@ -128,6 +164,8 @@ def compute_histogram_data(
         Column to compute histogram for.
     n_bins : int
         Number of histogram bins.
+    missing_codes : pl.DataFrame | None
+        The project's missing codes. Values matching them are left out.
 
     Returns
     -------
@@ -137,6 +175,8 @@ def compute_histogram_data(
     if df.is_empty() or column not in df.columns:
         return pd.DataFrame()
 
+    if missing_codes is not None:
+        df = mask_missing_codes(df, [column], missing_codes)
     values = df[column].cast(pl.Float64, strict=False).drop_nulls().to_numpy()
     if len(values) == 0:
         return pd.DataFrame()
@@ -195,70 +235,60 @@ def _create_new_column_selection_df(
     """Create a DataFrame for the column selector with descriptive type labels."""
     all_cols = df.columns
     selected = [False] * len(all_cols)
-    col_types = []
-    for col in all_cols:
-        if col in columns.datetime_columns:
-            col_types.append("datetime")
-        elif col in columns.numeric_columns:
-            col_types.append("numeric")
-        elif col in columns.categorical_columns:
-            col_types.append("categorical")
-        elif col in columns.string_columns:
-            col_types.append("string")
-        else:
-            col_types.append("other")
-
+    col_types = [_get_column_type_label(col, columns) for col in all_cols]
     return pl.DataFrame({"Selected": selected, "column": all_cols, "type": col_types})
 
 
-def _modify_column_selection_df(
-    column_selection_df: pl.DataFrame, current_cols: set[str]
+def _selection_table(page_name_id: str) -> str:
+    """Return the logs table holding a page's descriptive column selection."""
+    return check_table_name(DESCRIPTIVE_COLUMNS_TABLE, page_name_id)
+
+
+def _apply_saved_selection(
+    selection: pl.DataFrame, saved: pl.DataFrame
 ) -> pl.DataFrame:
-    """Modify the column selection DataFrame to match the current dataset columns."""
-    existing_cols = set(column_selection_df["column"])
-    cols_to_add = current_cols - existing_cols
-    cols_to_remove = existing_cols - current_cols
+    """Tick the columns ``saved`` selected, keeping ``selection``'s columns.
 
-    # Remove columns that no longer exist
-    if cols_to_remove:
-        column_selection_df = column_selection_df.filter(
-            ~pl.col("column").is_in(list(cols_to_remove))
-        )
-
-    # Add new columns that are not in the existing DataFrame
-    for col in cols_to_add:
-        column_selection_df = column_selection_df.concat(
-            pl.DataFrame(
-                {
-                    "Selected": [False],
-                    "column": [col],
-                    "type": [_get_column_type_label(col, existing_cols)],
-                }
-            ),
-            allow_duplicates=False,
-        )
-
-    return column_selection_df
+    Saved columns no longer in the data are dropped; new columns start
+    unselected.
+    """
+    chosen = saved.filter(pl.col("Selected").cast(pl.Boolean))["column"].to_list()
+    return selection.with_columns(pl.col("column").is_in(chosen).alias("Selected"))
 
 
 def get_column_selection_df(
-    project_id: str, df: pl.DataFrame, columns: ColumnByType
+    project_id: str, page_name_id: str, df: pl.DataFrame, columns: ColumnByType
 ) -> pl.DataFrame:
-    """Retrieve the column selection DataFrame from duckdb or create a new one."""
-    try:
-        column_selection_df = duckdb_get_table(
-            project_id,
-            "selected_columns_df",
-            "intermediate",
-        )
-        current_cols = set(df.columns)
-        if not set(column_selection_df["column"]).issubset(current_cols):
-            return _modify_column_selection_df(column_selection_df, current_cols)
-    except Exception:
-        # If the table doesn't exist or columns mismatch, create a new one
-        return _create_new_column_selection_df(df, columns)
-    else:
-        return column_selection_df
+    """Return the page's descriptive column selection for the current data.
+
+    One row per column of ``df`` with its type and whether the page selected
+    it. The selection is saved per page in the ``logs`` database.
+
+    Older versions saved one selection for the whole project. A page with no
+    selection of its own starts from that one, keeping only the page's
+    columns, and saves it as its own; the old table is left in place.
+    """
+    selection = _create_new_column_selection_df(df, columns)
+    table = _selection_table(page_name_id)
+    if duckdb_table_exists(project_id, table, "logs"):
+        saved = duckdb_get_table(project_id, table, "logs")
+        return _apply_saved_selection(selection, saved)
+
+    legacy = duckdb_get_table(
+        project_id, LEGACY_DESCRIPTIVE_SELECTION_TABLE, "intermediate"
+    )
+    if legacy.is_empty():
+        return selection
+    seeded = _apply_saved_selection(selection, legacy)
+    save_column_selection(project_id, page_name_id, seeded)
+    return seeded
+
+
+def save_column_selection(
+    project_id: str, page_name_id: str, selection: pl.DataFrame
+) -> None:
+    """Save the page's descriptive column selection to the ``logs`` database."""
+    duckdb_save_table(project_id, selection, _selection_table(page_name_id), "logs")
 
 
 # =============================================================================
@@ -282,16 +312,19 @@ def _get_column_type_label(col: str, columns: ColumnByType) -> str:
 @st.fragment
 def _render_column_selector(
     project_id: str,
+    page_name_id: str,
     column_selection_df: pl.DataFrame,
 ) -> ColumnByType:
     """Render the inline column selector with descriptive type labels.
 
     Parameters
     ----------
-    df : pl.DataFrame
-        Dataset (used to determine available columns).
-    columns : ColumnByType
-        Column type information.
+    project_id : str
+        Project identifier.
+    page_name_id : str
+        Page identifier; the selection is saved per page.
+    column_selection_df : pl.DataFrame
+        The page's current column selection.
 
     Returns
     -------
@@ -374,12 +407,7 @@ def _render_column_selector(
             type="primary",
             width="stretch",
         ):
-            duckdb_save_table(
-                project_id,
-                selected_columns_df,
-                "selected_columns_df",
-                "intermediate",
-            )
+            save_column_selection(project_id, page_name_id, selected_columns_df)
             st.rerun()
 
     selected_numeric_cols = selected_columns_df.filter(
@@ -396,13 +424,17 @@ def _render_column_selector(
     )
 
 
-def _render_summary_stats(df: pl.DataFrame, numeric_cols: list[str]) -> None:
+def _render_summary_stats(
+    df: pl.DataFrame,
+    numeric_cols: list[str],
+    missing_codes: pl.DataFrame | None = None,
+) -> None:
     """Render the Summary Stats tab."""
     if not numeric_cols:
         st.info("No numeric columns selected.")
         return
 
-    stats = compute_summary_stats(df, numeric_cols)
+    stats = compute_summary_stats(df, numeric_cols, missing_codes=missing_codes)
     if stats.empty:
         st.info("No data to display.")
         return
@@ -471,7 +503,10 @@ def _build_shape_caption(s: pl.Series) -> str:
 
 @st.fragment
 def _render_histogram(
-    df: pl.DataFrame, numeric_cols: list[str], setting_file: str
+    df: pl.DataFrame,
+    numeric_cols: list[str],
+    setting_file: str,
+    missing_codes: pl.DataFrame | None = None,
 ) -> None:
     """Render the Histogram section."""
     if not numeric_cols:
@@ -479,39 +514,23 @@ def _render_histogram(
         return
 
     col_sel, _, bins_sel = st.columns([3, 1, 2])
-
-    saved_settings = load_check_settings(setting_file, TAB_NAME) or {}
-    default_col_to_plot = saved_settings.get("col_to_plot", None)
-
-    default_col_to_plot_index = (
-        numeric_cols.index(default_col_to_plot)
-        if default_col_to_plot in numeric_cols
-        else 0
-    )
+    saved_view = check_view(setting_file)
 
     col_to_plot = col_sel.selectbox(
         "Column",
         numeric_cols,
-        index=default_col_to_plot_index,
-        key="desc_hist_col",
-        on_change=trigger_save,
-        kwargs={"state_name": TAB_NAME + "_col_to_plot"},
+        **saved_view.bind("desc_hist_col", options=numeric_cols, index=0),
     )
-    save_check_settings(setting_file, TAB_NAME, {"col_to_plot": col_to_plot})
-
-    default_n_bins = saved_settings.get("n_bins", 20)
 
     n_bins = bins_sel.slider(
         "Bins",
         min_value=5,
         max_value=100,
-        value=default_n_bins,
-        key="desc_hist_bins",
-        on_change=trigger_save,
-        kwargs={"state_name": TAB_NAME + "_n_bins"},
+        **saved_view.bind("desc_hist_bins", options=range(5, 101), value=20),
     )
-    save_check_settings(setting_file, TAB_NAME, {"n_bins": n_bins})
 
+    if missing_codes is not None:
+        df = mask_missing_codes(df, [col_to_plot], missing_codes)
     hist_data = compute_histogram_data(df, col_to_plot, n_bins=n_bins)
     if hist_data.empty:
         st.info("No data to plot.")
@@ -546,37 +565,20 @@ def _render_value_counts(
         return
 
     col_sel, _, topn_sel = st.columns([3, 1, 2])
-
-    saved_settings = load_check_settings(setting_file, TAB_NAME) or {}
-    default_col_to_analyse = saved_settings.get("col_to_analyse", None)
-    default_col_to_analyse_index = (
-        all_selected_cols.index(default_col_to_analyse)
-        if default_col_to_analyse in all_selected_cols
-        else 0
-    )
+    saved_view = check_view(setting_file)
 
     col_to_analyse = col_sel.selectbox(
         "Column",
         all_selected_cols,
-        index=default_col_to_analyse_index,
-        key="desc_vc_col",
-        on_change=trigger_save,
-        kwargs={"state_name": TAB_NAME + "_col_to_analyse"},
+        **saved_view.bind("desc_vc_col", options=all_selected_cols, index=0),
     )
-    save_check_settings(setting_file, TAB_NAME, {"col_to_analyse": col_to_analyse})
-
-    default_top_n = saved_settings.get("top_n", 20)
 
     top_n = topn_sel.slider(
         "Top N categories",
         5,
         50,
-        value=default_top_n,
-        key="desc_vc_topn",
-        on_change=trigger_save,
-        kwargs={"state_name": TAB_NAME + "_top_n"},
+        **saved_view.bind("desc_vc_topn", options=range(5, 51), value=20),
     )
-    save_check_settings(setting_file, TAB_NAME, {"top_n": top_n})
 
     vc = compute_value_counts(df, col_to_analyse, top_n=top_n)
     if vc.empty:
@@ -588,19 +590,15 @@ def _render_value_counts(
         "chart": ":material/bar_chart: Chart View",
     }
 
-    default_view = saved_settings.get("view", "table")
-
     view = st.pills(
         "Select view",
-        default=default_view,
         options=options_map.keys(),
         format_func=lambda x: options_map[x],
-        key="desc_vc_view_pills",
         help="Toggle between table and chart view for value counts",
-        on_change=trigger_save,
-        kwargs={"state_name": TAB_NAME + "_view"},
+        **saved_view.bind(
+            "desc_vc_view_pills", options=list(options_map), default="table"
+        ),
     )
-    save_check_settings(setting_file, TAB_NAME, {"view": view})
 
     if view == "table":
         st.dataframe(
@@ -620,7 +618,6 @@ def _render_value_counts(
             },
         )
     else:
-        default_agg_option = saved_settings.get("agg_option", "count")
         agg_options_map = {
             "count": ":material/123: Count",
             "pct": ":material/percent: Percentage",
@@ -630,13 +627,11 @@ def _render_value_counts(
             "Aggregate by",
             options=agg_options_map.keys(),
             format_func=lambda x: agg_options_map[x],
-            key="desc_vc_agg_pills",
             help="Choose whether to size bars by count or percentage",
-            default=default_agg_option,
-            on_change=trigger_save,
-            kwargs={"state_name": TAB_NAME + "_agg_option"},
+            **saved_view.bind(
+                "desc_vc_agg_pills", options=list(agg_options_map), default="count"
+            ),
         )
-        save_check_settings(setting_file, TAB_NAME, {"agg_option": agg_options})
 
         # Create the figure
         fig = go.Figure()
@@ -697,6 +692,7 @@ def _render_value_counts(
 @demo_output_onboarding(TAB_NAME)
 def descriptive_report(
     project_id: str,
+    page_name_id: str,
     data: pl.DataFrame,
     setting_file: str,
     survey_columns: ColumnByType,
@@ -709,22 +705,34 @@ def descriptive_report(
 
     Parameters
     ----------
-    df : pl.DataFrame | pd.DataFrame
-        Survey dataset to analyse. Pandas DataFrames are converted automatically.
-    columns : ColumnByType
+    project_id : str
+        Project identifier.
+    page_name_id : str
+        Page identifier; the column selection is saved per page.
+    data : pl.DataFrame
+        Survey dataset to analyse.
+    setting_file : str
+        Path to the page's settings file.
+    survey_columns : ColumnByType
         Column type metadata for the dataset.
     """
-    st.title("Descriptive Statistics")
+    # No settings section here, so the action sits beside the title.
+    with reset_filters_beside(check_view(setting_file), vertical_alignment="center"):
+        st.title("Descriptive Statistics")
 
     # check if DataFrame is empty before proceeding with any computations or rendering
     if data.is_empty():
         st.warning("The selected dataset is empty.")
         return
 
-    column_selection_df = get_column_selection_df(project_id, data, survey_columns)
+    column_selection_df = get_column_selection_df(
+        project_id, page_name_id, data, survey_columns
+    )
 
     # Inline column selector
-    selected_columns = _render_column_selector(project_id, column_selection_df)
+    selected_columns = _render_column_selector(
+        project_id, page_name_id, column_selection_df
+    )
 
     if not selected_columns.all_columns:
         st.info("No columns selected. Use the column selector above to select columns.")
@@ -732,18 +740,33 @@ def descriptive_report(
 
     st.write("---")
 
+    # Missing codes such as -99 are missing, not values, in the numeric views
+    missing_codes = load_missing_codes_from_db(project_id)
+
     # Stacked sections
     st.subheader("Summary Stats")
-    _render_summary_stats(data, selected_columns.numeric_columns)
+    _render_summary_stats(data, selected_columns.numeric_columns, missing_codes)
 
     st.write("---")
     st.subheader("Histogram")
-    _render_histogram(data, selected_columns.numeric_columns, setting_file)
+    _render_histogram(
+        data, selected_columns.numeric_columns, setting_file, missing_codes
+    )
 
     st.write("---")
     st.subheader("Value Counts")
     _render_value_counts(data, selected_columns.all_columns, setting_file)
 
     demo_callout(
-        "**Next**: :material/arrow_upward: Scroll up and select the **Progress Tracking** tab."
+        "You have now explored every data quality check: **Overview** (Summary, "
+        "Progress), **Data integrity** (Missing Values, Duplicates, Outliers & "
+        "Constraints, GPS Checks), **Field team** (Enumerator Stats, Backchecks) "
+        "and **Exploration** (Descriptive Stats).\n\n"
+        "The next step is the **Correct Data** page, where you will learn how to "
+        "apply targeted corrections to your survey data based on the quality "
+        "findings from these checks.\n\n"
+        "To get there, click **Correct Data** in the sidebar or use the "
+        "**Proceed to Correct Data** button below.",
+        type="success",
     )
+    show_demo_next_action(5, "st_corr_page", "Proceed to Correct Data")

@@ -23,11 +23,13 @@ from datasure.models.enums import (
     PrepOperations,
     PrepRowConditions,
 )
+from datasure.processing.row_index import parse_row_indices, resolve_row_positions
 from datasure.utils.duckdb_utils import duckdb_get_table, duckdb_save_table
 from datasure.utils.prep_utils import (
     PrepActionResult,
     PrepConfirmationMessages,
 )
+from datasure.utils.reapply_utils import ReapplyFailure
 
 # === EXCEPTIONS === #
 
@@ -51,6 +53,15 @@ class OperationError(PrepError):
 
 
 # === DATA MODELS === #
+
+
+@dataclass
+class PrepReapplyOutcome:
+    """Result of (re)applying one logged prep action during a bulk reapply."""
+
+    prep_args: PrepActionResult
+    status: str  # "Successful" or "Failed"
+    error: str | None = None
 
 
 @dataclass
@@ -161,29 +172,42 @@ class RemoveColumnsOperation(PrepOperation):
     def execute(
         self, data: pl.DataFrame, prep_args: PrepActionResult
     ) -> tuple[pl.DataFrame, PrepActionResult]:
-        """Remove columns specified in description."""
-        try:
-            # Extract column names from description
-            columns = prep_args.source_columns
-            self._validate_columns_exist(data, columns)
+        """Remove columns specified in description.
 
-            # drop columns
-            results = data.drop(columns)
+        Columns that no longer exist (e.g. dropped by a later re-import) are
+        skipped rather than failing the whole step, as long as at least one
+        requested column is still present - so a step that removed 4 columns
+        still removes the 2 that remain instead of removing none.
+        """
+        try:
+            columns = prep_args.source_columns or []
+            existing_columns = [c for c in columns if c in data.columns]
+            missing_columns = [c for c in columns if c not in data.columns]
+
+            if not existing_columns:
+                raise OperationError(f"Columns not found: {missing_columns}")  # noqa: TRY301
+
+            # Remove columns using Polars
+            results = data.drop(existing_columns)
 
             updated_prep_args = {
                 "action": PrepActions.remove_column.value,
                 "column_names": None,
-                "affected_count": len(columns),
-                "remaining_count": data.width,
+                "affected_count": len(existing_columns),
+                "remaining_rows": results.height,
+                "remaining_columns": results.width,
                 "value": None,
                 "method": None,
-                "source_columns": columns,
+                "source_columns": existing_columns,
                 "condition": prep_args.condition,
-                "failed_count": 0,
-                "additional_info": None,
+                "failed_count": len(missing_columns),
+                "additional_info": (
+                    f"Columns not found and skipped: {missing_columns}"
+                    if missing_columns
+                    else None
+                ),
             }
 
-            # Remove columns using Polars
             return results, PrepActionResult(**updated_prep_args)
 
         except (ValidationError, OperationError):
@@ -316,11 +340,12 @@ class RemoveRowsOperation(PrepOperation):
             value = prep_args.value
             condition = prep_args.condition
             source_columns = prep_args.source_columns or []
+            additional_info = None
 
             if method == PrepMethods.row_index.value:
                 results = self._remove_by_index(data, value)
             elif method == PrepMethods.condition.value:
-                results = self._remove_by_condition(
+                results, additional_info = self._remove_by_condition(
                     data, condition, source_columns, value
                 )
             else:
@@ -330,13 +355,14 @@ class RemoveRowsOperation(PrepOperation):
                 "action": PrepActions.remove_row.value,
                 "column_names": None,
                 "affected_count": data.height - results.height,
-                "remaining_count": results.height,
+                "remaining_rows": results.height,
+                "remaining_columns": results.width,
                 "value": value,
                 "method": method,
                 "source_columns": source_columns,
                 "condition": condition,
                 "failed_count": 0,
-                "additional_info": None,
+                "additional_info": additional_info,
             }
 
             return results, PrepActionResult(**updated_prep_args)
@@ -348,40 +374,44 @@ class RemoveRowsOperation(PrepOperation):
 
     def _remove_by_index(self, data: pl.DataFrame, index_values: list) -> pl.DataFrame:
         """Remove rows by index positions."""
-        rows_to_drop = []
-        for item in index_values:
-            if item in [",", None]:
-                continue
-            if isinstance(item, str) and ":" in item:
-                # Handle range like "1:3"
-                start, end = item.split(":")
-                rows_to_drop.extend(range(int(start), int(end) + 1))
-            else:
-                rows_to_drop.append(int(item))
+        try:
+            spans = parse_row_indices(index_values)
+        except ValueError as e:
+            raise ValidationError(str(e)) from e
+        rows_to_drop = list(resolve_row_positions(spans, data.height))
 
         # Create row number column for filtering
-        data_with_idx = data.with_row_count("__row_idx__")
+        data_with_idx = data.with_row_index("__row_idx__")
         filtered_data = data_with_idx.filter(~pl.col("__row_idx__").is_in(rows_to_drop))
         return filtered_data.drop("__row_idx__")
 
     def _remove_by_condition(
         self, data: pl.DataFrame, condition: str, columns: list[str], value: Any
-    ) -> pl.DataFrame:
-        """Remove rows based on conditions."""
-        # Parse columns
+    ) -> tuple[pl.DataFrame, str | None]:
+        """Remove rows where the condition is true in any selected column.
+
+        A row whose condition is unknown because of a missing value is kept.
+        An empty string counts as missing, as it does in Stata.
+        Returns the remaining data and a notice counting those kept rows.
+        """
         self._validate_columns_exist(data, columns)
+        schema = data.schema
+        view = data.select(
+            pl.col(col).replace("", None) if schema[col] == pl.String else pl.col(col)
+            for col in dict.fromkeys(columns)
+        )
 
         if condition == PrepRowConditions.missing.value:
-            return data.filter(~pl.any_horizontal(pl.col(columns).is_null()))
+            masks = [pl.col(col).is_null() for col in columns]
 
         elif condition == PrepRowConditions.not_missing.value:
-            return data.filter(pl.any_horizontal(pl.col(columns).is_null()))
+            masks = [pl.col(col).is_not_null() for col in columns]
 
         elif condition in [
             PrepRowConditions.equal_to.value,
             PrepRowConditions.not_equal_to.value,
         ]:
-            return self._filter_by_equality(data, condition, columns, value)
+            masks = self._equality_masks(condition, columns, value)
 
         elif condition in [
             PrepRowConditions.greater_than.value,
@@ -389,119 +419,103 @@ class RemoveRowsOperation(PrepOperation):
             PrepRowConditions.less_than.value,
             PrepRowConditions.less_than_or_equal_to.value,
         ]:
-            return self._filter_by_comparison(data, condition, columns, value)
+            masks = self._comparison_masks(condition, columns, value, schema)
 
         elif condition in [
             PrepRowConditions.between.value,
             PrepRowConditions.not_between.value,
         ]:
-            return self._filter_by_range(data, condition, columns, value)
+            masks = self._range_masks(condition, columns, value, schema)
 
         elif condition in [
             PrepRowConditions.like.value,
             PrepRowConditions.not_like.value,
         ]:
-            return self._filter_by_pattern(data, condition, columns, value)
+            masks = self._pattern_masks(condition, columns, value)
 
         else:
             raise ValidationError(f"Unknown condition: {condition}")
 
-    def _filter_by_equality(
-        self, data: pl.DataFrame, condition: str, columns: list[str], value: Any
-    ) -> pl.DataFrame:
-        """Filter by equality conditions."""
+        mask = view.select(pl.any_horizontal(masks)).to_series()
+        return self._drop_where(data, mask, columns)
+
+    @staticmethod
+    def _drop_where(
+        data: pl.DataFrame, mask: pl.Series, columns: list[str]
+    ) -> tuple[pl.DataFrame, str | None]:
+        """Drop rows where ``mask`` is true; keep rows where it is null."""
+        kept_missing = mask.null_count()
+        results = data.filter(~mask.fill_null(False))
+
+        if not kept_missing:
+            return results, None
+        row_text = "row" if kept_missing == 1 else "rows"
+        column_display = ", ".join(f'"{col}"' for col in columns)
+        return (
+            results,
+            f"{kept_missing} {row_text} kept because a value is missing in "
+            f"{column_display}.",
+        )
+
+    def _equality_masks(
+        self, condition: str, columns: list[str], value: Any
+    ) -> list[pl.Expr]:
+        """Build remove-masks for equality conditions."""
         # Ensure value is a list for is_in() to treat as literal values
         value_list = value if isinstance(value, list) else [value]
 
+        masks = [pl.col(col).is_in(value_list) for col in columns]
         if condition == PrepRowConditions.not_equal_to.value:
-            # Keep rows where value is NOT in the list (remove matching rows)
-            filter_expr = pl.any_horizontal(
-                [pl.col(col).is_in(value_list) for col in columns]
-            )
-            return data.filter(~filter_expr)
-        else:
-            # Keep rows where value IS in the list (remove non-matching rows)
-            filter_expr = pl.any_horizontal(
-                [pl.col(col).is_in(value_list) for col in columns]
-            )
-            return data.filter(filter_expr)
+            return [~mask for mask in masks]
+        return masks
 
-    def _filter_by_comparison(
-        self, data: pl.DataFrame, condition: str, columns: list[str], value: Any
-    ) -> pl.DataFrame:
-        """Filter by comparison conditions."""
+    @staticmethod
+    def _bound(dtype: pl.DataType, raw: Any) -> Any:
+        """Convert a bound to the column's type; saved date bounds are text."""
+        if dtype.is_temporal():
+            return pl.lit(raw).str.strptime(dtype) if isinstance(raw, str) else raw
+        return float(raw)
+
+    def _comparison_masks(
+        self, condition: str, columns: list[str], value: Any, schema: pl.Schema
+    ) -> list[pl.Expr]:
+        """Build remove-masks for comparison conditions."""
         # Handle both single values and lists
         raw_value = value[0] if isinstance(value, list) else value
-        value_use = float(raw_value)
+        bounds = {col: self._bound(schema[col], raw_value) for col in columns}
 
-        # Build filter expression for each column
         if condition == PrepRowConditions.greater_than.value:
-            filter_expr = pl.any_horizontal(
-                [pl.col(col) <= value_use for col in columns]
-            )
-        elif condition == PrepRowConditions.greater_than_or_equal_to.value:
-            filter_expr = pl.any_horizontal(
-                [pl.col(col) < value_use for col in columns]
-            )
-        elif condition == PrepRowConditions.less_than.value:
-            filter_expr = pl.any_horizontal(
-                [pl.col(col) >= value_use for col in columns]
-            )
-        elif condition == PrepRowConditions.less_than_or_equal_to.value:
-            filter_expr = pl.any_horizontal(
-                [pl.col(col) > value_use for col in columns]
-            )
-        else:
-            return data
+            return [pl.col(col) > bounds[col] for col in columns]
+        if condition == PrepRowConditions.greater_than_or_equal_to.value:
+            return [pl.col(col) >= bounds[col] for col in columns]
+        if condition == PrepRowConditions.less_than.value:
+            return [pl.col(col) < bounds[col] for col in columns]
+        return [pl.col(col) <= bounds[col] for col in columns]
 
-        return data.filter(filter_expr)
-
-    def _filter_by_range(
-        self, data: pl.DataFrame, condition: str, columns: list[str], value: Any
-    ) -> pl.DataFrame:
-        """Filter by range conditions."""
+    def _range_masks(
+        self, condition: str, columns: list[str], value: Any, schema: pl.Schema
+    ) -> list[pl.Expr]:
+        """Build remove-masks for range conditions."""
         # Handle both single values and lists for value
         value_list = value if isinstance(value, list) else [value, value]
         if len(value_list) != 2:
             raise ValidationError(f"Expected 2 values for range, got: {value_list}")
+        masks = [
+            pl.col(col).is_between(*(self._bound(schema[col], b) for b in value_list))
+            for col in columns
+        ]
+        if condition == PrepRowConditions.not_between.value:
+            return [~mask for mask in masks]
+        return masks
 
-        if condition == "value is between":
-            # Keep rows outside the range
-            filter_expr = pl.any_horizontal(
-                [
-                    (pl.col(col) < value_list[0]) | (pl.col(col) > value_list[1])
-                    for col in columns
-                ]
-            )
-        else:
-            # Keep rows inside the range
-            filter_expr = pl.any_horizontal(
-                [
-                    (pl.col(col) >= value_list[0]) & (pl.col(col) <= value_list[1])
-                    for col in columns
-                ]
-            )
-
-        return data.filter(filter_expr)
-
-    def _filter_by_pattern(
-        self, data: pl.DataFrame, condition: str, columns: list[str], value: str
-    ) -> pl.DataFrame:
-        """Filter by pattern matching."""
-        if condition == PrepRowConditions.like.value:
-            # Keep rows that don't match the pattern
-            filter_expr = pl.all_horizontal(
-                [~pl.col(col).str.contains(value) for col in columns]
-            )
-            return data.filter(filter_expr)
-        elif condition == PrepRowConditions.not_like.value:
-            # Keep rows that match the pattern
-            filter_expr = pl.any_horizontal(
-                [pl.col(col).str.contains(value) for col in columns]
-            )
-            return data.filter(filter_expr)
-        else:
-            raise ValidationError(f"Unknown pattern condition: {condition}")
+    def _pattern_masks(
+        self, condition: str, columns: list[str], value: str
+    ) -> list[pl.Expr]:
+        """Build remove-masks for pattern conditions."""
+        masks = [pl.col(col).str.contains(value) for col in columns]
+        if condition == PrepRowConditions.not_like.value:
+            return [~mask for mask in masks]
+        return masks
 
 
 class TransformColumnsOperation(PrepOperation):
@@ -532,7 +546,8 @@ class TransformColumnsOperation(PrepOperation):
                 "action": "transform column(s)",
                 "column_names": None,
                 "affected_count": affected_count,
-                "remaining_count": None,
+                "remaining_rows": result_data.height,
+                "remaining_columns": result_data.width,
                 "value": prep_args.value,
                 "method": prep_args.method,
                 "source_columns": source_columns,
@@ -558,9 +573,19 @@ class TransformColumnsOperation(PrepOperation):
                 "example": "18aug2025 19:49:00",
             },
             {
+                "format": "%d%b%Y %H:%M",
+                "validator": r"^\d{1,2}[a-zA-Z]{3}\d{4} \d{1,2}:\d{2}$",
+                "example": "18aug2025 19:49",
+            },
+            {
                 "format": "%d-%b-%Y %H:%M:%S",
                 "validator": r"^\d{1,2}-[a-zA-Z]{3}-\d{4} \d{2}:\d{2}:\d{2}$",
                 "example": "18-aug-2025 19:49:00",
+            },
+            {
+                "format": "%d-%b-%Y %H:%M",
+                "validator": r"^\d{1,2}-[a-zA-Z]{3}-\d{4} \d{1,2}:\d{2}$",
+                "example": "18-aug-2025 19:49",
             },
             {
                 "format": "%Y-%m-%d %H:%M:%S",
@@ -568,14 +593,29 @@ class TransformColumnsOperation(PrepOperation):
                 "example": "2025-08-18 19:49:00",
             },
             {
+                "format": "%Y-%m-%d %H:%M",
+                "validator": r"^\d{4}-\d{2}-\d{2} \d{1,2}:\d{2}$",
+                "example": "2025-08-18 19:49",
+            },
+            {
                 "format": "%m/%d/%Y %H:%M:%S",
                 "validator": r"^\d{1,2}/\d{1,2}/\d{4} \d{2}:\d{2}:\d{2}$",
                 "example": "08/18/2025 19:49:00",
             },
             {
+                "format": "%m/%d/%Y %H:%M",
+                "validator": r"^\d{1,2}/\d{1,2}/\d{4} \d{1,2}:\d{2}$",
+                "example": "3/15/2026 17:28",
+            },
+            {
                 "format": "%d/%m/%Y %H:%M:%S",
                 "validator": r"^\d{1,2}/\d{1,2}/\d{4} \d{2}:\d{2}:\d{2}$",
                 "example": "18/08/2025 19:49:00",
+            },
+            {
+                "format": "%d/%m/%Y %H:%M",
+                "validator": r"^\d{1,2}/\d{1,2}/\d{4} \d{1,2}:\d{2}$",
+                "example": "18/08/2025 19:49",
             },
             {
                 "format": "%Y-%m-%d",
@@ -688,6 +728,16 @@ class TransformColumnsOperation(PrepOperation):
                 self._parse_flexible_datetime(data, column_name).alias(column_name)
             )
 
+        if func_name == PrepOperations.to_string.value:
+            return data.with_columns(
+                self._to_string(pl.col(column_name), data.schema[column_name]).alias(
+                    column_name
+                )
+            )
+
+        if func_name == PrepOperations.to_number.value:
+            return data.with_columns(pl.col(column_name).cast(pl.Int64))
+
         # Get dummies (one-hot encoding)
         if func_name == "get dummies":
             return data.to_dummies(columns=[column_name])
@@ -705,6 +755,17 @@ class TransformColumnsOperation(PrepOperation):
             return self._apply_pattern_extract(data, column_name, value)
 
         raise ValidationError(f"Unknown transformation function: {func_name}")
+
+    @staticmethod
+    def _to_string(col: pl.Expr, dtype: pl.DataType) -> pl.Expr:
+        """Convert a column to text, keeping missing values missing.
+
+        Whole-number floats drop the trailing ".0" (12.0 -> "12").
+        """
+        as_text = col.cast(pl.String)
+        if dtype.is_float():
+            return as_text.str.replace(r"\.0$", "")
+        return as_text
 
     def _apply_arithmetic(
         self,
@@ -794,6 +855,10 @@ class AddNewColumnOperation(PrepOperation):
                 PrepFunctions.random.value,
             ]:
                 results = self._add_special_column(data, method, new_col_name)
+            elif method == PrepFunctions.concat.value:
+                results = self._add_concat_column(
+                    data, new_col_name, source_columns, value_spec
+                )
             else:
                 results = self._add_computed_column(
                     data, new_col_name, method, source_columns
@@ -803,7 +868,8 @@ class AddNewColumnOperation(PrepOperation):
                 "action": PrepActions.add_column.value,
                 "column_names": new_col_name,
                 "affected_count": 1,
-                "remaining_count": results.width,
+                "remaining_rows": results.height,
+                "remaining_columns": results.width,
                 "value": value_spec,
                 "method": method,
                 "source_columns": source_columns,
@@ -838,14 +904,14 @@ class AddNewColumnOperation(PrepOperation):
     ) -> pl.DataFrame:
         """Add special columns like index, uuid, or random."""
         if method == "index":
-            return data.with_row_count(col_name)
+            return data.with_row_index(col_name)
 
         elif method == "uuid":
             # Generate UUID-like hash based on project ID and row index
             project_id = st.session_state.st_project_id
 
             return (
-                data.with_row_count("__temp_idx__")
+                data.with_row_index("__temp_idx__")
                 .with_columns(
                     pl.col("__temp_idx__")
                     .map_elements(
@@ -867,6 +933,41 @@ class AddNewColumnOperation(PrepOperation):
             return data.with_columns(pl.Series(random_values).alias(col_name))
 
         return data
+
+    def _add_concat_column(
+        self,
+        data: pl.DataFrame,
+        col_name: str,
+        source_columns: list[str],
+        separator: str | None,
+    ) -> pl.DataFrame:
+        """Join text columns row by row, in the order they were selected.
+
+        A missing value counts as an empty string, so the other values still
+        join; the result is missing only when every value is. A missing
+        separator means none: an empty one can come back from the saved log
+        as null.
+        """
+        missing = [c for c in source_columns if c not in data.columns]
+        if missing:
+            raise ValidationError(f"Columns not found: {missing}")
+        not_text = [c for c in source_columns if data.schema[c] != pl.String]
+        if not_text:
+            raise ValidationError(
+                f"Concat needs text columns, but these are not text: {not_text}. "
+                "Convert them with the 'to string' transform first."
+            )
+
+        joined = pl.concat_str(
+            source_columns, separator=separator or "", ignore_nulls=True
+        )
+        all_missing = pl.all_horizontal(pl.col(source_columns).is_null())
+        return data.with_columns(
+            pl.when(all_missing)
+            .then(pl.lit(None, dtype=pl.String))
+            .otherwise(joined)
+            .alias(col_name)
+        )
 
     def _add_computed_column(
         self, data: pl.DataFrame, col_name: str, method: str, source_columns: str
@@ -891,7 +992,9 @@ class AddNewColumnOperation(PrepOperation):
             PrepFunctions.var.value: lambda cols: pl.concat_list(cols).list.var(),
             PrepFunctions.first.value: lambda cols: pl.concat_list(cols).list.first(),
             PrepFunctions.last.value: lambda cols: pl.concat_list(cols).list.last(),
-            PrepFunctions.count.value: lambda cols: pl.concat_list(cols).list.len(),
+            PrepFunctions.count.value: lambda cols: (
+                pl.concat_list(cols).list.drop_nulls().list.len()
+            ),
             PrepFunctions.nunique.value: lambda cols: (
                 pl.concat_list(cols).list.unique().list.len()
             ),
@@ -948,19 +1051,46 @@ class PrepProcessor:
 
     def execute_all_actions(
         self, data: pl.DataFrame, actions: list[PrepAction]
-    ) -> pl.DataFrame:
-        """Execute a sequence of preparation actions."""
+    ) -> tuple[pl.DataFrame, list[PrepReapplyOutcome]]:
+        """Execute a sequence of preparation actions.
+
+        An action that fails is skipped - the data is left as it was before
+        that action - so a single step made incompatible by upstream changes
+        (e.g. a re-import that renames/drops a column an earlier step relied
+        on) does not abort the rest of the sequence.
+
+        Returns
+        -------
+            Tuple of the resulting data and one outcome per action, in order,
+            reflecting what actually happened this time (a step that used to
+            remove 4 columns but now only finds 2 is reported as removing 2,
+            not as a failure).
+        """
         result_data = data
+        outcomes: list[PrepReapplyOutcome] = []
 
         for action in actions:
             try:
-                result_data, _ = self.execute_single_action(result_data, action)
-            except (ValidationError, OperationError):
-                raise
+                result_data, updated_args = self.execute_single_action(
+                    result_data, action
+                )
+                outcomes.append(
+                    PrepReapplyOutcome(prep_args=updated_args, status="Successful")
+                )
+            except (ValidationError, OperationError) as e:
+                outcomes.append(
+                    PrepReapplyOutcome(
+                        prep_args=action.prep_args, status="Failed", error=str(e)
+                    )
+                )
             except Exception as e:
-                raise OperationError(f"Failed to execute action '{action}': {e}") from e
+                outcomes.append(
+                    PrepReapplyOutcome(
+                        prep_args=action.prep_args, status="Failed", error=str(e)
+                    )
+                )
 
-        return result_data
+        return result_data, outcomes
 
 
 # === LOG MANAGEMENT (PRIVATE) === #
@@ -982,7 +1112,7 @@ def _parse_prep_log_to_actions(prep_log_df: pl.DataFrame) -> list[PrepAction]:
         if isinstance(args, str):
             try:
                 args = json.loads(args)
-            except (json.JSONDecodeError, ValueError):
+            except ValueError:
                 args = ast.literal_eval(args)
         prep_action = PrepActionResult(**args)
         actions.append(PrepAction.from_args(prep_action))
@@ -1032,6 +1162,7 @@ def _create_log_entry(
     description: str,
     prep_args: PrepActionResult,
     log_index: int,
+    status: str = "Successful",
 ) -> pl.DataFrame:
     """Create a new log entry DataFrame for a prep action.
 
@@ -1040,6 +1171,8 @@ def _create_log_entry(
         description: Human-readable description
         prep_args: The preparation action result
         log_index: Current log size (for action_index)
+        status: "Successful" or "Failed" - the outcome of the most recent
+            (re)application of this step
 
     Returns
     -------
@@ -1052,8 +1185,56 @@ def _create_log_entry(
             "description": [description],
             "prep_args": [prep_args],
             "action_index": [action_index_val],
+            "status": [status],
         }
     )
+
+
+def _ensure_status_column(df: pl.DataFrame) -> pl.DataFrame:
+    """Backfill a "status" column for logs persisted before it was added."""
+    if df.is_empty() or "status" in df.columns:
+        return df
+    return df.with_columns(pl.lit("Successful").alias("status"))
+
+
+def _build_log_from_outcomes(
+    existing_actions: list[PrepAction], outcomes: list[PrepReapplyOutcome]
+) -> pl.DataFrame:
+    """Rebuild the persisted prep log after a reapply.
+
+    Each step's original request (`prep_args`) is kept as-is, so a column
+    that reappears in a later re-import is still requested for removal.
+    Only the display description and status are refreshed to reflect what
+    actually happened this time.
+
+    Args:
+        existing_actions: The logged actions, as originally requested
+        outcomes: The result of (re)applying each action, in the same order
+
+    Returns
+    -------
+        A fresh prep log DataFrame reflecting the latest reapply
+    """
+    entries = []
+    for index, (action, outcome) in enumerate(
+        zip(existing_actions, outcomes, strict=True)
+    ):
+        if outcome.status == "Failed":
+            description = f"✗ Failed to reapply: {outcome.error}"
+        else:
+            description = _generate_action_description(outcome.prep_args)
+
+        entries.append(
+            _create_log_entry(
+                action.prep_args.action,
+                description,
+                action.prep_args,
+                index,
+                outcome.status,
+            )
+        )
+
+    return pl.concat([_convert_prep_args_to_string(e) for e in entries])
 
 
 def _append_to_prep_log(
@@ -1071,7 +1252,7 @@ def _append_to_prep_log(
     """
     if existing_log.is_empty():
         return new_entry
-    existing_log_str = _convert_prep_args_to_string(existing_log)
+    existing_log_str = _ensure_status_column(_convert_prep_args_to_string(existing_log))
     new_entry_str = _convert_prep_args_to_string(new_entry)
     return pl.concat([existing_log_str, new_entry_str])
 
@@ -1081,7 +1262,7 @@ def _reapply_all_actions(
     alias: str,
     prep_log_df: pl.DataFrame,
     processor: PrepProcessor,
-) -> None:
+) -> list[ReapplyFailure]:
     """Re-apply all actions from the log to the raw data.
 
     Args:
@@ -1089,16 +1270,31 @@ def _reapply_all_actions(
         alias: Dataset alias
         prep_log_df: DataFrame containing the preparation log
         processor: PrepProcessor instance for executing actions
+
+    Returns
+    -------
+        List of actions that were skipped because they failed to reapply.
     """
     raw_data = duckdb_get_table(project_id, alias, db_name="raw")
 
     if prep_log_df.is_empty():
         duckdb_save_table(project_id, raw_data, alias, db_name="prep")
-        return
+        return []
 
     existing_actions = _parse_prep_log_to_actions(prep_log_df)
-    result_data = processor.execute_all_actions(raw_data, existing_actions)
+    result_data, outcomes = processor.execute_all_actions(raw_data, existing_actions)
     duckdb_save_table(project_id, result_data, alias, db_name="prep")
+
+    refreshed_log = _build_log_from_outcomes(existing_actions, outcomes)
+    duckdb_save_table(project_id, refreshed_log, f"prep_log_{alias}", db_name="logs")
+
+    return [
+        ReapplyFailure(
+            step=_generate_action_description(outcome.prep_args), reason=outcome.error
+        )
+        for outcome in outcomes
+        if outcome.status == "Failed"
+    ]
 
 
 def _apply_single_action(
@@ -1143,7 +1339,7 @@ def prep_apply_action(
     project_id: str,
     alias: str,
     prep_args: PrepActionResult | None = None,
-) -> None:
+) -> list[ReapplyFailure]:
     """Apply data preparation action to dataset.
 
     When prep_args is provided, applies the single new action to the current
@@ -1155,15 +1351,23 @@ def prep_apply_action(
         alias: Dataset alias
         prep_args: Optional action to apply. If None, re-applies all logged actions.
 
+    Returns
+    -------
+        List of actions skipped while re-applying the full log. Always empty
+        when applying a single new action (prep_args is not None).
+
     Raises
     ------
-        ValidationError: If action/description validation fails
-        OperationError: If data operation fails
+        ValidationError: If action/description validation fails (only when
+            applying a single new action)
+        OperationError: If data operation fails (only when applying a single
+            new action)
     """
     processor = PrepProcessor()
     prep_log_df = duckdb_get_table(project_id, f"prep_log_{alias}", db_name="logs")
 
     if prep_args is None:
-        _reapply_all_actions(project_id, alias, prep_log_df, processor)
-    else:
-        _apply_single_action(project_id, alias, prep_args, prep_log_df, processor)
+        return _reapply_all_actions(project_id, alias, prep_log_df, processor)
+
+    _apply_single_action(project_id, alias, prep_args, prep_log_df, processor)
+    return []

@@ -1,15 +1,31 @@
 """Tests for the onboarding utilities module."""
 
+import importlib
 import json
+import pkgutil
+import re
+from datetime import date, datetime, timedelta
 from unittest.mock import MagicMock, patch
 
 import polars as pl
 import pytest
 
 from datasure.utils.onboarding_utils import (
+    DEMO_AGE_BOUNDS,
+    DEMO_ATTRIBUTION_NO_NOTE,
+    DEMO_ATTRIBUTION_WITH_NOTE,
+    DEMO_DUPLICATES,
+    DEMO_GPS_ACCEPT,
+    DEMO_GUIDANCE_COLUMNS,
+    DEMO_LAND_CORRECTION,
+    DEMO_OUTLIER_ACCEPT,
+    DEMO_OUTLIER_CORRECTION,
+    DEMO_OUTPUT_FUNCTIONS,
     DEMO_PROJECT_ID,
     DEMO_PROJECT_NAME,
-    CheckPage,
+    DEMO_REPEAT_SUBMISSION,
+    DEMO_SHARED_LONGITUDE,
+    DemoColumn,
     DemoDataGenerator,
     ImportDemoInfo,
     OnboardingSteps,
@@ -25,7 +41,6 @@ from datasure.utils.onboarding_utils import (
     load_demo_data,
     set_onboarding_step,
     show_demo_banner,
-    show_demo_completion_message,
     show_demo_intro,
     show_next_steps,
     show_progress_indicator,
@@ -41,26 +56,6 @@ class TestConstants:
         assert DEMO_PROJECT_NAME == "DataSure Demo"
         assert isinstance(DEMO_PROJECT_ID, str)
         assert isinstance(DEMO_PROJECT_NAME, str)
-
-
-class TestCheckPage:
-    """Test the CheckPage enum."""
-
-    def test_check_page_values(self):
-        """Test that CheckPage enum has correct values."""
-        assert CheckPage.SUMMARY.value == "Summary"
-        assert CheckPage.SURVEY_PROGRESS.value == "Survey Progress"
-        assert CheckPage.DUPLICATES.value == "Duplicates"
-        assert CheckPage.MISSING_DATA.value == "Missing Data"
-        assert CheckPage.OUTLIERS.value == "Outliers"
-        assert CheckPage.ENUMERATOR_STATS.value == "Enumerator Stats"
-        assert CheckPage.DESCRIPTIVE_STATS.value == "Descriptive Stats"
-        assert CheckPage.BACK_CHECKS.value == "Back Checks"
-        assert CheckPage.GPS_CHECKS.value == "GPS Checks"
-
-    def test_check_page_member_count(self):
-        """Test that CheckPage enum has correct number of members."""
-        assert len(CheckPage) == 9
 
 
 class TestDemoContainer:
@@ -89,29 +84,14 @@ class TestImportDemoInfo:
         message = ImportDemoInfo.get_info_message("add_to_session_info")
         assert "loaded successfully" in message
 
-        message = ImportDemoInfo.get_info_message("prepare_data_info")
-        assert "Data preparation is a crucial step" in message
-
         message = ImportDemoInfo.get_info_message("preview_data_info")
         assert "loaded and ready" in message
 
         message = ImportDemoInfo.get_info_message("proceed_to_config_info")
         assert "experiment with data preparation" in message
 
-        message = ImportDemoInfo.get_info_message("demo_data_info")
-        assert "Data Import Complete" in message
-
         message = ImportDemoInfo.get_info_message("proceed_to_hfcs_info")
         assert "ready for quality analysis" in message
-
-        message = ImportDemoInfo.get_info_message("add_check_config_info")
-        assert "Follow these steps to set up data quality checks" in message
-
-        message = ImportDemoInfo.get_info_message("add_prep_steps_info")
-        assert "convert the submissiondate" in message
-
-        message = ImportDemoInfo.get_info_message("add_correction_step_info")
-        assert "targeted corrections" in message
 
     def test_get_info_message_invalid_id(self):
         """Test getting info message with invalid ID returns default message."""
@@ -122,13 +102,24 @@ class TestImportDemoInfo:
         """Test that all class variables are defined."""
         assert hasattr(ImportDemoInfo, "ADD_TO_SESSION_INFO")
         assert hasattr(ImportDemoInfo, "PREVIEW_DATA_INFO")
-        assert hasattr(ImportDemoInfo, "PREPARE_DATA_INFO")
         assert hasattr(ImportDemoInfo, "PROCEED_TO_CONFIG_INFO")
-        assert hasattr(ImportDemoInfo, "DEMO_DATA_INFO")
         assert hasattr(ImportDemoInfo, "PROCEED_TO_HFCS_INFO")
-        assert hasattr(ImportDemoInfo, "ADD_CHECK_CONFIG_INFO")
-        assert hasattr(ImportDemoInfo, "ADD_PREP_STEPS_INFO")
-        assert hasattr(ImportDemoInfo, "ADD_CORRECTION_STEP_INFO")
+
+    def test_every_message_is_shown_somewhere(self, datasure_sources):
+        """Every ImportDemoInfo message is requested by a page in datasure."""
+        requested = {
+            message_id
+            for _path, text in datasure_sources
+            for message_id in re.findall(r"get_info_message\(\s*\"([a-z_]+)\"", text)
+        }
+        constants = {
+            name
+            for name, value in vars(ImportDemoInfo).items()
+            if name.isupper() and isinstance(value, str)
+        }
+        assert constants, "no ImportDemoInfo messages found"
+        unused = sorted(name for name in constants if name.lower() not in requested)
+        assert not unused, f"demo messages never shown: {unused}"
 
 
 class TestOnboardingSteps:
@@ -213,13 +204,6 @@ class TestOutputOnboardingInfo:
     def test_get_onboarding_message_summary(self):
         """Test getting onboarding message for summary tab."""
         message = OutputOnboardingInfo.get_onboarding_message(
-            "summary", "summary_report"
-        )
-        assert message["title"] == "Data Quality Summary"
-        assert "overview of the data quality checks" in message["content"]
-
-        # Test other summary messages
-        message = OutputOnboardingInfo.get_onboarding_message(
             "summary", "summary_settings"
         )
         assert message["title"] == "Summary Settings"
@@ -254,7 +238,7 @@ class TestOutputOnboardingInfo:
         message = OutputOnboardingInfo.get_onboarding_message(
             "missing", "missing_summary"
         )
-        assert message["title"] == "Missing Values Tab"
+        assert message["title"] == "Missing Values"
         assert "missing data" in message["content"].lower()
 
     def test_get_onboarding_message_outliers(self):
@@ -313,13 +297,19 @@ class TestOutputOnboardingInfo:
         assert message["title"] == "Progress"
         assert "Submission Progress" in message["content"]
 
-    def test_get_onboarding_message_summary_data_quality(self):
-        """Test summary_data_quality entry."""
+    def test_get_onboarding_message_summary_check_health(self):
+        """Test summary_check_health entry, which replaced Data Quality."""
         message = OutputOnboardingInfo.get_onboarding_message(
-            "summary", "summary_data_quality"
+            "summary", "summary_check_health"
         )
-        assert message["title"] == "Data Quality"
-        assert "duplicate" in message["content"].lower()
+        assert message["title"] == "Check health"
+        assert "Open →" in message["content"]
+        assert (
+            OutputOnboardingInfo.get_onboarding_message(
+                "summary", "summary_data_quality"
+            )
+            is None
+        )
 
     def test_get_onboarding_message_progress_display_summary(self):
         """Test display_progress_summary entry."""
@@ -398,14 +388,14 @@ class TestOutputOnboardingInfo:
         message = OutputOnboardingInfo.get_onboarding_message(
             "invalid_tab", "some_message"
         )
-        assert message == "Invalid Message"
+        assert message is None
 
     def test_get_onboarding_message_invalid_message_id(self):
         """Test getting onboarding message with invalid message ID."""
         message = OutputOnboardingInfo.get_onboarding_message(
             "summary", "invalid_message_id"
         )
-        assert message == "Invalid Message"
+        assert message is None
 
     def test_class_variables_exist(self):
         """Test that all class variables are defined."""
@@ -430,10 +420,10 @@ class TestDemoOutputOnboarding:
         mock_is_demo.return_value = True
 
         @demo_output_onboarding("summary")
-        def summary_report():
+        def summary_settings():
             return "executed"
 
-        result = summary_report()
+        result = summary_settings()
         assert result == "executed"
         mock_demo_expander.assert_called_once()
 
@@ -463,6 +453,98 @@ class TestDemoOutputOnboarding:
 
         result = summary_report("a", "b", kwarg1="c")
         assert result == "a-b-c"
+
+    @pytest.mark.parametrize("is_demo", [False, True])
+    @patch("datasure.utils.onboarding_utils.is_demo_project")
+    @patch("datasure.utils.onboarding_utils.demo_expander")
+    def test_unknown_function_still_runs(
+        self, mock_demo_expander, mock_is_demo, is_demo
+    ):
+        """A function with no message entry runs, with no guidance, in any project."""
+        mock_is_demo.return_value = is_demo
+
+        @demo_output_onboarding("summary")
+        def renamed_report():
+            return "executed"
+
+        assert renamed_report() == "executed"
+        mock_demo_expander.assert_not_called()
+
+    @patch("datasure.utils.onboarding_utils.is_demo_project", return_value=True)
+    @patch("datasure.utils.onboarding_utils.demo_expander")
+    def test_unknown_function_warns_once_in_demo(
+        self, mock_demo_expander, mock_is_demo, caplog
+    ):
+        """In the demo, a missing message logs one warning across reruns."""
+
+        @demo_output_onboarding("summary")
+        def warned_report():
+            return None
+
+        with caplog.at_level("WARNING", logger="datasure.utils.onboarding_utils"):
+            warned_report()
+            warned_report()
+
+        warnings = [
+            r
+            for r in caplog.records
+            if "No demo guidance for warned_report" in r.message
+        ]
+        assert len(warnings) == 1
+
+    def test_decorator_preserves_function_name(self):
+        """The wrapper keeps the decorated function's name."""
+
+        @demo_output_onboarding("summary")
+        def summary_report():
+            return None
+
+        assert summary_report.__name__ == "summary_report"
+
+    def test_every_decorated_function_has_message(self):
+        """Every @demo_output_onboarding function in datasure has a message."""
+        import datasure.checks
+
+        for module in pkgutil.walk_packages(
+            datasure.checks.__path__, prefix="datasure.checks."
+        ):
+            importlib.import_module(module.name)
+
+        checked = {
+            (tab, name)
+            for module, tab, name in DEMO_OUTPUT_FUNCTIONS
+            if module.startswith("datasure.")
+        }
+        assert checked, "no decorated check functions were registered"
+        missing = sorted(
+            (tab, name)
+            for tab, name in checked
+            if OutputOnboardingInfo.get_onboarding_message(tab, name) is None
+        )
+        assert not missing, f"decorated functions without a message: {missing}"
+
+    def test_every_message_has_decorated_function(self):
+        """Every OutputOnboardingInfo message is shown by a decorated function."""
+        import datasure.checks
+
+        for module in pkgutil.walk_packages(
+            datasure.checks.__path__, prefix="datasure.checks."
+        ):
+            importlib.import_module(module.name)
+
+        shown = [
+            OutputOnboardingInfo.get_onboarding_message(tab, name)
+            for module, tab, name in DEMO_OUTPUT_FUNCTIONS
+            if module.startswith("datasure.")
+        ]
+        unused = sorted(
+            f"{group}[{message_id!r}]"
+            for group, messages in vars(OutputOnboardingInfo).items()
+            if group.isupper() and isinstance(messages, dict)
+            for message_id, message in messages.items()
+            if message not in shown
+        )
+        assert not unused, f"demo messages never shown: {unused}"
 
 
 class TestDemoProjectFunctions:
@@ -638,14 +720,14 @@ class TestDemoUIFunctions:
     @patch("datasure.utils.onboarding_utils.st")
     @patch("datasure.utils.onboarding_utils.is_demo_project")
     def test_show_next_steps_completed(self, mock_is_demo, mock_st):
-        """Test showing next steps when all steps completed."""
+        """After the last step nothing is shown; the completion message follows."""
         mock_is_demo.return_value = True
-        mock_st.button.return_value = False
 
         show_next_steps(7)
 
-        mock_st.success.assert_called_once()
-        mock_st.button.assert_called()
+        mock_st.success.assert_not_called()
+        mock_st.info.assert_not_called()
+        mock_st.button.assert_not_called()
 
     @patch("datasure.utils.onboarding_utils.st")
     @patch("datasure.utils.onboarding_utils.is_demo_project")
@@ -656,90 +738,6 @@ class TestDemoUIFunctions:
         show_next_steps(2)
 
         mock_st.markdown.assert_not_called()
-
-    @patch("datasure.utils.onboarding_utils.st")
-    @patch("datasure.utils.onboarding_utils.is_demo_project")
-    @patch("datasure.utils.onboarding_utils.is_demo_complete")
-    def test_show_demo_completion_message_complete(
-        self, mock_is_complete, mock_is_demo, mock_st
-    ):
-        """Test completion message displays when demo is complete."""
-        mock_is_demo.return_value = True
-        mock_is_complete.return_value = True
-        mock_st.button.return_value = False
-        mock_st.columns.return_value = [MagicMock(), MagicMock()]
-
-        show_demo_completion_message()
-
-        mock_st.balloons.assert_called_once()
-        mock_st.success.assert_called_once()
-
-    @patch("datasure.utils.onboarding_utils.st")
-    @patch("datasure.utils.onboarding_utils.is_demo_project")
-    @patch("datasure.utils.onboarding_utils.is_demo_complete")
-    def test_show_demo_completion_message_restart_button(
-        self, mock_is_complete, mock_is_demo, mock_st
-    ):
-        """Test completion message restart button click."""
-        mock_is_demo.return_value = True
-        mock_is_complete.return_value = True
-        mock_st.button.side_effect = [True, False]  # First button clicked
-        mock_st.columns.return_value = [MagicMock(), MagicMock()]
-
-        with patch("datasure.utils.onboarding_utils.set_onboarding_step") as mock_set:
-            show_demo_completion_message()
-            mock_set.assert_called_with(1)
-            mock_st.rerun.assert_called_once()
-
-    @patch("datasure.utils.onboarding_utils.st")
-    @patch("datasure.utils.onboarding_utils.is_demo_project")
-    @patch("datasure.utils.onboarding_utils.is_demo_complete")
-    def test_show_demo_completion_message_create_project_button(
-        self, mock_is_complete, mock_is_demo, mock_st
-    ):
-        """Test completion message create new project button click."""
-        mock_is_demo.return_value = True
-        mock_is_complete.return_value = True
-        mock_st.button.side_effect = [False, True]  # Second button clicked
-        mock_st.columns.return_value = [MagicMock(), MagicMock()]
-
-        # Use MagicMock for session_state to support attribute assignment
-        mock_session_state = MagicMock()
-        mock_session_state.onboarding_step = 6
-        mock_st.session_state = mock_session_state
-
-        show_demo_completion_message()
-
-        assert mock_st.session_state.st_project_id == ""
-        mock_st.switch_page.assert_called_with("pages/start_view.py")
-
-    @patch("datasure.utils.onboarding_utils.st")
-    @patch("datasure.utils.onboarding_utils.is_demo_project")
-    @patch("datasure.utils.onboarding_utils.is_demo_complete")
-    def test_show_demo_completion_message_non_demo(
-        self, mock_is_complete, mock_is_demo, mock_st
-    ):
-        """Test completion message doesn't display when not in demo mode."""
-        mock_is_demo.return_value = False
-        mock_is_complete.return_value = True
-
-        show_demo_completion_message()
-
-        mock_st.balloons.assert_not_called()
-
-    @patch("datasure.utils.onboarding_utils.st")
-    @patch("datasure.utils.onboarding_utils.is_demo_project")
-    @patch("datasure.utils.onboarding_utils.is_demo_complete")
-    def test_show_demo_completion_message_incomplete(
-        self, mock_is_complete, mock_is_demo, mock_st
-    ):
-        """Test completion message doesn't display when demo incomplete."""
-        mock_is_demo.return_value = True
-        mock_is_complete.return_value = False
-
-        show_demo_completion_message()
-
-        mock_st.balloons.assert_not_called()
 
     @patch("datasure.utils.onboarding_utils.st")
     @patch("datasure.utils.onboarding_utils.is_demo_project")
@@ -855,73 +853,60 @@ class TestDemoDataGenerator:
         generator = DemoDataGenerator(df)
         assert generator.df.height == 3
 
-    def test_gen_starttime(self):
-        """Test generating starttime column."""
-        df = pl.DataFrame({"id": [1, 2, 3]})
-        generator = DemoDataGenerator(df)
-        result_df = generator._gen_starttime()
+    def test_dates_are_ordered_strings_ending_today(self):
+        """Each interview starts, ends, then is submitted; the latest is today."""
+        df = pl.DataFrame({"id": list(range(50))})
+        result_df = DemoDataGenerator(df, today=date(2026, 3, 10)).add_demo_fields()
 
-        assert "starttime" in result_df.columns
-        assert result_df.height == 3
+        for col in DemoDataGenerator.DATE_COLUMNS:
+            assert result_df[col].dtype == pl.Utf8
+        start, end, submitted = (
+            result_df[col].str.to_datetime(DemoDataGenerator.DATE_FORMAT)
+            for col in DemoDataGenerator.DATE_COLUMNS
+        )
+        assert (start < end).all()
+        assert (end < submitted).all()
+        assert submitted.dt.date().max() == date(2026, 3, 10)
+        assert start.min() >= datetime(2026, 1, 9)
 
-    def test_gen_endtime(self):
-        """Test generating endtime column."""
-        df = pl.DataFrame({"id": [1, 2, 3]})
-        generator = DemoDataGenerator(df)
-        generator._gen_starttime()
-        result_df = generator._gen_endtime()
+    def test_same_seed_gives_same_fields(self):
+        """The generator is seeded, so two runs agree."""
+        df = pl.DataFrame({"id": list(range(20))})
 
-        assert "endtime" in result_df.columns
-        assert result_df.height == 3
+        first = DemoDataGenerator(df, today=date(2026, 3, 10)).add_demo_fields()
+        second = DemoDataGenerator(df, today=date(2026, 3, 10)).add_demo_fields()
 
-    def test_gen_submissiondate(self):
-        """Test generating submissiondate column."""
-        df = pl.DataFrame({"id": [1, 2, 3]})
-        generator = DemoDataGenerator(df)
-        generator._gen_starttime()
-        generator._gen_endtime()
-        result_df = generator._gen_submissiondate()
+        assert first.equals(second)
 
-        assert "submissiondate" in result_df.columns
-        assert result_df.height == 3
+    def test_consent_and_completion_values(self):
+        """Consent is mostly yes and completion mostly complete."""
+        df = pl.DataFrame({"id": list(range(1000))})
+        result_df = DemoDataGenerator(df).add_demo_fields()
 
-    def test_gen_dates(self):
-        """Test generating all date columns."""
-        df = pl.DataFrame({"id": [1, 2, 3]})
-        generator = DemoDataGenerator(df)
-        result_df = generator._gen_dates()
+        consent = result_df["consent"].to_list()
+        status = result_df["completion_status"].to_list()
+        assert set(consent) <= {"yes", "no"}
+        assert consent.count("yes") >= 900
+        assert set(status) <= {"complete", "incomplete"}
+        assert status.count("complete") >= 900
 
-        assert "starttime" in result_df.columns
-        assert "endtime" in result_df.columns
-        assert "submissiondate" in result_df.columns
-        # Verify dates are strings
-        assert result_df["starttime"].dtype == pl.Utf8
+    def test_backcheck_is_dated_after_its_survey(self):
+        """A backcheck starts after the survey of the same household."""
+        survey = DemoDataGenerator(
+            pl.DataFrame({"hhid": ["A", "B", "C"]}), today=date(2026, 3, 10)
+        ).add_demo_fields()
+        backcheck = DemoDataGenerator(
+            pl.DataFrame({"hhid": ["C", "A"]}), today=date(2026, 3, 10)
+        ).add_demo_fields("backcheck", survey_df=survey)
 
-    def test_gen_consent_status(self):
-        """Test generating consent status column."""
-        df = pl.DataFrame({"id": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]})
-        generator = DemoDataGenerator(df)
-        result_df = generator._gen_consent_status()
-
-        assert "consent" in result_df.columns
-        assert result_df.height == 10
-        # Check that values are either 'yes' or 'no'
-        consent_values = result_df["consent"].to_list()
-        assert all(val in ["yes", "no"] for val in consent_values)
-        # Most should be 'yes' given 98% weight
-        assert consent_values.count("yes") >= 8
-
-    def test_gen_completion_status(self):
-        """Test generating completion status column."""
-        df = pl.DataFrame({"id": [1, 2, 3, 4, 5, 6, 7, 8, 9, 10]})
-        generator = DemoDataGenerator(df)
-        result_df = generator._gen_completion_status()
-
-        assert "completion_status" in result_df.columns
-        assert result_df.height == 10
-        # Check that values are either 'complete' or 'incomplete'
-        status_values = result_df["completion_status"].to_list()
-        assert all(val in ["complete", "incomplete"] for val in status_values)
+        joined = backcheck.join(survey, on="hhid", suffix="_survey")
+        assert (
+            joined["starttime"].str.to_datetime()
+            > joined["submissiondate_survey"].str.to_datetime()
+        ).all()
+        assert joined["submissiondate"].str.to_datetime().dt.date().max() <= date(
+            2026, 3, 10
+        )
 
     def test_add_demo_fields_survey(self):
         """Test adding all demo fields for survey data."""
@@ -1168,3 +1153,605 @@ class TestLoadDemoData:
         result = load_demo_data()
 
         assert result is False
+
+
+@pytest.fixture
+def load_real_demo(tmp_path, monkeypatch):
+    """Load the shipped demo CSVs into a fresh cache and return the raw tables.
+
+    Each call builds its own empty cache directory, so every load is a fresh
+    first-time load of ``assets/demo_survey.csv`` and ``demo_backcheck.csv``.
+    """
+    from datasure.utils.duckdb_utils import duckdb_get_table
+
+    def _load(today=None):
+        cache_root = tmp_path / f"run{len(list(tmp_path.iterdir()))}"
+        cache_root.mkdir()
+        (cache_root / "pyproject.toml").write_text("")
+        monkeypatch.chdir(cache_root)
+        create_demo_project()
+        with patch("datasure.utils.onboarding_utils.st"):
+            assert load_demo_data(today=today) is True
+        return (
+            duckdb_get_table(DEMO_PROJECT_ID, "demo_survey", "raw"),
+            duckdb_get_table(DEMO_PROJECT_ID, "demo_backcheck", "raw"),
+        )
+
+    return _load
+
+
+# The backcheck columns, categories and OK ranges from the demo guidance
+_BACKCHECK_GUIDANCE = {
+    "age": (1, [-1, 1]),
+    "household_count": (2, None),
+    "minc_pri": (1, None),
+    "npinc_out": (1, None),
+    "no_save": (1, None),
+    "pri_govt_sch": (1, None),
+}
+
+
+def _demo_backcheck_analysis(survey, backcheck):
+    """Compare the demo survey and backcheck as the Backchecks guidance sets up."""
+    from datasure.checks.backchecks.compute import compute_backcheck_analysis
+    from datasure.checks.backchecks.models import BackcheckSettings
+
+    guidance = _BACKCHECK_GUIDANCE
+    column_settings = pl.DataFrame(
+        {
+            "search_type": ["exact"] * len(guidance),
+            "pattern": list(guidance),
+            "column_name": [[col] for col in guidance],
+            "category": [category for category, _ in guidance.values()],
+            "ok_range_type": ["number" if ok else None for _, ok in guidance.values()],
+            "ok_range_values": [ok for _, ok in guidance.values()],
+            "ttest": [False] * len(guidance),
+            "prtest": [False] * len(guidance),
+            "signrank": [False] * len(guidance),
+            "reliability": [False] * len(guidance),
+        }
+    )
+    settings = BackcheckSettings(
+        survey_key="KEY",
+        survey_id="hhid",
+        enumerator="enum_id",
+        backchecker="bcer_id",
+    )
+    return compute_backcheck_analysis(survey, backcheck, settings, column_settings)
+
+
+class TestRealDemoData:
+    """Load the real demo assets through load_demo_data (#360, #364)."""
+
+    def test_two_fresh_loads_on_the_same_day_are_identical(self, load_real_demo):
+        """Restarting the demo on the same day gives the same data."""
+        survey_a, backcheck_a = load_real_demo(today=date(2026, 3, 10))
+        survey_b, backcheck_b = load_real_demo(today=date(2026, 3, 10))
+
+        assert survey_a.equals(survey_b)
+        assert backcheck_a.equals(backcheck_b)
+
+    def test_loads_on_different_days_differ_only_by_the_date_offset(
+        self, load_real_demo
+    ):
+        """A later load moves every date by whole days and changes nothing else."""
+        date_cols = list(DemoDataGenerator.DATE_COLUMNS)
+        date_format = DemoDataGenerator.DATE_FORMAT
+        earlier = load_real_demo(today=date(2026, 3, 10))
+        later = load_real_demo(today=date(2026, 3, 17))
+
+        for before, after in zip(earlier, later, strict=True):
+            assert before.drop(date_cols).equals(after.drop(date_cols))
+            for col in date_cols:
+                shifted = before[col].str.to_datetime(date_format) + timedelta(days=7)
+                assert after[col].str.to_datetime(date_format).equals(shifted)
+
+    def test_latest_submissions_fall_on_yesterday_and_today(self, load_real_demo):
+        """Check health deltas need submissions on the last two days."""
+        today = date(2026, 3, 10)
+        survey, _ = load_real_demo(today=today)
+
+        days = set(survey["submissiondate"].str.to_datetime().dt.date())
+
+        assert max(days) == today
+        assert today - timedelta(days=1) in days
+
+    def test_default_load_puts_the_latest_submission_today(self, load_real_demo):
+        """Without an explicit date the demo is anchored on the current day."""
+        survey, _ = load_real_demo()
+
+        latest = survey["submissiondate"].str.to_datetime().dt.date().max()
+
+        assert latest == date.today()
+
+    def test_every_backcheck_follows_its_survey(self, load_real_demo):
+        """A backcheck never starts before its household's survey was submitted."""
+        survey, backcheck = load_real_demo(today=date(2026, 3, 10))
+
+        latest_survey = survey.group_by("hhid").agg(
+            pl.col("submissiondate").str.to_datetime().max().alias("surveyed")
+        )
+        joined = backcheck.join(latest_survey, on="hhid", how="left")
+
+        assert joined["surveyed"].null_count() == 0
+        assert (joined["starttime"].str.to_datetime() > joined["surveyed"]).all()
+        assert joined["submissiondate"].str.to_datetime().dt.date().max() <= date(
+            2026, 3, 10
+        )
+
+    def test_state_values_are_states(self, load_real_demo):
+        """``state`` holds Indian states, not districts such as Anantapur."""
+        states = {"Andhra Pradesh", "Gujarat", "Uttar Pradesh"}
+        for data in load_real_demo(today=date(2026, 3, 10)):
+            assert set(data["state"].unique()) == states
+
+    def test_survey_has_refused_values(self, load_real_demo):
+        """-88 ("Refused") shows up in the Missing check."""
+        survey, _ = load_real_demo(today=date(2026, 3, 10))
+
+        refused = sum(
+            (survey[col] == -88).sum()
+            for col in survey.columns
+            if survey[col].dtype.is_numeric()
+        )
+
+        assert refused >= 10
+
+    def test_land_acre_is_a_populated_numeric_outlier_example(self, load_real_demo):
+        """The Outliers guidance needs a numeric column with values to flag."""
+        survey, _ = load_real_demo(today=date(2026, 3, 10))
+        land = survey["land_acre"]
+
+        assert land.dtype.is_numeric()
+        assert land.null_count() <= survey.height // 10
+        valid = land.filter(land >= 0)
+        q1, q3 = valid.quantile(0.25), valid.quantile(0.75)
+        assert (valid > q3 + 3 * (q3 - q1)).sum() >= 2
+
+    def test_recommended_backcheck_columns_have_mismatches(self, load_real_demo):
+        """Each column the Backchecks guidance adds shows non-zero error rates."""
+        survey, backcheck = load_real_demo(today=date(2026, 3, 10))
+
+        analysis = _demo_backcheck_analysis(survey, backcheck)
+        mismatches = dict(
+            analysis.filter(pl.col("match_status") == "mismatch")
+            .group_by("column_name")
+            .len()
+            .iter_rows()
+        )
+
+        for col in _BACKCHECK_GUIDANCE:
+            assert mismatches.get(col, 0) >= 2, col
+
+    def test_every_column_named_in_guidance_exists(self, load_real_demo):
+        """Demo guidance only names columns the demo data has (#356)."""
+        survey, backcheck = load_real_demo(today=date(2026, 3, 10))
+        data = {"demo_survey": survey, "demo_backcheck": backcheck}
+
+        assert set(DEMO_GUIDANCE_COLUMNS) == set(data)
+        missing = sorted(
+            (alias, str(col))
+            for alias, columns in DEMO_GUIDANCE_COLUMNS.items()
+            for col in columns
+            if col not in data[alias].columns
+        )
+        assert not missing, f"guidance names columns not in the demo data: {missing}"
+
+    def test_duplicates_named_in_guidance_match_the_demo_data(self, load_real_demo):
+        """The duplicate IDs, KEYs and new IDs the guidance names are real."""
+        survey, _ = load_real_demo(today=date(2026, 3, 10))
+        hhids = set(survey[DemoColumn.HHID])
+
+        for duplicate in DEMO_DUPLICATES:
+            records = survey.filter(pl.col(DemoColumn.HHID) == duplicate.hhid)
+            assert records.height == 2, duplicate.hhid
+            assert duplicate.key in records[DemoColumn.KEY].to_list(), duplicate
+            if duplicate.new_hhid is not None:
+                assert duplicate.new_hhid not in hhids, duplicate
+
+    def test_repeat_submission_to_drop_is_the_emptier_record(self, load_real_demo):
+        """The record the guidance drops leaves more answers blank than the other."""
+        survey, _ = load_real_demo(today=date(2026, 3, 10))
+        records = survey.filter(
+            pl.col(DemoColumn.HHID) == DEMO_REPEAT_SUBMISSION.hhid
+        ).with_columns(blanks=pl.sum_horizontal(pl.all().is_null()))
+        blanks = dict(records.select(DemoColumn.KEY, "blanks").iter_rows())
+
+        dropped = blanks.pop(DEMO_REPEAT_SUBMISSION.key)
+        (kept,) = blanks.values()
+        assert dropped > kept
+
+    def test_correction_named_in_guidance_fixes_an_outlier(self, load_real_demo):
+        """The value Correct Data fixes is an IQR outlier; the new value is not."""
+        from datasure.checks.outliers.compute import compute_outlier_stats_polars
+
+        survey, _ = load_real_demo(today=date(2026, 3, 10))
+        fix = DEMO_LAND_CORRECTION
+        row = survey.filter(pl.col(DemoColumn.KEY) == fix.record.key)
+        assert row[DemoColumn.HHID].to_list() == [fix.record.hhid]
+        assert row[fix.column].to_list() == [fix.value]
+
+        def bounds(data):
+            # Negative values are missing codes such as -99, not answers
+            values = data[fix.column].filter(data[fix.column] >= 0)
+            stats = compute_outlier_stats_polars(values, None, None)
+            return stats.lower_bound, stats.upper_bound
+
+        low, high = bounds(survey)
+        assert not low <= fix.value <= high
+        corrected = survey.with_columns(
+            pl.when(pl.col(DemoColumn.KEY) == fix.record.key)
+            .then(fix.new_value)
+            .otherwise(pl.col(fix.column))
+            .alias(fix.column)
+        )
+        low, high = bounds(corrected)
+        assert low <= fix.new_value <= high
+
+
+def _source(relative_path: str) -> str:
+    """Return the text of a datasure source file, without importing it."""
+    from pathlib import Path
+
+    import datasure
+
+    return (Path(datasure.__file__).parent / relative_path).read_text(encoding="utf-8")
+
+
+class TestProjectGuidance:
+    """Demo guidance for the project-level features of #361 (items 5-9).
+
+    Each test checks the guidance names a label and that the label exists in
+    the source file that renders it, so renaming a widget fails a test.
+    """
+
+    @staticmethod
+    def _assert_names_real_labels(guidance: str, source_path: str, labels):
+        source = _source(source_path)
+        for label in labels:
+            assert label in guidance, f"guidance does not name {label!r}"
+            assert label in source, f"{label!r} is not a label in {source_path}"
+
+    def test_reports_guidance_asks_for_the_reviewer_name(self):
+        """The sidebar reviewer name is set before the first correction (item 5)."""
+        guidance = OnboardingSteps.OUTPUTS["guidance_content"]
+        self._assert_names_real_labels(
+            guidance,
+            "utils/reviewer.py",
+            [":material/person: Reviewer:", "Reviewer name"],
+        )
+
+    def test_shared_accept_steps_name_the_review_form_labels(self):
+        """Outliers and GPS share the Review dialog's form inputs."""
+        from datasure.utils.onboarding_utils import (
+            DEMO_SHOW_REVIEWED,
+            demo_accept_steps,
+        )
+
+        steps = demo_accept_steps("Review", "Some dialog", "A reason")
+        self._assert_names_real_labels(
+            steps,
+            "utils/correction_form.py",
+            ["Select Action", "Reason for Correction", "Apply"],
+        )
+        assert "**Some dialog**" in steps
+        assert "*A reason*" in steps
+        for check in ("checks/outliers/report_ui.py", "checks/gpschecks/report_ui.py"):
+            self._assert_names_real_labels(DEMO_SHOW_REVIEWED, check, ["Show reviewed"])
+
+    def test_reports_guidance_places_the_reviewer_above_demo_help(self):
+        """The reviewer setting renders before the page adds Demo Help."""
+        guidance = OnboardingSteps.OUTPUTS["guidance_content"]
+        app = _source("app.py")
+        # The sidebar footer renders before the page, and the page adds Demo Help
+        assert app.index("render_reviewer_setting()") < app.rindex("nav_menu.run()")
+        assert "### Demo Help" in _source("utils/navigations_utils.py")
+
+        assert "bottom of the sidebar" not in guidance
+        assert "above **Demo Help**" in guidance
+
+    def test_configure_guidance_edits_only_the_target(self):
+        """Editing changes the target, never the page name the walkthrough uses."""
+        from datasure.utils import onboarding_utils as ou
+
+        guidance = OnboardingSteps.CONFIGURE["guidance_content"]
+        self._assert_names_real_labels(
+            guidance,
+            "utils/config_utils.py",
+            [
+                "Edit Check Configuration",
+                "Select Check Configuration to Edit",
+                "Enter Target Number of responses for the Survey",
+                "Save Changes",
+            ],
+        )
+        assert f"**Page Name:** {ou.DEMO_PAGE_NAME}" in guidance
+        assert f"Target Number of responses: {ou.DEMO_SURVEY_TARGET}" in guidance
+        assert str(ou.DEMO_EDITED_TARGET) in guidance
+        assert ou.DEMO_EDITED_TARGET != ou.DEMO_SURVEY_TARGET
+
+    def test_configure_guidance_removes_only_a_throwaway_config(self):
+        """Removing uses a second config, so Household HFCs survives."""
+        from datasure.utils import onboarding_utils as ou
+
+        guidance = OnboardingSteps.CONFIGURE["guidance_content"]
+        self._assert_names_real_labels(
+            guidance,
+            "utils/config_utils.py",
+            ["Remove Check Configuration", "Select Check Configuration to Remove"],
+        )
+        assert ou.DEMO_THROWAWAY_PAGE in guidance
+        assert ou.DEMO_THROWAWAY_PAGE != ou.DEMO_PAGE_NAME
+        # Page Name accepts at most 20 characters
+        for name in (ou.DEMO_PAGE_NAME, ou.DEMO_THROWAWAY_PAGE):
+            assert len(name) <= 20, name
+
+    def test_surveycto_guidance_names_the_real_forms(self):
+        """The SurveyCTO step is explanatory: it names the real labels (item 7)."""
+        guidance = ImportDemoInfo.get_info_message("surveycto_info")
+        self._assert_names_real_labels(
+            guidance,
+            "views/import_view.py",
+            ["Add Credentials", "Add Import Configuration", "Import Type", "SurveyCTO"],
+        )
+        self._assert_names_real_labels(
+            guidance,
+            "connectors/scto.py",
+            [
+                "Server name",
+                "Email address",
+                "Password",
+                "Connect & Save Credentials",
+                "Select Server Credentials",
+                "Select Form ID",
+                "Add Form",
+            ],
+        )
+
+    def test_surveycto_guidance_needs_no_server_or_credentials(self):
+        guidance = ImportDemoInfo.get_info_message("surveycto_info").lower()
+        assert "no surveycto server" in guidance
+        assert "do not click" in guidance
+
+    def test_replication_guidance_excludes_reviewer_names(self):
+        """Item 9: the Exclude reviewer names checkbox is part of the walkthrough."""
+        guidance = OnboardingSteps.REPLICATION["guidance_content"]
+        self._assert_names_real_labels(
+            guidance,
+            "views/replication_view.py",
+            ["Exclude reviewer names", "correction_log.csv"],
+        )
+
+    def test_replication_guidance_follows_the_page_order(self):
+        """Exclude reviewer names sits under Page Name, above the page details."""
+        guidance = OnboardingSteps.REPLICATION["guidance_content"]
+        page = _source("views/replication_view.py")
+        order = [
+            '"Page Name"',
+            '"Exclude reviewer names"',
+            "_render_config_details(configs",
+        ]
+        positions = [page.index(marker) for marker in order]
+        assert positions == sorted(positions)
+        self._assert_names_real_labels(
+            guidance, "views/replication_view.py", ["Selected page details"]
+        )
+
+        steps = [
+            "**Page Name**",
+            "**Exclude reviewer names**",
+            "**Selected page details**",
+        ]
+        positions = [guidance.index(step) for step in steps]
+        assert positions == sorted(positions)
+
+    def test_replication_guidance_exports_before_the_demo_completes(self):
+        """Ticking the PII box completes the demo, so the export comes first."""
+        guidance = OnboardingSteps.REPLICATION["guidance_content"]
+        # Ticking the PII confirmation shows the completion message
+        page = _source("views/replication_view.py")
+        assert page.index("_replication_pii_confirmed") < page.index(
+            "show_demo_completion_message()"
+        )
+        self._assert_names_real_labels(
+            guidance,
+            "utils/navigations_utils.py",
+            ["Restart Demo", "Create Real Project"],
+        )
+
+        assert guidance.index("**Download configuration**") < guidance.index(
+            "check the PII confirmation box"
+        )
+
+    def test_replication_guidance_exports_the_demo_project(self):
+        """Item 8: export runs from the demo row; update and delete are explained."""
+        from datasure.utils import onboarding_utils as ou
+
+        guidance = OnboardingSteps.REPLICATION["guidance_content"]
+        self._assert_names_real_labels(
+            guidance,
+            "views/start_view.py",
+            [
+                "Include record-level decisions",
+                "Download configuration",
+                "Update from configuration",
+                "Delete project",
+            ],
+        )
+        assert ou.DEMO_PROJECT_NAME in guidance
+        # The demo row's own button, next to Resume and Restart
+        assert "**Export**" in guidance
+        assert 'key="demo_export"' in _source("views/start_view.py")
+
+    def test_exporting_the_loaded_demo_builds_a_bundle(self, load_real_demo):
+        """The demo project exports like any other project (item 8)."""
+        from datasure.utils.project_config import export_project_config
+
+        load_real_demo(today=date(2026, 3, 10))
+        bundle = export_project_config(DEMO_PROJECT_ID, DEMO_PROJECT_NAME)
+
+        assert bundle.exported_from_project == DEMO_PROJECT_NAME
+        assert {d.alias for d in bundle.datasets} == {"demo_survey", "demo_backcheck"}
+        assert all(d.username is None for d in bundle.datasets)
+
+
+def _demo_flags(survey, flag, bounds=None):
+    """Run the Outliers check on one flagged demo column as guidance sets it up.
+
+    Returns ``(outliers, violations)``: the column's IQR outlier rows and its
+    constraint violation rows (empty without ``bounds``).
+    """
+    from datasure.checks.outliers.compute import (
+        compute_constraint_violations,
+        compute_outlier_output,
+    )
+    from datasure.checks.outliers.models import OutlierSettings
+
+    hard_min, soft_min, soft_max, hard_max = bounds or (None,) * 4
+    config = pl.DataFrame(
+        {
+            "search_type": ["exact"],
+            "pattern": [None],
+            "column_name": [[flag.column]],
+            "grouped_columns": [False],
+            "locked": [False],
+            "outlier_enabled": [True],
+            "outlier_method": ["Interquartile Range (IQR)"],
+            "outlier_multiplier": [1.5],
+            "outlier_threshold": [20],
+            "hard_min": [hard_min],
+            "soft_min": [soft_min],
+            "soft_max": [soft_max],
+            "hard_max": [hard_max],
+        },
+        schema_overrides={
+            bound: pl.Float64
+            for bound in ("hard_min", "soft_min", "soft_max", "hard_max")
+        },
+    )
+    settings = OutlierSettings(survey_key=DemoColumn.KEY, survey_id=DemoColumn.HHID)
+    # Negative values are missing codes such as -99, which the check skips
+    data = survey.with_columns(
+        pl.when(pl.col(flag.column) >= 0).then(pl.col(flag.column)).alias(flag.column)
+    )
+    outliers = compute_outlier_output(data, settings, config).filter(
+        pl.col("outlier reason") != "no outlier"
+    )
+    violations = pl.DataFrame()
+    if bounds:
+        violations = compute_constraint_violations(data, settings, config).filter(
+            pl.col("violation reason") != "no violation"
+        )
+    return outliers, violations
+
+
+class TestReviewGuidanceValues:
+    """Values the check-page review guidance names are flagged in the demo (#361)."""
+
+    def test_value_to_accept_breaches_only_a_soft_age_bound(self, load_real_demo):
+        """The age guidance accepts is unusual (soft) but not impossible (hard)."""
+        survey, _ = load_real_demo(today=date(2026, 3, 10))
+        flag = DEMO_OUTLIER_ACCEPT
+        row = survey.filter(pl.col(DemoColumn.KEY) == flag.record.key)
+        assert row[DemoColumn.HHID].to_list() == [flag.record.hhid]
+        assert row[flag.column].to_list() == [flag.value]
+        assert flag.new_value is None
+
+        _, violations = _demo_flags(survey, flag, DEMO_AGE_BOUNDS)
+
+        reasons = violations.filter(pl.col(DemoColumn.KEY) == flag.record.key)[
+            "violation reason"
+        ].to_list()
+        assert len(reasons) == 1
+        assert "soft" in reasons[0]
+        assert not violations["violation reason"].str.contains("hard").any()
+
+    def test_value_to_correct_on_the_check_page_is_an_outlier(self, load_real_demo):
+        """The land value guidance corrects in the Review dialog is flagged."""
+        survey, _ = load_real_demo(today=date(2026, 3, 10))
+        flag = DEMO_OUTLIER_CORRECTION
+        row = survey.filter(pl.col(DemoColumn.KEY) == flag.record.key)
+        assert row[DemoColumn.HHID].to_list() == [flag.record.hhid]
+        assert row[flag.column].to_list() == [flag.value]
+        # The Correct Data step still has its own value left to fix
+        assert flag.record.key != DEMO_LAND_CORRECTION.record.key
+
+        outliers, _ = _demo_flags(survey, flag)
+
+        assert flag.record.key in outliers[DemoColumn.KEY].to_list()
+        corrected = survey.with_columns(
+            pl.when(pl.col(DemoColumn.KEY) == flag.record.key)
+            .then(flag.new_value)
+            .otherwise(pl.col(flag.column))
+            .alias(flag.column)
+        )
+        outliers, _ = _demo_flags(corrected, flag)
+        assert flag.record.key not in outliers[DemoColumn.KEY].to_list()
+
+    def test_gps_outlier_to_accept_is_flagged_by_state(self, load_real_demo):
+        """Cluster by Column on state, after the Duplicates Drop, flags the record."""
+        from datasure.checks.gpschecks.compute import detect_outliers_with_clusters
+
+        survey, _ = load_real_demo(today=date(2026, 3, 10))
+        record = DEMO_GPS_ACCEPT
+        row = survey.filter(pl.col(DemoColumn.KEY) == record.key)
+        assert row[DemoColumn.HHID].to_list() == [record.hhid]
+        kept = survey.filter(pl.col(DemoColumn.KEY) != DEMO_REPEAT_SUBMISSION.key)
+
+        flagged = detect_outliers_with_clusters(
+            kept.to_pandas(),
+            DemoColumn.HOUSEHOLD_LATITUDE,
+            DemoColumn.HOUSEHOLD_LONGITUDE,
+            DemoColumn.STATE,
+        )
+
+        outlier_keys = flagged.loc[flagged["Outlier"], DemoColumn.KEY].tolist()
+        assert record.key in outlier_keys
+
+    def test_attributions_cover_a_source_with_and_without_a_note(self):
+        """One attribution saves without a note, the other needs one."""
+        from datasure.checks.backchecks.attribution import note_required
+
+        assert not note_required(DEMO_ATTRIBUTION_NO_NOTE.source)
+        assert note_required(DEMO_ATTRIBUTION_WITH_NOTE.source)
+
+    @pytest.mark.parametrize(
+        "mismatch",
+        (DEMO_ATTRIBUTION_NO_NOTE, DEMO_ATTRIBUTION_WITH_NOTE),
+        ids=lambda m: f"{m.record.hhid}-{m.column}",
+    )
+    def test_mismatch_to_attribute_is_a_backcheck_mismatch(
+        self, load_real_demo, mismatch
+    ):
+        """Each mismatch the attribution guidance names shows as a mismatch."""
+        survey, backcheck = load_real_demo(today=date(2026, 3, 10))
+        assert survey.filter(pl.col(DemoColumn.KEY) == mismatch.record.key)[
+            DemoColumn.HHID
+        ].to_list() == [mismatch.record.hhid]
+
+        analysis = _demo_backcheck_analysis(survey, backcheck)
+
+        row = analysis.filter(
+            (pl.col(DemoColumn.KEY) == mismatch.record.key)
+            & (pl.col("column_name") == mismatch.column)
+        )
+        assert row["match_status"].to_list() == ["mismatch"]
+        assert float(row["survey_value"].item()) == mismatch.survey_value
+        assert float(row["backcheck_value"].item()) == mismatch.backcheck_value
+
+    def test_other_duplicates_find_only_the_shared_longitude(self, load_real_demo):
+        """Of the two GPS columns guidance checks, only longitude repeats a value."""
+        from datasure.checks.duplicates import compute_column_duplicates
+
+        survey, _ = load_real_demo(today=date(2026, 3, 10))
+        shared = DEMO_SHARED_LONGITUDE
+
+        def duplicates(column):
+            return compute_column_duplicates(
+                survey, DemoColumn.HHID, DemoColumn.SUBMISSIONDATE, column
+            )
+
+        assert duplicates(DemoColumn.HOUSEHOLD_LATITUDE).is_empty()
+        found = duplicates(shared.column)
+        assert sorted(found[DemoColumn.HHID]) == sorted(shared.hhids)
+        assert set(found[shared.column].cast(pl.Float64)) == {shared.value}

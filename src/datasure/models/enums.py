@@ -43,6 +43,7 @@ class PrepFunctions(Enum):
     nunique: str = "nunique"
     product: str = "product"
     quotient: str = "quotient"
+    concat: str = "concat"
     index: str = "index"
     uuid: str = "uuid"
     random: str = "random"
@@ -76,6 +77,8 @@ class PrepOperations(Enum):
     string_to_number: str = "string to number"
     string_to_date: str = "string to date"
     string_to_datetime: str = "string to datetime"
+    to_string: str = "to string"
+    to_number: str = "to number"
     extract_pattern: str = "extract pattern"
     get_dummies: str = "get dummies"
     add: str = "add"
@@ -176,6 +179,7 @@ COL_FUNC_WITH_VALUES = (
     PrepFunctions.nunique.value,
     PrepFunctions.product.value,
     PrepFunctions.quotient.value,
+    PrepFunctions.concat.value,
 )
 
 

@@ -1,0 +1,21 @@
+name: Question
+description: Ask how to do something in DataSure
+labels: ["question", "needs-triage"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Check the [user guide](https://github.com/PovertyAction/datasure/blob/main/docs/USER_GUIDE.md) first.
+        Do not paste survey data, respondent names, or other personal information into this issue.
+  - type: textarea
+    id: question
+    attributes:
+      label: Your question
+      description: Describe what you are trying to do and what you have tried.
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: DataSure version
+      description: Run `datasure --version`.

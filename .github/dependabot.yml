@@ -5,6 +5,9 @@
 # https://docs.github.com/github/administering-a-repository/configuration-options-for-dependency-updates
 # https://containers.dev/guide/dependabot
 
+# Labels are set explicitly so Dependabot does not recreate its default
+# per-ecosystem labels (python, github_actions); see
+# CONTRIBUTING.md#issue-types-and-labels.
 # All ecosystems use a 7-day cooldown so a compromised upstream release is
 # likely caught before Dependabot proposes it here (zizmor: dependabot-cooldown).
 version: 2
@@ -15,6 +18,8 @@ updates:
       interval: "weekly"
     commit-message:
       prefix: "chore(deps)"
+    labels:
+      - "dependencies"
     cooldown:
       default-days: 7
   - package-ecosystem: "github-actions"
@@ -23,11 +28,16 @@ updates:
       interval: "weekly"
     commit-message:
       prefix: "chore(actions)"
+    labels:
+      - "dependencies"
+      - "area/ci-cd"
     cooldown:
       default-days: 7
   - package-ecosystem: "devcontainers"
     directory: "/"
     schedule:
       interval: weekly
+    labels:
+      - "dependencies"
     cooldown:
       default-days: 7

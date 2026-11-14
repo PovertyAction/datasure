@@ -1,0 +1,2219 @@
+"""Report-rendering UI for the outliers report."""
+
+import json
+import logging
+from collections.abc import Callable
+from dataclasses import dataclass, field, replace
+from datetime import date
+from typing import Any
+
+import polars as pl
+import streamlit as st
+from pydantic import BaseModel, ValidationError
+
+from datasure.checks.headline import (
+    CheckDelta,
+    CheckHeadline,
+    settings_no_longer_fit,
+)
+from datasure.checks.health_period import DeltaWindow, dated_after, logged_after
+from datasure.checks.outliers.compute import (
+    _build_include_cols,
+    _compute_constraint_metrics,
+    _compute_outlier_metrics,
+    _create_box_plot,
+    _create_descriptive_stats,
+    _mask_inspection_column,
+    _update_unlocked_cols,
+    clear_unavailable_columns,
+    compute_constraint_violations,
+    compute_outlier_output,
+    expand_col_names,
+    flagged_value_percent,
+    load_default_settings,
+)
+from datasure.checks.outliers.models import (
+    TAB_NAME,
+    ConstraintBounds,
+    ConstraintMetrics,
+    OutlierMethod,
+    OutlierMetrics,
+    OutlierMultipliers,
+    OutlierOptionsConfig,
+    OutlierSettings,
+    OutlierThresholds,
+    SearchType,
+)
+from datasure.checks.outliers.review import (
+    CONSTRAINTS,
+    OUTLIERS,
+    REVIEW_COLUMNS,
+    REVIEW_STATUS_COL,
+    VIOLATION_TYPE_COL,
+    FlagCheck,
+    FlagSelection,
+    TableFilters,
+    allowed_actions,
+    clear_reviewed_flags,
+    count_resolved_flags,
+    filter_table,
+    flagged_cells,
+    has_corrected_cells,
+    highlight_reviewed_row,
+    join_survey_columns,
+    key_has_conflicting_values,
+    mark_reviewed,
+    needs_hard_confirmation,
+    select_flag,
+)
+from datasure.checks.outliers.settings_ui import outliers_report_settings
+from datasure.processing.correction_log import HARD_SEVERITY, Action
+from datasure.processing.corrections import CorrectionProcessor
+from datasure.utils.correction_form import (
+    apply_correction_entries,
+    get_current_value,
+    render_correction_inputs,
+    should_enable_apply_button,
+)
+from datasure.utils.dataframe_utils import ColumnByType
+from datasure.utils.duckdb_utils import (
+    OUTLIERS_TABLE,
+    check_table_name,
+    duckdb_get_table,
+    duckdb_save_table,
+    load_missing_codes_from_db,
+)
+from datasure.utils.navigation import READY, CheckStatus, StatusResult
+from datasure.utils.navigations_utils import demo_callout
+from datasure.utils.onboarding_utils import (
+    DEMO_AGE_BOUNDS,
+    DEMO_OUTLIER_ACCEPT,
+    DEMO_OUTLIER_CORRECTION,
+    DEMO_SHOW_REVIEWED,
+    DemoColumn,
+    demo_accept_steps,
+    is_demo_project,
+)
+from datasure.utils.ui_utils import (
+    queue_notice,
+    row_styler,
+    show_queued_notices,
+    styled_dataframe,
+)
+from datasure.utils.view_state import reset_filters_beside, view_factory
+
+logger = logging.getLogger(__name__)
+
+# Saved view state scope: the check's catalogue slug. The inspected column and
+# the extra constraint violation columns are personal view state; older
+# versions saved them in the check's settings and they move on first load.
+VIEW_SCOPE = "outliers"
+check_view = view_factory(
+    VIEW_SCOPE,
+    legacy=(
+        TAB_NAME,
+        {
+            "outlier_inspect_col": "selected_col",
+            "constraint_violation_display_cols": "constraint_display_cols",
+        },
+    ),
+)
+
+# =============================================================================
+# Streamlit UI - Metrics Display
+# =============================================================================
+
+
+def _render_constraint_metrics(
+    violation_data: pl.DataFrame,
+) -> None:
+    """Render constraint violation metrics using Streamlit.
+
+    Parameters
+    ----------
+    violation_data : pl.DataFrame
+        DataFrame containing constraint violation data.
+    """
+    metrics: ConstraintMetrics = _compute_constraint_metrics(violation_data)
+
+    _, _, uc3, uc4 = st.columns(4)
+    with uc3, st.container(border=True):
+        st.metric(
+            label="Number of columns checked",
+            value=f"{metrics.columns_checked:,}",
+            help="Number of columns checked for constraint violations",
+        )
+    with uc4, st.container(border=True):
+        st.metric(
+            label="Total Violations",
+            value=f"{metrics.total_violations:,}",
+            help="Total number of constraint violations detected",
+        )
+
+    lc1, lc2, lc3, lc4 = st.columns(4, border=True)
+    lc1.metric(
+        label="Hard Min Violations",
+        value=f"{metrics.hard_min_violations:,}",
+        help="Number of violations below hard minimum",
+    )
+    lc2.metric(
+        label="Soft Min Violations",
+        value=f"{metrics.soft_min_violations:,}",
+        help="Number of violations below soft minimum",
+    )
+    lc3.metric(
+        label="Soft Max Violations",
+        value=f"{metrics.soft_max_violations:,}",
+        help="Number of violations above soft maximum",
+    )
+    lc4.metric(
+        label="Hard Max Violations",
+        value=f"{metrics.hard_max_violations:,}",
+        help="Number of violations above hard maximum",
+    )
+
+
+def _render_outlier_metrics(
+    outliers_data: pl.DataFrame,
+    settings: OutlierSettings,
+) -> None:
+    """Render outlier metrics using Streamlit.
+
+    Parameters
+    ----------
+    outliers_data : pl.DataFrame
+        DataFrame containing outlier data.
+    settings : OutlierSettings
+        Outlier settings configuration.
+    """
+    metrics: OutlierMetrics = _compute_outlier_metrics(
+        outliers_data, settings.enumerator
+    )
+
+    uc1, uc2, uc3, uc4 = st.columns(4, border=True)
+    uc1.metric(
+        label="Number of columns checked",
+        value=f"{metrics.columns_checked:,}",
+        help="Number of columns checked for outliers",
+    )
+    uc2.metric(
+        label="Columns with Outliers",
+        value=f"{metrics.columns_with_outliers:,}",
+        help="Number of columns that have outliers detected",
+    )
+    uc3.metric(
+        label="Total Outliers",
+        value=f"{metrics.total_outliers:,}",
+        help="Total number of outliers detected",
+    )
+    if settings.enumerator:
+        uc4.metric(
+            label="Enumerators with Outliers",
+            value=f"{metrics.enumerators_with_outliers:,}",
+            help="Number of unique enumerators with outliers detected",
+        )
+
+
+# =============================================================================
+# Streamlit UI - Correcting and Accepting Flags
+# =============================================================================
+
+# `queue_notice` scope of the confirmation shown after the post-save rerun.
+_NOTICE_SCOPE = "outliers_corrections"
+
+# First column of a results table: a button that opens the correction dialog.
+REVIEW_BUTTON_COL = "_review"
+REVIEW_BUTTON_LABEL = ":material/edit_note: Review"
+
+
+@dataclass(frozen=True)
+class ReviewContext:
+    """What the results tables need to correct or accept flagged values.
+
+    One context is built per report run, so lookups shared by both tables
+    are cached on it. With `entries_after`, only log entries made after that
+    date count, for the flags resolved in Summary's comparison period, and
+    an acceptance of a cell resolved by then does not count.
+    """
+
+    processor: CorrectionProcessor
+    alias: str
+    entries_after: date | None = None
+    _corrections: dict[str, pl.DataFrame] = field(
+        default_factory=dict, compare=False, repr=False
+    )
+
+    def _in_period(self, log_rows: pl.DataFrame) -> pl.DataFrame:
+        if self.entries_after is None or log_rows.is_empty():
+            return log_rows
+        return log_rows.filter(logged_after(log_rows, self.entries_after))
+
+    def resolved_by_period_start(self, check_type: str) -> set[tuple]:
+        """Return the (KEY, column) cells whose flag of a check was resolved
+        on or before `entries_after`.
+
+        A cell counts when an acceptance of the check or a successful value
+        correction of the cell was logged by then, even if a later entry
+        replaced it. Empty without `entries_after`.
+        """
+        log = self.processor.get_correction_log(self.alias)
+        if self.entries_after is None or log.is_empty():
+            return set()
+        resolving = (
+            (pl.col("action") == Action.ACCEPT) & (pl.col("check_type") == check_type)
+        ) | (
+            pl.col("action").is_in([Action.MODIFY_VALUE, Action.REMOVE_VALUE])
+            & (pl.col("status") == "Successful")
+        )
+        earlier = log.filter(resolving & ~logged_after(log, self.entries_after))
+        return set(
+            earlier.select(
+                pl.col("KEY").cast(pl.String), pl.col("column").cast(pl.String)
+            ).iter_rows()
+        )
+
+    def active_acceptances(self, check_type: str, key_col: str) -> pl.DataFrame:
+        """Return the acceptances of a check that still apply to the data."""
+        acceptances = self._in_period(
+            self.processor.get_active_acceptances(self.alias, check_type, key_col)
+        )
+        earlier = self.resolved_by_period_start(check_type)
+        if not earlier or acceptances.is_empty():
+            return acceptances
+        cells = pl.DataFrame(
+            list(earlier), schema={"KEY": pl.String, "column": pl.String}, orient="row"
+        )
+        return acceptances.join(cells, on=["KEY", "column"], how="anti")
+
+    def active_corrections(self, key_col: str) -> pl.DataFrame:
+        """Return the active value corrections, looked up once per run."""
+        if key_col not in self._corrections:
+            self._corrections[key_col] = self._in_period(
+                self.processor.get_active_corrections(self.alias, key_col)
+            )
+        return self._corrections[key_col]
+
+
+def _with_review_status(
+    flags: pl.DataFrame,
+    settings: OutlierSettings,
+    check: FlagCheck,
+    review: ReviewContext | None,
+) -> pl.DataFrame:
+    """Mark accepted flags and corrected values; a no-op if already marked."""
+    if review is None or flags.is_empty() or REVIEW_STATUS_COL in flags.columns:
+        return flags
+    acceptances = review.active_acceptances(check.check_type, settings.survey_key)
+    corrections = review.active_corrections(settings.survey_key)
+    return mark_reviewed(flags, acceptances, settings.survey_key, check, corrections)
+
+
+def _render_table_toggles(
+    check: FlagCheck, review: ReviewContext | None, setting_file: str
+) -> TableFilters:
+    """Render the toggles above a results table and return their values.
+
+    "Show reviewed" and "Show only reviewed" are only offered with
+    `review`. While "Show only reviewed" is on, the other two toggles are
+    disabled, since it overrides them. The toggles are saved view state.
+    """
+    view = check_view(setting_file)
+    flagged_only = view.bind(f"{check.check_type}_flagged_only", value=True)
+    reviewed_only_key = f"{check.check_type}_reviewed_only"
+    show_reviewed_widget = view.bind(f"{check.check_type}_show_reviewed")
+    reviewed_only_widget = view.bind(reviewed_only_key)
+    # Read before rendering so the toggles to its left can be disabled.
+    reviewed_only_on = review is not None and bool(
+        st.session_state.get(reviewed_only_key, False)
+    )
+
+    tc1, tc2, tc3, _ = st.columns([0.22, 0.22, 0.22, 0.34])
+    with tc1:
+        flagged_only_on = st.toggle(
+            "Show only flagged values",
+            disabled=reviewed_only_on,
+            help="Turn off to show every checked value, flagged or not.",
+            **flagged_only,
+        )
+    if review is None:
+        return TableFilters(flagged_only=flagged_only_on)
+
+    with tc2:
+        show_reviewed = st.toggle(
+            "Show reviewed",
+            disabled=reviewed_only_on,
+            help="Also show flags accepted as valid and corrected values, "
+            "highlighted green, with the reason.",
+            **show_reviewed_widget,
+        )
+    with tc3:
+        reviewed_only = st.toggle(
+            "Show only reviewed",
+            help="Show only flags accepted as valid and corrected values.",
+            **reviewed_only_widget,
+        )
+    return TableFilters(
+        flagged_only=flagged_only_on,
+        show_reviewed=show_reviewed,
+        reviewed_only=reviewed_only,
+    )
+
+
+def _render_flags_table(
+    table: pl.DataFrame,
+    data: pl.DataFrame,
+    settings: OutlierSettings,
+    check: FlagCheck,
+    review: ReviewContext | None,
+    **dataframe_kwargs: Any,
+) -> None:
+    """Render a results table; with `review`, each row has a Review button.
+
+    Clicking Review opens the correction form for that row in a dialog.
+    """
+    if review is None:
+        st.dataframe(table, **dataframe_kwargs)
+        return
+
+    click_key = f"{check.check_type}_flag_review_click"
+    # Survey fields can be added to the table, so avoid their names.
+    button_col = REVIEW_BUTTON_COL
+    while button_col in table.columns:
+        button_col = f"_{button_col}"
+    shown = table.select(pl.lit(REVIEW_BUTTON_LABEL).alias(button_col), pl.all())
+    column_config = {
+        button_col: st.column_config.ButtonColumn(
+            "",
+            type="tertiary",
+            pinned=True,
+            key=click_key,
+            help="Correct the value or accept it as valid.",
+        )
+    }
+    if REVIEW_STATUS_COL in shown.columns:
+        # "Show reviewed" is on: colour the reviewed flags green.
+        styled_dataframe(
+            row_styler(shown, highlight_reviewed_row),
+            column_config=column_config,
+            **dataframe_kwargs,
+        )
+    else:
+        st.dataframe(shown, column_config=column_config, **dataframe_kwargs)
+
+    # The click is only present during the rerun it triggers, so the dialog
+    # opens once per click; widgets inside the dialog rerun just the dialog.
+    click = st.session_state.get(click_key)
+    rows = [click["row"]] if click else []
+    selection = select_flag(table, rows, settings.survey_key, check)
+    if selection is not None:
+        _flag_correction_dialog(data, settings, selection, review)
+
+
+@st.dialog("Correct or accept flagged value", width="medium")
+def _flag_correction_dialog(
+    data: pl.DataFrame,
+    settings: OutlierSettings,
+    selection: FlagSelection,
+    review: ReviewContext,
+) -> None:
+    """Show the correction form for a flag in a dialog."""
+    _render_flag_correction_form(data, settings, selection, review)
+
+
+def _render_flag_correction_form(
+    data: pl.DataFrame,
+    settings: OutlierSettings,
+    selection: FlagSelection,
+    review: ReviewContext,
+) -> None:
+    """Render the shared correction form for the selected flag.
+
+    The form is prefilled with the flag's KEY and column and the value in
+    the data. Accepting a hard constraint violation needs an extra
+    confirmation and is logged with severity "hard". A successful save
+    reruns the page so the tables and metrics reflect it.
+
+    A KEY shared by rows with different values of the column can't be
+    reviewed, since a correction would change every one of those rows.
+    """
+    key_col = settings.survey_key
+    key_value = selection.key_value
+
+    st.markdown(f"**{selection.column}** for KEY **{key_value}**")
+    if key_has_conflicting_values(data, key_col, key_value, selection.column):
+        st.warning(
+            f"KEY {key_value} is on more than one row, with different values "
+            f"of {selection.column}. Corrections and acceptances apply to "
+            "every row with the KEY, so this value can't be reviewed here. "
+            "Give each record a unique KEY in the source data first; the "
+            "Duplicates check lists duplicated KEYs."
+        )
+        return
+
+    current_value = get_current_value(data, key_col, key_value, selection.column)
+    survey_id_value = (
+        get_current_value(data, key_col, key_value, settings.survey_id)
+        if settings.survey_id
+        else None
+    )
+    # JSON keeps the parts distinct: KEY "a_1"/column "b" and KEY "a"/column
+    # "1_b" would collide if joined with underscores.
+    namespace = json.dumps([selection.check_type, str(key_value), selection.column])
+
+    if selection.reviewed:
+        st.info(
+            "This flag was accepted as valid. Remove the acceptance on the "
+            "Correct Data page to flag it again."
+        )
+
+    state = render_correction_inputs(
+        data,
+        key_col,
+        str(key_value),
+        key_namespace=namespace,
+        actions=allowed_actions(selection),
+        column=selection.column,
+        current_value=current_value,
+        check_type=selection.check_type,
+        survey_id_value=survey_id_value,
+    )
+
+    hard_accept = needs_hard_confirmation(selection, state.action)
+    confirmed = True
+    if hard_accept:
+        st.warning(
+            "This value breaks a hard constraint, a bound meant to be "
+            "absolute. The acceptance is highlighted in the Correction Log."
+        )
+        confirmed = st.checkbox(
+            "I confirm this value is correct despite the hard constraint",
+            key=f"correction_hard_confirm_{namespace}",
+        )
+
+    apply_enabled = (
+        should_enable_apply_button(state.action, state.reason, state.new_value)
+        and not state.validation_error
+        and confirmed
+    )
+    if not st.button(
+        label="Apply",
+        key=f"correction_apply_{namespace}",
+        width="stretch",
+        disabled=not apply_enabled,
+        type="primary",
+    ):
+        return
+
+    # The form holds KEY as text for display; validation and the data
+    # compare the KEY's native value (e.g. 7, not "7").
+    entry = replace(state.to_entry(), key_value=key_value)
+    if hard_accept:
+        entry = replace(entry, severity=HARD_SEVERITY)
+    if not apply_correction_entries(
+        review.processor,
+        review.alias,
+        key_col,
+        [entry],
+        source=selection.check_type,
+    ):
+        return
+
+    # A full rerun closes the dialog and refreshes the tables and metrics.
+    queue_notice(
+        _NOTICE_SCOPE,
+        "toast",
+        f"Saved {state.action} on {selection.column} for KEY {key_value}. "
+        "It is listed in the Correction Log on the Correct Data page.",
+    )
+    st.rerun()
+
+
+def _show_saved_toast() -> None:
+    """Show the confirmation queued by a save before the page reran."""
+    if not show_queued_notices(_NOTICE_SCOPE):
+        return
+    # A markdown link in the toast would open a new browser session and lose
+    # the selected project; a page link navigates within this session.
+    corrections_page = st.session_state.get("st_corr_page")
+    if corrections_page is not None:
+        st.page_link(
+            corrections_page,
+            label="Open the Correction Log",
+            icon=":material/cleaning_services:",
+        )
+
+
+# =============================================================================
+# Streamlit UI - Table Display
+# =============================================================================
+
+
+def _render_display_columns_expander(
+    setting_file: str,
+    widget_key: str,
+    display_options: list[str],
+    info_message: str,
+) -> list[str]:
+    """Render the "Show more columns" expander and return the selected columns.
+
+    Used by ``_render_constraint_violations_table`` to let users add extra
+    context columns to the results table. The selection is saved view state.
+
+    Parameters
+    ----------
+    setting_file : str
+        Path to the page settings file holding the view state.
+    widget_key : str
+        Streamlit widget key for the multiselect.
+    display_options : list[str]
+        Columns available for selection.
+    info_message : str
+        Help text shown above the multiselect.
+
+    Returns
+    -------
+    list[str]
+        Columns selected by the user.
+    """
+    with st.expander(":material/clarify: Show more columns in report", expanded=False):
+        st.info(info_message)
+        display_cols = st.multiselect(
+            label="Select columns to display",
+            options=display_options,
+            **check_view(setting_file).bind(
+                widget_key, options=display_options, multi=True, default=[]
+            ),
+        )
+
+    return display_cols
+
+
+def _render_constraint_violations_table(
+    data: pl.DataFrame,
+    violation_data: pl.DataFrame,
+    settings: OutlierSettings,
+    setting_file: str,
+    review: ReviewContext | None = None,
+) -> None:
+    """Render constraint violations table using Streamlit.
+
+    Parameters
+    ----------
+    data : pl.DataFrame
+        Original survey data.
+    violation_data : pl.DataFrame
+        DataFrame containing constraint violation data.
+    settings : OutlierSettings
+        Outlier settings configuration.
+    setting_file : str
+        Path to settings file.
+    review : ReviewContext | None
+        If given, accepted violations are hidden (unless "Show reviewed" is
+        on) and selecting a row opens the correction form.
+    """
+    if violation_data.is_empty():
+        st.info("No constraint violations detected.")
+        return
+
+    violation_data = filter_table(
+        _with_review_status(violation_data, settings, CONSTRAINTS, review),
+        _render_table_toggles(CONSTRAINTS, review, setting_file),
+        CONSTRAINTS,
+    )
+
+    all_columns = data.columns
+
+    include_cols = _build_include_cols(
+        survey_key=settings.survey_key,
+        survey_id=settings.survey_id,
+        survey_date=settings.survey_date,
+        enumerator=settings.enumerator,
+        team=settings.team,
+    )
+
+    display_options = [col for col in all_columns if col not in include_cols]
+
+    constraint_display_cols = _render_display_columns_expander(
+        setting_file,
+        "constraint_violation_display_cols",
+        display_options,
+        "Select additional columns to include in the constraint violations report.",
+    )
+
+    if constraint_display_cols:
+        include_cols.extend(constraint_display_cols)
+
+    # select columns to display from data
+    display_df = data.select(include_cols)
+    violations_df = join_survey_columns(
+        display_df,
+        violation_data,
+        settings.survey_key,
+        CONSTRAINTS,
+        reserved=[VIOLATION_TYPE_COL],
+    )
+
+    # add violation type column ie. "Soft Min", "Soft Max", "Hard Min", "Hard Max"
+    # (null for values within bounds, shown when flagged-only is off)
+    violation_type_expr = (
+        pl.when(pl.col("violation reason") == CONSTRAINTS.no_flag)
+        .then(pl.lit(None, dtype=pl.String))
+        .when(pl.col("violation reason").str.contains("below hard minimum"))
+        .then(pl.lit("Hard Min"))
+        .when(pl.col("violation reason").str.contains("below soft minimum"))
+        .then(pl.lit("Soft Min"))
+        .when(pl.col("violation reason").str.contains("above soft maximum"))
+        .then(pl.lit("Soft Max"))
+        .when(pl.col("violation reason").str.contains("above hard maximum"))
+        .then(pl.lit("Hard Max"))
+        .otherwise(pl.lit("Unknown"))
+    )
+
+    violations_df = violations_df.with_columns(
+        violation_type_expr.alias(VIOLATION_TYPE_COL)
+    )
+
+    _render_flags_table(violations_df, data, settings, CONSTRAINTS, review)
+
+
+def _excluded_codes_message(excluded_codes: pl.DataFrame) -> str:
+    """Describe the missing codes left out of the inspection statistics.
+
+    For example: "11 values were excluded because they are specified as
+    missing values: -77 (6), -99 (5)".
+    """
+
+    def _fmt(value: Any) -> str:
+        if isinstance(value, float) and value.is_integer():
+            return str(int(value))
+        return str(value)
+
+    total = excluded_codes["count"].sum()
+    codes = ", ".join(
+        f"{_fmt(value)} ({count})" for value, count in excluded_codes.iter_rows()
+    )
+    if total == 1:
+        return f"1 value was excluded because it is specified as missing: {codes}"
+    return (
+        f"{total} values were excluded because they are specified as "
+        f"missing values: {codes}"
+    )
+
+
+def _render_outlier_column_inspection(
+    data: pl.DataFrame,
+    outliers_data: pl.DataFrame,
+    settings: OutlierSettings,
+    setting_file: str,
+    review: ReviewContext | None = None,
+    missing_codes: pl.DataFrame | None = None,
+) -> None:
+    """Inspect outlier columns in the DataFrame.
+
+    Parameters
+    ----------
+    data : pl.DataFrame
+        DataFrame containing the survey data.
+    outliers_data : pl.DataFrame
+        DataFrame containing outlier detection results.
+    settings : OutlierSettings
+        Outlier settings configuration.
+    setting_file : str
+        Path to settings file.
+    review : ReviewContext | None
+        If given, accepted outliers are hidden (unless "Show reviewed" is
+        on) and selecting a row opens the correction form.
+    missing_codes : pl.DataFrame | None
+        The project's missing codes, left out of the statistics and box plot.
+        The record table still shows the values as entered.
+    """
+    if outliers_data.is_empty():
+        st.info(
+            "No outlier columns selected. Please select outlier columns to inspect."
+        )
+        return
+
+    all_columns = data.columns
+
+    include_cols = _build_include_cols(
+        survey_key=settings.survey_key,
+        survey_id=settings.survey_id,
+        survey_date=settings.survey_date,
+        enumerator=settings.enumerator,
+        team=settings.team,
+    )
+
+    # list of outlier columns checked
+    columns_checked_list = (
+        outliers_data.select("column name").unique().to_series().to_list()
+    )
+
+    ic1, _ = st.columns([0.2, 0.8])
+
+    with ic1:
+        selected_col = st.selectbox(
+            label="Select outlier columns to inspect",
+            options=columns_checked_list,
+            help="Select the outlier columns to inspect. "
+            "You can only select one column at a time.",
+            **check_view(setting_file).bind(
+                "outlier_inspect_col", options=columns_checked_list, index=None
+            ),
+        )
+
+        if not selected_col:
+            st.info("Select an outlier column to inspect.")
+            return
+
+        if selected_col not in data.columns:
+            raise ValueError(
+                f"Selected column '{selected_col}' is not present in the data. "
+                "Please select a valid column."
+            )
+        else:
+            include_cols.append(selected_col)
+
+    # create a subset of the data
+    column_data = data.select([selected_col])
+    excluded_codes = None
+    if missing_codes is not None:
+        column_data, excluded_codes = _mask_inspection_column(
+            column_data, selected_col, missing_codes
+        )
+
+    st.subheader(f"Details/Distribution for {selected_col} values")
+    if excluded_codes is not None and not excluded_codes.is_empty():
+        st.warning(_excluded_codes_message(excluded_codes))
+    dc1, _, dc3 = st.columns([0.3, 0.1, 0.6])
+    with dc1:
+        desc_stats = _create_descriptive_stats(column_data)
+        st.dataframe(desc_stats)
+
+    with dc3:
+        box_plot = _create_box_plot(
+            data=column_data[selected_col].to_pandas(),
+            title=selected_col,
+        )
+        st.plotly_chart(box_plot, width="stretch")
+
+    with st.expander(":material/clarify: Show more columns in report", expanded=False):
+        st.info(
+            "Select additional columns to include in the outlier inspection report."
+        )
+        display_options = [
+            col
+            for col in all_columns
+            if col not in include_cols and col != selected_col
+        ]
+        inspect_display_cols = st.multiselect(
+            label="Select columns to display",
+            options=display_options,
+            help="Select the columns to display in the inspection table.",
+            disabled=not selected_col,
+            **check_view(setting_file).bind(
+                "outlier_inspect_display_cols", options=display_options, multi=True
+            ),
+        )
+
+        if inspect_display_cols:
+            include_cols.extend(inspect_display_cols)
+
+    outliers_data = filter_table(
+        _with_review_status(outliers_data, settings, OUTLIERS, review),
+        _render_table_toggles(OUTLIERS, review, setting_file),
+        OUTLIERS,
+    )
+
+    # select columns to display from data
+    display_df = data.select(include_cols)
+    display_df = join_survey_columns(
+        display_df, outliers_data, settings.survey_key, OUTLIERS
+    )
+
+    _render_flags_table(
+        display_df,
+        data,
+        settings,
+        OUTLIERS,
+        review,
+        width="stretch",
+        hide_index=True,
+    )
+
+
+# =============================================================================
+# Streamlit UI - Column Search/Configuration Widgets
+# =============================================================================
+
+
+def _create_search_type_info(search_type_param: str) -> None:
+    """Display info based on the selected search type.
+
+    Parameters
+    ----------
+    search_type_param : str
+        The search type to display info for.
+    """
+    info_messages = {
+        SearchType.EXACT.value: "Select columns that match the exact name. "
+        "You may select multiple columns.",
+        SearchType.STARTSWITH.value: "Select columns that start with the specified pattern. "
+        "You will have to enter the pattern in the input box below.",
+        SearchType.ENDSWITH.value: "Select columns that end with the specified pattern. "
+        "You will have to enter the pattern in the input box below.",
+        SearchType.CONTAINS.value: "Select columns that contain the specified pattern. "
+        "You will have to enter the pattern in the input box below.",
+        SearchType.REGEX.value: "Select columns that match the specified regex pattern. "
+        "You will have to enter the pattern in the input box below.",
+    }
+
+    st.info(info_messages.get(search_type_param, "Unknown search type."))
+
+
+def _render_search_type_selection(
+    numeric_columns: list[str],
+) -> tuple[str, str | None, list[str], bool]:
+    """Render search type selection UI.
+
+    Parameters
+    ----------
+    numeric_columns : list[str]
+        List of numeric columns.
+
+    Returns
+    -------
+    tuple[str, str | None, list[str], bool]
+        Search type, pattern, selected columns, and lock_cols flag.
+    """
+    search_type_options = [e.value for e in SearchType]
+    search_type = st.selectbox(
+        label="Search type",
+        options=search_type_options,
+        index=0,
+        help="Select the type of search to perform on the column names.",
+    )
+
+    _create_search_type_info(search_type)
+
+    if search_type == SearchType.EXACT.value:
+        outlier_cols_sel = st.multiselect(
+            label="Select columns to check",
+            options=numeric_columns,
+            default=None,
+            help="Select column or group of columns to check for outliers.",
+        )
+        pattern, lock_cols = None, None
+        return search_type, pattern, outlier_cols_sel, lock_cols
+    else:
+        pattern = st.text_input(
+            label="Enter pattern to match column names",
+            placeholder="Enter pattern to match column names",
+            help="Enter the pattern to match column names based on the "
+            "selected search type.",
+        )
+        if pattern:
+            outlier_cols_patt = expand_col_names(
+                numeric_columns, pattern, search_type=search_type
+            )
+        else:
+            outlier_cols_patt = []
+
+        st.write(
+            "**Columns Selected:** ",
+            ", ".join(outlier_cols_patt) if outlier_cols_patt else "None",
+        )
+        return search_type, pattern, outlier_cols_patt, None
+
+
+def _render_column_grouping_options(
+    outlier_cols: list[str], search_type: str
+) -> tuple[bool, bool]:
+    """Render column grouping and locking options.
+
+    Parameters
+    ----------
+    outlier_cols : list[str]
+        Selected outlier columns.
+    search_type : str
+        Search type used.
+
+    Returns
+    -------
+    tuple[bool, bool]
+        Group columns flag and lock columns flag.
+    """
+    gc1, gc2 = st.columns([0.5, 0.5])
+    with gc1:
+        group_cols = st.toggle(
+            label="Group columns",
+            key="group_outlier_cols",
+            help="Group selected columns together for outlier detection.",
+            disabled=not outlier_cols or len(outlier_cols) < 2,
+        )
+    with gc2:
+        lock_cols = st.toggle(
+            label="Lock column selection",
+            key="outlier_cols_lock",
+            help="Lock the selected columns to prevent changes.",
+            disabled=not outlier_cols
+            or len(outlier_cols) < 2
+            or search_type == SearchType.EXACT.value,
+        )
+    return group_cols, lock_cols
+
+
+def _render_outlier_options() -> tuple[bool, dict | None, bool]:
+    """Render outlier detection options UI.
+
+    Returns
+    -------
+    tuple[bool, dict | None, bool]
+        Enable outliers flag, outlier settings dict, and validation status.
+    """
+    with st.container(border=True):
+        st.write("**Outlier Options:**")
+        enable_outliers = st.toggle(
+            "Enable Outlier Checks", key="enable_coutlier", value=True
+        )
+        if enable_outliers:
+            oc1, oc2 = st.columns([0.5, 0.5])
+            with oc1:
+                outlier_method = st.selectbox(
+                    label="Select outlier detection method",
+                    options=[e.value for e in OutlierMethod],
+                    index=0,
+                    help="Select the method to use for outlier detection.",
+                    key="outlier_method",
+                )
+            with oc2:
+                default_multiplier = (
+                    OutlierMultipliers.IQR.value
+                    if outlier_method == OutlierMethod.IQR.value
+                    else OutlierMultipliers.SD.value
+                )
+                outlier_multiplier = st.number_input(
+                    label="Select multiplier for outlier detection",
+                    min_value=0.1,
+                    max_value=10.0,
+                    value=default_multiplier,
+                    step=0.1,
+                    help="Select the multiplier to use for outlier detection.",
+                    key="outlier_multiplier",
+                )
+
+            outlier_threshold_default = (
+                OutlierThresholds.SD.value
+                if outlier_method == OutlierMethod.SD.value
+                else OutlierThresholds.IQR.value
+            )
+            outlier_threshold = st.number_input(
+                label="Outlier threshold (%)",
+                min_value=1,
+                value=outlier_threshold_default,
+                help="Set the minimum number values required to flag outliers in the column.",
+                key="outlier_threshold",
+            )
+
+            outlier_settings, valid_outlier = _validate_outlier_settings(
+                {
+                    "outlier_method": outlier_method,
+                    "outlier_multiplier": outlier_multiplier,
+                    "outlier_threshold": outlier_threshold,
+                }
+            )
+            return enable_outliers, outlier_settings, valid_outlier
+        else:
+            return False, None, True
+
+
+def _render_constraint_options() -> tuple[dict, bool]:
+    """Render constraint bounds options UI.
+
+    Returns
+    -------
+    tuple[dict, bool]
+        Constraint settings dict and validation status.
+    """
+    with st.container(border=True):
+        st.write("**Constraint Options:**")
+
+        hc1, hc2 = st.columns(2)
+        with hc1:
+            hard_min = st.number_input(
+                label="(OPTIONAL) Hard minimum",
+                help="(OPTIONAL) Hard minimum value for outlier detection.",
+                value=None,
+            )
+        with hc2:
+            hard_max = st.number_input(
+                label="(OPTIONAL) Hard maximum",
+                help="(OPTIONAL) Hard maximum value for outlier detection.",
+                value=None,
+            )
+
+        sc1, sc2 = st.columns(2)
+        with sc1:
+            soft_min = st.number_input(
+                label="(OPTIONAL) Soft minimum",
+                help="(OPTIONAL) Soft minimum value for outlier detection.",
+                value=None,
+            )
+        with sc2:
+            soft_max = st.number_input(
+                label="(OPTIONAL) Soft maximum",
+                help="(OPTIONAL) Soft maximum value for outlier detection.",
+                value=None,
+            )
+
+        return _validate_constraint_settings(
+            {
+                "hard_min": hard_min,
+                "soft_min": soft_min,
+                "soft_max": soft_max,
+                "hard_max": hard_max,
+            }
+        )
+
+
+# =============================================================================
+# Streamlit UI - Column Configuration (CRUD)
+# =============================================================================
+#
+# NOTE: although these functions read as "settings" (they configure outlier
+# columns), they are only ever invoked from `outliers_report` via
+# `_render_outlier_column_actions` -- never from `outliers_report_settings` --
+# so they live here in report_ui rather than in settings_ui.
+
+
+def _render_outlier_column_actions(
+    project_id: str, page_name_id: str, numeric_columns: list[str]
+) -> None:
+    """Render the outlier column configuration UI.
+
+    Parameters
+    ----------
+    project_id : str
+        Project identifier.
+    page_name_id : str
+        Page name identifier.
+    numeric_columns : list[str]
+        List of numeric columns.
+    """
+    outlier_settings = _load_outlier_settings(project_id, page_name_id)
+
+    os1, os2, _ = st.columns([0.4, 0.3, 0.3])
+    with os1:
+        st.button(
+            "Add Outlier/Constraint Column",
+            key="add_outlier_column",
+            help="Add a new outlier column configuration.",
+            width="stretch",
+            type="primary",
+            on_click=_add_outlier_column,
+            args=(
+                project_id,
+                page_name_id,
+                numeric_columns,
+            ),
+        )
+    with os2:
+        _delete_outlier_column(project_id, page_name_id, outlier_settings)
+
+    if outlier_settings.is_empty():
+        st.info(
+            "Use the :material/add: button to add columns to check for outliers and the "
+            ":material/delete: button to remove columns."
+        )
+    else:
+        _render_outlier_settings_table(outlier_settings)
+
+
+@st.dialog("Add Outlier & Constraint Column(s)", width="medium")
+def _add_outlier_column(
+    project_id: str, page_name_id: str, numeric_columns: list[str]
+) -> None:
+    """Dialog to add a new outlier column configuration.
+
+    Parameters
+    ----------
+    project_id : str
+        Project identifier.
+    page_name_id : str
+        Page name identifier.
+    numeric_columns : list[str]
+        List of numeric columns.
+    """
+    # Render search type selection
+    search_type, pattern, outlier_cols, lock_cols_initial = (
+        _render_search_type_selection(numeric_columns)
+    )
+
+    if outlier_cols:
+        # Render grouping options
+        group_cols, lock_cols = _render_column_grouping_options(
+            outlier_cols, search_type
+        )
+        if lock_cols_initial is not None:
+            lock_cols = lock_cols_initial
+
+        # Render outlier options
+        enable_outliers, outlier_settings, valid_outlier = _render_outlier_options()
+
+        # Render constraint options
+        constraint_settings, valid_constraint = _render_constraint_options()
+
+        button_disabled = (
+            not outlier_cols
+            or (enable_outliers and not valid_outlier)
+            or not valid_constraint
+        )
+        if st.button(
+            "Add Outlier & Constraint Configuration",
+            key="confirm_add_outlier_column",
+            type="primary",
+            width="stretch",
+            disabled=button_disabled,
+        ):
+            _update_outlier_column_config(
+                project_id,
+                page_name_id,
+                search_type,
+                pattern,
+                outlier_cols,
+                group_cols,
+                lock_cols,
+                enable_outliers,
+                outlier_settings,
+                constraint_settings,
+            )
+
+            st.success("Outlier & Constraint configuration added successfully.")
+            st.rerun()
+
+
+def _validate_settings(
+    settings: dict,
+    model_cls: type[BaseModel],
+    format_error: Callable[[ValidationError], str],
+) -> tuple[BaseModel | None, bool]:
+    """Validate a settings dict against a Pydantic model, showing errors via st.error.
+
+    Shared by ``_validate_constraint_settings`` and ``_validate_outlier_settings``,
+    which differ only in which model and error formatter they use.
+
+    Parameters
+    ----------
+    settings : dict
+        Dictionary of settings to validate.
+    model_cls : type[BaseModel]
+        Pydantic model class to validate against.
+    format_error : Callable[[ValidationError], str]
+        Function that converts a ValidationError into a user-friendly message.
+
+    Returns
+    -------
+    tuple[BaseModel | None, bool]
+        Validated model instance and validation status.
+    """
+    try:
+        return model_cls(**settings), True
+    except ValidationError as e:
+        st.error(format_error(e))
+        return None, False
+
+
+def _validate_constraint_settings(
+    constraint_settings: dict,
+) -> tuple[ConstraintBounds | None, bool]:
+    """Validate constraint settings using Pydantic model.
+
+    Parameters
+    ----------
+    constraint_settings : dict[str, Any]
+        Dictionary containing constraint settings.
+
+    Returns
+    -------
+    tuple[ConstraintBounds | None, bool]
+        Validated constraint settings and validation status.
+    """
+    return _validate_settings(
+        constraint_settings, ConstraintBounds, _format_constraint_validation_error
+    )
+
+
+def _validate_outlier_settings(
+    outlier_settings: dict,
+) -> tuple[OutlierOptionsConfig | None, bool]:
+    """Validate outlier settings using Pydantic model.
+
+    Parameters
+    ----------
+    outlier_settings : dict[str, Any]
+        Dictionary containing outlier settings.
+
+    Returns
+    -------
+    tuple[OutlierOptionsConfig | None, bool]
+        Validated outlier settings and validation status.
+    """
+    return _validate_settings(
+        outlier_settings, OutlierOptionsConfig, _format_outlier_validation_error
+    )
+
+
+def _format_constraint_validation_error(e: ValidationError) -> str:
+    """Convert Pydantic ValidationError to user-friendly message.
+
+    Parameters
+    ----------
+    e : ValidationError
+        Pydantic validation error.
+
+    Returns
+    -------
+    str
+        User-friendly error message.
+    """
+    errors = []
+    for error in e.errors():
+        field = " -> ".join(str(loc) for loc in error["loc"])
+        msg = error["msg"]
+
+        # Customize messages based on error type
+        if error["type"] == "float_not_finite":
+            errors.append(
+                f"• {field}: Value must be a finite number (not NaN or infinity)"
+            )
+        elif error["type"] == "value_error":
+            errors.append(f"• {msg}")  # Your custom validation messages
+        else:
+            errors.append(f"• {field}: {msg}")
+
+    return "Invalid constraint configuration:\n" + "\n".join(errors)
+
+
+def _format_outlier_validation_error(e: ValidationError) -> str:
+    """Convert Pydantic ValidationError to user-friendly message.
+
+    Parameters
+    ----------
+    e : ValidationError
+        Pydantic validation error.
+
+    Returns
+    -------
+    str
+        User-friendly error message.
+    """
+    errors = []
+    for error in e.errors():
+        field = " -> ".join(str(loc) for loc in error["loc"])
+        msg = error["msg"]
+
+        # Customize messages based on error type
+        if error["type"] == "value_error.number.not_ge":
+            errors.append(
+                f"• {field}: Value must be greater than or equal to the minimum allowed."
+            )
+        elif error["type"] == "value_error.number.not_le":
+            errors.append(
+                f"• {field}: Value must be less than or equal to the maximum allowed."
+            )
+        else:
+            errors.append(f"• {field}: {msg}")
+
+    return "Invalid outlier configuration:\n" + "\n".join(errors)
+
+
+def _update_outlier_column_config(
+    project_id: str,
+    page_name_id: str,
+    search_type: str,
+    pattern: str | None,
+    outlier_cols: list[str],
+    group_cols: bool,
+    lock_cols: bool,
+    outlier_enabled: bool,
+    outlier_settings: OutlierOptionsConfig | None,
+    constraint_settings: ConstraintBounds | None,
+) -> None:
+    """Update the outlier column configuration in the database.
+
+    Parameters
+    ----------
+    project_id : str
+        Project identifier.
+    page_name_id : str
+        Page name identifier.
+    search_type : str
+        Search type used.
+    pattern : str | None
+        Pattern for column matching.
+    outlier_cols : list[str]
+        Selected columns.
+    group_cols : bool
+        Whether to group columns.
+    lock_cols : bool
+        Whether to lock column selection.
+    outlier_enabled : bool
+        Whether outlier detection is enabled.
+    outlier_settings : OutlierOptionsConfig | None
+        Outlier detection settings.
+    constraint_settings : ConstraintBounds | None
+        Constraint bounds settings.
+    """
+    # get existing config
+    existing_config = _load_outlier_settings(project_id, page_name_id)
+
+    # Prepare new configurations
+    new_config = {
+        "search_type": search_type,
+        "pattern": pattern,
+        "column_name": [outlier_cols],
+        "grouped_columns": group_cols,
+        "locked": lock_cols,
+        "outlier_enabled": outlier_enabled,
+        "outlier_method": outlier_settings.outlier_method if outlier_settings else None,
+        "outlier_multiplier": outlier_settings.outlier_multiplier
+        if outlier_settings
+        else None,
+        "outlier_threshold": outlier_settings.outlier_threshold
+        if outlier_settings
+        else None,
+        "hard_min": constraint_settings.hard_min if constraint_settings else None,
+        "soft_min": constraint_settings.soft_min if constraint_settings else None,
+        "soft_max": constraint_settings.soft_max if constraint_settings else None,
+        "hard_max": constraint_settings.hard_max if constraint_settings else None,
+    }
+
+    schema = {
+        "search_type": pl.Utf8,
+        "pattern": pl.Utf8,
+        "column_name": pl.List(pl.Utf8),
+        "grouped_columns": pl.Boolean,
+        "locked": pl.Boolean,
+        "outlier_enabled": pl.Boolean,
+        "outlier_method": pl.Utf8,
+        "outlier_multiplier": pl.Float64,
+        "outlier_threshold": pl.Int64,
+        "hard_min": pl.Float64,
+        "soft_min": pl.Float64,
+        "soft_max": pl.Float64,
+        "hard_max": pl.Float64,
+    }
+
+    # Append new configurations to existing polars DataFrame
+    new_config_df = pl.DataFrame(new_config, schema=schema)
+    if not existing_config.is_empty():
+        formatted_existing_config = _ensure_column_formats(existing_config)
+        updated_config = pl.concat(
+            [formatted_existing_config, new_config_df], how="vertical"
+        )
+    else:
+        updated_config = new_config_df
+
+    # Save updated configurations back to the database
+    duckdb_save_table(
+        project_id,
+        updated_config,
+        check_table_name(OUTLIERS_TABLE, page_name_id),
+        db_name="logs",
+    )
+
+
+def _ensure_column_formats(
+    outlier_settings: pl.DataFrame,
+) -> pl.DataFrame:
+    """Ensure correct data types for outlier settings DataFrame.
+
+    Parameters
+    ----------
+    outlier_settings : pl.DataFrame
+        Outlier settings configuration.
+
+    Returns
+    -------
+    pl.DataFrame
+        DataFrame with ensured data types.
+    """
+    return outlier_settings.with_columns(
+        [
+            pl.col("search_type").cast(pl.Utf8),
+            pl.col("pattern").cast(pl.Utf8),
+            pl.col("column_name").cast(pl.List(pl.Utf8)),
+            pl.col("grouped_columns").cast(pl.Boolean),
+            pl.col("locked").cast(pl.Boolean),
+            pl.col("outlier_enabled").cast(pl.Boolean),
+            pl.col("outlier_method").cast(pl.Utf8),
+            pl.col("outlier_multiplier").cast(pl.Float64),
+            pl.col("outlier_threshold").cast(pl.Int64),
+            pl.col("hard_min").cast(pl.Float64),
+            pl.col("soft_min").cast(pl.Float64),
+            pl.col("soft_max").cast(pl.Float64),
+            pl.col("hard_max").cast(pl.Float64),
+        ]
+    )
+
+
+def _render_outlier_settings_table(outlier_settings: pl.DataFrame) -> None:
+    """Render the outlier settings table in Streamlit.
+
+    Parameters
+    ----------
+    outlier_settings : pl.DataFrame
+        Outlier settings configuration.
+    """
+    with st.expander("Outlier & Constraint Column Settings", expanded=False):
+        st.dataframe(
+            outlier_settings,
+            width="stretch",
+            hide_index=True,
+            column_config={
+                "search_type": st.column_config.Column("Search Type"),
+                "pattern": st.column_config.Column("Pattern"),
+                "column_name": st.column_config.Column("Column Name(s)"),
+                "grouped_columns": st.column_config.CheckboxColumn("Grouped Columns"),
+                "locked": st.column_config.CheckboxColumn("Locked"),
+                "outlier_enabled": st.column_config.CheckboxColumn("Outlier Enabled"),
+                "outlier_method": st.column_config.Column("Outlier Method"),
+                "outlier_multiplier": st.column_config.NumberColumn(
+                    "Outlier Multiplier"
+                ),
+                "outlier_threshold": st.column_config.NumberColumn("Outlier Threshold"),
+                "hard_min": st.column_config.NumberColumn("Hard Min"),
+                "soft_min": st.column_config.NumberColumn("Soft Min"),
+                "soft_max": st.column_config.NumberColumn("Soft Max"),
+                "hard_max": st.column_config.NumberColumn("Hard Max"),
+            },
+        )
+
+
+def _load_outlier_settings(project_id: str, page_name_id: str) -> pl.DataFrame:
+    """Load the outlier column settings for a page.
+
+    Drops the `index` helper column older versions saved with the settings.
+    The report saves the settings back on every render, which removes it from
+    the stored table too.
+    """
+    return duckdb_get_table(
+        project_id, check_table_name(OUTLIERS_TABLE, page_name_id), "logs"
+    ).drop("index", strict=False)
+
+
+def _review_context(
+    project_id: str, alias: str | None, survey_key: str
+) -> ReviewContext | None:
+    """Return the context for reviewing flags, or None if they can't be reviewed.
+
+    Flags can't be reviewed without a dataset alias, or when the Survey KEY
+    column has the name of a review results column.
+    """
+    if not alias or survey_key in REVIEW_COLUMNS:
+        return None
+    return ReviewContext(CorrectionProcessor(project_id), alias)
+
+
+@dataclass(frozen=True)
+class _ReviewedFlags:
+    """Outlier and constraint results with accepted flags cleared.
+
+    `flagged_before_correction` holds the (KEY, column) cells each check
+    flags in the uncorrected data, by check type, so only corrections of
+    flagged values count as resolved.
+    """
+
+    outliers: pl.DataFrame
+    violations: pl.DataFrame
+    survey_key: str
+    flagged_before_correction: dict[str, set[tuple]]
+
+    @property
+    def results(self) -> list[tuple[pl.DataFrame, FlagCheck]]:
+        """Each check's results with the check, for the review helpers."""
+        return [(self.outliers, OUTLIERS), (self.violations, CONSTRAINTS)]
+
+
+@dataclass(frozen=True)
+class _Flags:
+    """The checks' results before review, and what they were computed with."""
+
+    outliers: pl.DataFrame
+    violations: pl.DataFrame
+    settings: OutlierSettings
+    column_config: pl.DataFrame
+    missing_codes: Any
+
+
+def _computed_flags(
+    project_id: str,
+    page_name_id: str,
+    data: pl.DataFrame,
+    survey_columns: ColumnByType,
+    setting_file: str,
+    config: dict,
+) -> _Flags | None:
+    """Compute the outliers and constraint violations with the saved settings.
+
+    None when no outlier columns are configured.
+
+    Raises
+    ------
+    ValueError
+        If the saved settings no longer fit the data (see
+        `settings_no_longer_fit`).
+    """
+    column_config = _load_outlier_settings(project_id, page_name_id)
+    if column_config.is_empty():
+        return None
+    try:
+        settings = clear_unavailable_columns(
+            load_default_settings(setting_file, OutlierSettings(**config)),
+            survey_columns.categorical_columns,
+            survey_columns.datetime_columns,
+        )
+        missing_codes = load_missing_codes_from_db(project_id)
+        outlier_data = compute_outlier_output(
+            data, settings, column_config, missing_codes=missing_codes
+        )
+        violations = compute_constraint_violations(
+            data, settings, column_config, missing_codes=missing_codes
+        )
+    except (pl.exceptions.PolarsError, ValidationError, ValueError) as exc:
+        raise settings_no_longer_fit("Outliers", exc) from exc
+    return _Flags(outlier_data, violations, settings, column_config, missing_codes)
+
+
+def _flagged_before_correction(
+    flags: _Flags, review: ReviewContext
+) -> dict[str, set[tuple]]:
+    """Return the cells each check flags in the uncorrected data, by check type."""
+    uncorrected = review.processor.get_uncorrected_data(review.alias)
+    if uncorrected.width == 0:
+        return {}
+    settings, columns = flags.settings, flags.column_config
+    try:
+        return flagged_cells(
+            [
+                (
+                    compute_outlier_output(
+                        uncorrected,
+                        settings,
+                        columns,
+                        missing_codes=flags.missing_codes,
+                    ),
+                    OUTLIERS,
+                ),
+                (
+                    compute_constraint_violations(
+                        uncorrected,
+                        settings,
+                        columns,
+                        missing_codes=flags.missing_codes,
+                    ),
+                    CONSTRAINTS,
+                ),
+            ],
+            settings.survey_key,
+        )
+    except (pl.exceptions.PolarsError, ValueError) as exc:
+        raise settings_no_longer_fit("Outliers", exc) from exc
+
+
+def _reviewed(
+    flags: _Flags,
+    review: ReviewContext | None,
+    flagged_before: dict[str, set[tuple]] | None = None,
+) -> _ReviewedFlags:
+    """Mark and clear the flags `review` accepts or corrects.
+
+    When values were corrected, the checks also run on the uncorrected data
+    to find which corrected values were flagged, unless `flagged_before`
+    already gives them.
+    """
+    settings = flags.settings
+    outlier_data = clear_reviewed_flags(
+        _with_review_status(flags.outliers, settings, OUTLIERS, review), OUTLIERS
+    )
+    violations = flags.violations
+    if not violations.is_empty():
+        violations = clear_reviewed_flags(
+            _with_review_status(violations, settings, CONSTRAINTS, review),
+            CONSTRAINTS,
+        )
+    if flagged_before is None:
+        flagged_before = (
+            _flagged_before_correction(flags, review)
+            if review is not None
+            and has_corrected_cells(
+                [(outlier_data, OUTLIERS), (violations, CONSTRAINTS)]
+            )
+            else {}
+        )
+    return _ReviewedFlags(outlier_data, violations, settings.survey_key, flagged_before)
+
+
+@dataclass(frozen=True)
+class OutliersBasis:
+    """What the outliers headline computed, for `outliers_delta` to reuse."""
+
+    flags: _Flags
+    review: ReviewContext | None
+    reviewed: _ReviewedFlags
+
+
+def _outliers_basis(
+    project_id: str,
+    page_name_id: str,
+    data: pl.DataFrame,
+    survey_columns: ColumnByType,
+    setting_file: str,
+    config: dict,
+    alias: str | None,
+) -> OutliersBasis | None:
+    """Compute the check's results without rendering it, for the health rows.
+
+    Uses the saved settings and outlier columns, and clears accepted flags,
+    as the Outliers tab does. None when no outlier columns are configured.
+
+    Raises
+    ------
+    ValueError
+        If the saved settings no longer fit the data (see
+        `settings_no_longer_fit`).
+    """
+    flags = _computed_flags(
+        project_id, page_name_id, data, survey_columns, setting_file, config
+    )
+    if flags is None:
+        return None
+    review = _review_context(project_id, alias, flags.settings.survey_key)
+    return OutliersBasis(flags, review, _reviewed(flags, review))
+
+
+def _outstanding(flags: _ReviewedFlags) -> tuple[int, int]:
+    """Return the outliers and constraint violations not yet reviewed."""
+    outliers = (
+        0
+        if flags.outliers.is_empty()
+        else _compute_outlier_metrics(flags.outliers, None).total_outliers
+    )
+    violations = (
+        0
+        if flags.violations.is_empty()
+        else _compute_constraint_metrics(flags.violations).total_violations
+    )
+    return outliers, violations
+
+
+def _on_keys(flags: _ReviewedFlags, keys: pl.Series) -> _ReviewedFlags:
+    """Keep the results of the submissions with a KEY in `keys`."""
+
+    def kept(frame: pl.DataFrame) -> pl.DataFrame:
+        if frame.is_empty():
+            return frame
+        return frame.filter(
+            pl.col(flags.survey_key).cast(pl.String).is_in(keys.implode())
+        )
+
+    return replace(  # NOSONAR(S5886): replace keeps the type
+        flags, outliers=kept(flags.outliers), violations=kept(flags.violations)
+    )
+
+
+def _plural(count: int, noun: str) -> str:
+    return f"{count:,} {noun}{'' if count == 1 else 's'}"
+
+
+def outliers_headline(
+    project_id: str,
+    page_name_id: str,
+    data: pl.DataFrame,
+    survey_columns: ColumnByType,
+    setting_file: str,
+    config: dict,
+    alias: str | None,
+) -> CheckHeadline | None:
+    """Return the outliers headline for Summary's check health row.
+
+    Outstanding: the check's "Total Outliers" plus "Total Violations",
+    leaving out accepted flags, with each total and the share of checked
+    values flagged in the detail. Resolved: the flags accepted or corrected
+    (see `count_resolved_flags`). Computed without rendering the tab.
+
+    Parameters
+    ----------
+    project_id : str
+        The project identifier.
+    page_name_id : str
+        Page name identifier.
+    data : pl.DataFrame
+        The survey data of the page.
+    survey_columns : ColumnByType
+        Columns of `data` by type, which saved settings must still match.
+    setting_file : str
+        Path to the page settings file.
+    config : dict
+        The page configuration the Outliers tab starts from.
+    alias : str | None
+        The survey dataset alias, whose correction log holds the accepted
+        flags. If None, every flag is counted.
+
+    Returns
+    -------
+    CheckHeadline | None
+        For example 4 outstanding, "3 outliers (1.4% of values), 1
+        constraint violation". The share is left out when no values were
+        checked. None when no outlier columns are configured.
+
+    Raises
+    ------
+    ValueError
+        If the saved settings no longer fit the data, so Summary shows the
+        row as an error with the reason.
+    """
+    basis = _outliers_basis(
+        project_id, page_name_id, data, survey_columns, setting_file, config, alias
+    )
+    if basis is None:
+        return None
+    flags = basis.reviewed
+    outliers, violations = _outstanding(flags)
+    percent = flagged_value_percent(flags.outliers)
+    rate = "" if percent is None else f" ({percent:.1f}% of values)"
+    return CheckHeadline(
+        f"{outliers + violations:,}",
+        f"{_plural(outliers, 'outlier')}{rate}, "
+        f"{_plural(violations, 'constraint violation')}",
+        outstanding=outliers + violations,
+        resolved=count_resolved_flags(
+            flags.results, flags.survey_key, flags.flagged_before_correction
+        ),
+        basis=basis,
+    )
+
+
+def outliers_delta(
+    project_id: str,
+    page_name_id: str,
+    data: pl.DataFrame,
+    survey_columns: ColumnByType,
+    setting_file: str,
+    config: dict,
+    alias: str | None,
+    window: DeltaWindow,
+    basis: OutliersBasis | None = None,
+) -> CheckDelta | None:
+    """Return the outliers row's change over the comparison period, for Summary.
+
+    Outstanding: the flags `outliers_headline` counts on submissions dated
+    after the period start (`window.as_of`), on the corrected data. The
+    flags are not recomputed on the earlier submissions alone, since that
+    would move the IQR and standard deviation bounds. Resolved: the flags
+    accepted or corrected by log entries made after the period start that
+    are still in effect, unless the cell's flag was already accepted or
+    corrected by the period start (see
+    `ReviewContext.resolved_by_period_start`); undone corrections and
+    acceptances that no longer apply drop out. Takes the parameters of
+    `outliers_headline`, the window (the period start and Summary's date
+    column), and `basis`: the headline's basis, computed on `data`, so the
+    flags are not computed again; None computes them.
+
+    Returns
+    -------
+    CheckDelta | None
+        None when no outlier columns are configured or Summary's date column
+        is not in the data. The outstanding change is None when the Survey
+        KEY column is not in the data, as flags cannot be matched to their
+        submissions' dates. The resolved change is None without a review
+        context, as the headline's is 0.
+
+    Raises
+    ------
+    ValueError
+        If the saved settings no longer fit the data.
+    """
+    if basis is None:
+        basis = _outliers_basis(
+            project_id, page_name_id, data, survey_columns, setting_file, config, alias
+        )
+    if basis is None:
+        return None
+    flags, review, now = basis.flags, basis.review, basis.reviewed
+    key, date_col, as_of = flags.settings.survey_key, window.survey_date, window.as_of
+    if not date_col or date_col not in data.columns:
+        return None
+    new = None
+    if key and key in data.columns:
+        new_keys = data.filter(dated_after(data, date_col, as_of))[key]
+        new = sum(_outstanding(_on_keys(now, new_keys.cast(pl.String))))
+    resolved = None
+    if review is not None:
+        recent_review = ReviewContext(
+            review.processor, review.alias, entries_after=as_of
+        )
+        recent = _reviewed(flags, recent_review, now.flagged_before_correction)
+        # A cell resolved by the period start was flagged before
+        # correction, but a correction in the period does not resolve it.
+        unresolved_then = {
+            check_type: cells - recent_review.resolved_by_period_start(check_type)
+            for check_type, cells in now.flagged_before_correction.items()
+        }
+        resolved = count_resolved_flags(recent.results, key, unresolved_then)
+    return CheckDelta(new, resolved=resolved)
+
+
+def _delete_outlier_column(
+    project_id: str, page_name_id: str, outliers_settings: pl.DataFrame
+) -> None:
+    """Render delete outlier column button and handle deletion.
+
+    Parameters
+    ----------
+    project_id : str
+        Project identifier.
+    page_name_id : str
+        Page name identifier.
+    outliers_settings : pl.DataFrame
+        Current outlier settings.
+    """
+    with (
+        st.popover(
+            label=":material/delete: Delete outlier column",
+            width="stretch",
+        ),
+    ):
+        st.markdown("#### Remove outlier columns")
+
+        if outliers_settings.is_empty():
+            st.info("No outlier columns have been added yet. ")
+        else:
+            settings_columns = outliers_settings.columns
+            outliers_settings = outliers_settings.with_row_index("row_nr").with_columns(
+                (
+                    pl.col("row_nr").cast(pl.Utf8)
+                    + " - "
+                    + pl.col("search_type")
+                    + " - "
+                    + pl.col("pattern").fill_null("")
+                ).alias("composite_index")
+            )
+
+            unique_index = (
+                outliers_settings["composite_index"]
+                .unique(maintain_order=True)
+                .to_list()
+            )
+
+            selected_index = st.selectbox(
+                label="Select outlier column to remove",
+                options=unique_index,
+                help="Select the outlier column to remove from the list.",
+            )
+
+            if st.button(
+                label="Confirm deletion",
+                type="primary",
+                width="stretch",
+                help="Click to confirm deletion of the selected outlier column.",
+                key="confirm_delete_outlier_column",
+                disabled=not selected_index,
+            ):
+                updated_settings = outliers_settings.filter(
+                    pl.col("composite_index") != selected_index
+                ).select(settings_columns)
+
+                duckdb_save_table(
+                    project_id,
+                    updated_settings,
+                    check_table_name(OUTLIERS_TABLE, page_name_id),
+                    "logs",
+                )
+
+                st.rerun()
+
+
+# =============================================================================
+# Main Report Function
+# =============================================================================
+
+
+def outliers_settings_section(
+    setting_file: str, config: dict, survey_columns: ColumnByType
+) -> OutlierSettings:
+    """Draw the check's settings panel and return the settings.
+
+    The report starts with it; the check page also shows it alone under the
+    empty state when the check does not apply, so it stays reachable.
+    """
+    with reset_filters_beside(check_view(setting_file)):
+        return outliers_report_settings(
+            setting_file,
+            OutlierSettings(**config),
+            survey_columns.categorical_columns,
+            survey_columns.datetime_columns,
+        )
+
+
+def outliers_report(
+    project_id: str,
+    page_name_id: str,
+    data: pl.DataFrame,
+    setting_file: str,
+    config: dict,
+    survey_columns: ColumnByType,
+    alias: str | None = None,
+) -> None:
+    """Create a comprehensive outliers report.
+
+    Parameters
+    ----------
+    project_id : str
+        The project identifier.
+    page_name_id : str
+        Page name identifier.
+    data : pd.DataFrame
+        DataFrame containing the survey data.
+    setting_file : str
+        Path to settings file.
+    config : dict
+        Configuration dictionary.
+    survey_columns : ColumnByType
+        Columns of `data` by type.
+    alias : str | None
+        The survey dataset alias. If given, flagged values can be corrected
+        or accepted from the results tables, and accepted flags are hidden
+        and left out of the metrics.
+    """
+    # get column info
+    categorical_columns = survey_columns.categorical_columns
+    numeric_columns = survey_columns.numeric_columns
+
+    st.title("Outliers and Constraints Report")
+    _show_saved_toast()
+
+    if is_demo_project():
+        demo_callout(
+            "This check tests your survey data against two types of rules:\n\n"
+            "- **Constraint Violations**: Records that breach hard or soft numeric bounds "
+            "you define (e.g., age below 0 or above 120).\n"
+            "- **Outliers**: Records flagged by a statistical method (IQR or Standard "
+            "Deviation) as unusually high or low.\n\n"
+            "Start by reviewing the :material/settings: **settings** panel — your columns "
+            "are pre-filled. Then use **Add Outlier/Constraint Column** to configure "
+            "which columns to check."
+        )
+
+    outliers_settings = outliers_settings_section(setting_file, config, survey_columns)
+    review = _review_context(project_id, alias, outliers_settings.survey_key)
+    if alias and review is None:
+        st.warning(
+            f"Flags can't be corrected or accepted on this page because the "
+            f"Survey KEY column is named '{outliers_settings.survey_key}', "
+            "which this report uses for review results. Rename the column to "
+            "review flags here."
+        )
+
+    # Outlier columns configuration
+    st.subheader("Outlier/Constraint Columns Configuration")
+
+    if is_demo_project():
+        demo_callout(
+            "Click **Add Outlier/Constraint Column** to select which numeric columns to "
+            "analyse. In the dialog that opens:\n\n"
+            "1. Leave **Search type** as **exact** and, under **Select columns to "
+            f"check**, select **{DemoColumn.AGE}**.\n"
+            "2. Under **Outlier Options**, keep the default Interquartile Range (IQR) "
+            "method (multiplier 1.5, threshold 20).\n"
+            "3. Under **Constraint Options**, enter bounds for respondent age: "
+            f"**(OPTIONAL) Hard minimum = {DEMO_AGE_BOUNDS.hard_min}**, "
+            f"**(OPTIONAL) Soft minimum = {DEMO_AGE_BOUNDS.soft_min}**, "
+            f"**(OPTIONAL) Soft maximum = {DEMO_AGE_BOUNDS.soft_max}** and "
+            f"**(OPTIONAL) Hard maximum = {DEMO_AGE_BOUNDS.hard_max}**. "
+            "Hard bounds flag impossible values; soft bounds flag values that are "
+            "unusual but may be legitimate.\n"
+            "4. Click **Add Outlier & Constraint Configuration** to save.\n\n"
+            "Then click **Add Outlier/Constraint Column** again, select "
+            f"**{DemoColumn.HOUSEHOLD_COUNT}** and **{DemoColumn.LAND_ACRE}**, leave "
+            "the constraint bounds empty and save. A few households report far more "
+            "land or members than the rest, so outliers show below."
+        )
+
+    _render_outlier_column_actions(project_id, page_name_id, numeric_columns)
+
+    # get outlier column config
+    outliers_column_config = _load_outlier_settings(project_id, page_name_id)
+
+    if outliers_column_config.is_empty():
+        return
+
+    # update lock columns if needed
+    outliers_column_config = _update_unlocked_cols(
+        outliers_column_config,
+        categorical_columns,
+    )
+
+    # save updated config
+    duckdb_save_table(
+        project_id,
+        outliers_column_config,
+        check_table_name(OUTLIERS_TABLE, page_name_id),
+        db_name="logs",
+    )
+
+    # Show constraint violations
+    st.write("---")
+    st.title("Constraint Violations")
+
+    if is_demo_project():
+        demo_callout(
+            "This section shows records that breach the **hard or soft bounds** you set "
+            "when configuring columns above.\n\n"
+            "- **Hard Min / Hard Max**: Absolute limits — any value outside these is an "
+            "unambiguous error (e.g., age < 0 or age > 120).\n"
+            "- **Soft Min / Soft Max**: Advisory range — values outside these are "
+            "unexpected but may be legitimate (e.g., a very large land holding).\n\n"
+            "Six metrics show how many records breach each bound type. "
+            "Use **:material/clarify: Show more columns in report** to add context "
+            f"columns such as **{DemoColumn.ENUM_NAME}** or **{DemoColumn.STATE}** to "
+            "the violations table."
+        )
+        accept = DEMO_OUTLIER_ACCEPT
+        demo_callout(
+            "**Accept a value that is unusual but correct.** Each flag can be "
+            "corrected or accepted right here:\n\n"
+            "1. In **Constraint Violations Details**, find KEY "
+            f"**{accept.record.key}** ({DemoColumn.HHID} **{accept.record.hhid}**), "
+            f"where **{accept.column}** is **{accept.value}**: below the soft "
+            "minimum, but a plausible age.\n"
+            + demo_accept_steps(
+                REVIEW_BUTTON_LABEL,
+                "Correct or accept flagged value",
+                "Age confirmed with the respondent",
+            )
+            + "The flag leaves the table and the metrics. "
+            f"{DEMO_SHOW_REVIEWED}. Every review is saved to the Correction Log "
+            "on the **Correct Data** page."
+        )
+
+    # Missing codes such as -99 are neither breaches nor outliers
+    missing_codes = load_missing_codes_from_db(project_id)
+
+    # compute constraint violations
+    constraint_violations = compute_constraint_violations(
+        data,
+        outliers_settings,
+        outliers_column_config,
+        missing_codes=missing_codes,
+    )
+
+    if constraint_violations.is_empty():
+        st.info("No constraint violations detected.")
+
+    else:
+        constraint_violations = _with_review_status(
+            constraint_violations, outliers_settings, CONSTRAINTS, review
+        )
+        # show constraint metrics, leaving out accepted violations
+        _render_constraint_metrics(
+            clear_reviewed_flags(constraint_violations, CONSTRAINTS)
+        )
+
+        # show constraint violations table
+        st.subheader("Constraint Violations Details")
+        _render_constraint_violations_table(
+            data,
+            constraint_violations,
+            outliers_settings,
+            setting_file,
+            review=review,
+        )
+
+    # show outliers metrics
+    st.write("---")
+    st.title("Outliers")
+
+    if is_demo_project():
+        demo_callout(
+            "This section flags records that fall outside the **statistical bounds** "
+            "computed by the method you chose (IQR or Standard Deviation).\n\n"
+            "Four metrics summarise the findings: **Number of columns checked**, "
+            "**Columns with Outliers**, **Total Outliers**, and "
+            "**Enumerators with Outliers**.\n\n"
+            "Under **Inspect Columns**, select a column from **Select outlier columns "
+            f"to inspect** (try **{DemoColumn.LAND_ACRE}**) to see "
+            "its descriptive statistics and a **box plot** showing where flagged values "
+            "sit relative to the distribution. Expand "
+            "**:material/clarify: Show more columns in report** to add context columns "
+            "to the record table below the chart."
+        )
+        fix = DEMO_OUTLIER_CORRECTION
+        demo_callout(
+            "**Correct a value that is wrong.** With "
+            f"**{fix.column}** selected under **Inspect Columns**, find KEY "
+            f"**{fix.record.key}** ({DemoColumn.HHID} **{fix.record.hhid}**) with "
+            f"**{fix.value}** acres, a misplaced decimal point:\n\n"
+            f"1. Click **{REVIEW_BUTTON_LABEL}** on that row.\n"
+            f"2. Set **Select Action** to **modify value**, enter **{fix.new_value}** "
+            "as the **New Value**, add a **Reason for Correction** (e.g., *Decimal "
+            "point misplaced*) and click **Apply**.\n\n"
+            "A message confirms the correction and links to the Correction Log. "
+            f"{DEMO_SHOW_REVIEWED}, or **Show only reviewed** to list just the "
+            "values you have reviewed."
+        )
+
+    # Compute outliers
+    outlier_data = compute_outlier_output(
+        data,
+        outliers_settings,
+        outliers_column_config,
+        missing_codes=missing_codes,
+    )
+
+    if outlier_data.is_empty():
+        st.info("No outliers detected.")
+
+    else:
+        outlier_data = _with_review_status(
+            outlier_data, outliers_settings, OUTLIERS, review
+        )
+        # show outlier metrics, leaving out accepted outliers
+        _render_outlier_metrics(
+            clear_reviewed_flags(outlier_data, OUTLIERS), outliers_settings
+        )
+
+        # show outlier column inspection
+        st.subheader("Inspect Columns")
+
+        _render_outlier_column_inspection(
+            data,
+            outlier_data,
+            outliers_settings,
+            setting_file,
+            review=review,
+            missing_codes=missing_codes,
+        )
+
+    demo_callout(
+        "**Next**: :material/arrow_upward: Scroll up and select **Data integrity → GPS Checks**."
+    )
+
+
+def outliers_status(
+    project_id: str, page_name_id: str, survey_columns: ColumnByType
+) -> StatusResult:
+    """Return the outliers check's status for the check page navigation.
+
+    Not applicable without numeric columns; not set up until an outlier or
+    constraint column is added.
+    """
+    if not survey_columns.numeric_columns:
+        return StatusResult(
+            CheckStatus.NOT_APPLICABLE, "No numeric columns found in this dataset."
+        )
+    if _load_outlier_settings(project_id, page_name_id).is_empty():
+        return StatusResult(
+            CheckStatus.NOT_SET_UP,
+            "No outlier or constraint columns are set up yet.",
+        )
+    return READY

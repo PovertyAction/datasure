@@ -4,8 +4,6 @@ Exports a self-contained Stata replication package (raw CSV, do-files,
 audit logs, README) as a zip file for download to the local drive.
 """
 
-import json
-
 import polars as pl
 import streamlit as st
 
@@ -16,9 +14,10 @@ from datasure.utils.config_utils import ConfigurationService
 from datasure.utils.duckdb_utils import duckdb_get_table
 from datasure.utils.navigations_utils import (
     add_demo_navigation,
-    demo_callout,
     demo_sidebar_help,
+    show_demo_completion_message,
 )
+from datasure.utils.project_registry import read_registry
 from datasure.utils.scto_api import (
     SurveyCTOAPIClient,
     SurveyCTOAPIConfig,
@@ -36,12 +35,8 @@ _PROJECTS_FILE = "projects.json"
 @st.cache_data(ttl=60)
 def _get_project_name(project_id: str) -> str:
     """Return the human-readable project name, falling back to project_id."""
-    projects_file = get_cache_path(_PROJECTS_FILE)
-    if projects_file.exists():
-        with open(projects_file) as f:
-            projects = json.load(f)
-        return projects.get(project_id, {}).get("name", project_id)
-    return project_id
+    projects = read_registry(get_cache_path(_PROJECTS_FILE))
+    return projects.get(project_id, {}).get("name", project_id)
 
 
 def _get_import_log_row(project_id: str, alias: str) -> dict | None:
@@ -339,26 +334,6 @@ page_header(
     "your corrected dataset from the raw source data.",
 )
 
-demo_callout(
-    """
-    This page bundles everything needed to reproduce your corrected dataset into a
-    single downloadable zip file — raw data, Stata do-files (import, prepare,
-    correct), correction and prep logs, codebooks, and a README.
-
-    ##### Instructions for Demo:
-    1. Under **Page Name**, select **Household HFCs**.
-    2. Review the configuration details that appear below the selector, then
-       expand **What's inside the zip?** to see the full directory structure.
-    3. Click **Build Replication Package**. DataSure will assemble the zip in seconds.
-    4. Once the build completes, check the PII confirmation box and click
-       **Download replication package (.zip)**.
-
-    The demo dataset is synthetic and contains no real PII. In a live project the
-    zip would include raw respondent data and must be stored on an encrypted,
-    access-controlled drive in accordance with IPA data policy.
-    """
-)
-
 st.divider()
 
 # ── Page selector ─────────────────────────────────────────────────────────────
@@ -375,6 +350,18 @@ with page_name_col:
             "Select the check configuration to export. "
             "The associated dataset will be included as raw data in the package."
         ),
+    )
+    exclude_reviewer_names = bool(
+        st.checkbox(
+            "Exclude reviewer names",
+            value=False,
+            key="_replication_exclude_reviewer_names",
+        )
+    )
+    st.caption(
+        "`correction_log.csv` records who made each correction: the Reviewer "
+        "name, or the computer login if no name was set. Check this to leave "
+        "that column blank in the package. The project's own log is not changed."
     )
 with export_mode_col:
     export_mode = st.radio(
@@ -416,12 +403,14 @@ else:
 alias: str = ""
 key_col: str = ""
 
-# Clear any previously built zip when the page selection or mode changes.
-if st.session_state.get("_replication_page_sel") != (selected_page, include_pii):
+# Clear any previously built zip when the page or export options change.
+build_settings = (selected_page, exclude_reviewer_names, include_pii)
+if st.session_state.get("_replication_build_settings") != build_settings:
     st.session_state.pop("_replication_zip", None)
     st.session_state.pop("_replication_filename", None)
+    st.session_state.pop("_replication_warnings", None)
     st.session_state.pop("_replication_zip_include_pii", None)
-    st.session_state["_replication_page_sel"] = (selected_page, include_pii)
+    st.session_state["_replication_build_settings"] = build_settings
 
 if selected_page:
     resolved = _resolve_page_config(configs, selected_page)
@@ -449,6 +438,7 @@ if st.button(
     type="primary",
     disabled=not selected_page or not alias,
 ):
+    build_warnings: list[str] = []
     with st.status("Building replication package…", expanded=True) as build_status:
         st.write("Fetching SurveyCTO questionnaire…")
         scto_xlsx, scto_form_def, scto_form_id, scto_error = _fetch_scto_assets(
@@ -470,8 +460,12 @@ if st.button(
             form_id=scto_form_id,
             include_pii=include_pii,
             on_progress=_on_progress,
+            exclude_reviewer_names=exclude_reviewer_names,
+            on_warning=build_warnings.append,
         )
         build_status.update(label="Package ready!", state="complete", expanded=False)
+
+    st.session_state["_replication_warnings"] = build_warnings
 
     st.session_state["_replication_zip"] = zip_bytes
     st.session_state["_replication_zip_include_pii"] = include_pii
@@ -501,6 +495,8 @@ if "_replication_zip" in st.session_state:
             "of the remaining variables.",
             key="_replication_pii_confirmed",
         )
+    for warning in st.session_state.get("_replication_warnings", []):
+        st.warning(warning, icon=":material/warning:")
     st.download_button(
         label="Download replication package (.zip)",
         data=st.session_state["_replication_zip"],
@@ -512,15 +508,8 @@ if "_replication_zip" in st.session_state:
     )
 
     if pii_confirmed:
-        demo_callout(
-            "You have completed the DataSure demo! You have gone through the full "
-            "workflow — importing data, preparing it, configuring quality checks, "
-            "reviewing reports, correcting data issues, and exporting a replication "
-            "package.\n\n"
-            "To exit the demo and return to the project selection screen, click the "
-            "**Exit Demo** button in the sidebar.",
-            type="success",
-        )
+        # Replication is the demo's last step, so the demo ends here.
+        show_demo_completion_message()
 
 # ── Preview ───────────────────────────────────────────────────────────────────
 

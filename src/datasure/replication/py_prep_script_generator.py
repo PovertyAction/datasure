@@ -12,6 +12,8 @@ directly instead of falling back to a "could not be translated" note.
 
 from __future__ import annotations
 
+import logging
+
 import polars as pl
 
 from datasure.replication.prep_script_generator import (
@@ -38,6 +40,8 @@ from datasure.replication.prep_script_generator import (
     _val_list,
 )
 from datasure.replication.py_script_generators import _py_header, _safe_survey
+
+logger = logging.getLogger(__name__)
 
 # ---------------------------------------------------------------------------
 # Embedded helper for "string to date"/"string to datetime" transforms.
@@ -496,19 +500,34 @@ def generate_prepare_data_script_py(
 
     for i, action, description, args in steps:
         lines.append(f"# Step {i}: {description or action}")
-        if action == _ACT_REMOVE_COL:
-            lines += _py_remove_columns(args, description)
-        elif action == _ACT_REMOVE_ROW:
-            lines += _py_remove_rows(args, description)
-        elif action == _ACT_TRANSFORM:
-            lines += _py_transform_column(args, description)
-        elif action == _ACT_ADD_COL:
-            lines += _py_add_column(args, description, seed=survey_name)
-        elif action == _ACT_REDACT_COL:
-            lines += _py_redact_columns(args, description)
-        else:
-            lines.append(f"# NOTE: unknown action {action!r}")
+        # Per-step boundary, as in the Stata generator: one bad step gets a
+        # NOTE instead of stopping the whole package (the Stata generator
+        # already reports it to the user through on_warning).
+        try:
+            lines += _py_step_body(action, description, args, survey_name)
+        except Exception as e:
+            logger.exception("Could not translate prep step %d (%s)", i, action)
+            lines.append(
+                f"# NOTE: step {i} could not be translated ({e}). Reproduce it by hand."
+            )
         lines.append("")
 
     lines += ["df.write_parquet(OUT)", 'print(f"Wrote {OUT} — {df.height:,} rows")']
     return "\n".join(lines) + "\n"
+
+
+def _py_step_body(
+    action: str, description: str, args: dict, survey_name: str
+) -> list[str]:
+    """Return the Python lines for one prep step."""
+    if action == _ACT_REMOVE_COL:
+        return _py_remove_columns(args, description)
+    if action == _ACT_REMOVE_ROW:
+        return _py_remove_rows(args, description)
+    if action == _ACT_TRANSFORM:
+        return _py_transform_column(args, description)
+    if action == _ACT_ADD_COL:
+        return _py_add_column(args, description, seed=survey_name)
+    if action == _ACT_REDACT_COL:
+        return _py_redact_columns(args, description)
+    return [f"# NOTE: unknown action {action!r}"]

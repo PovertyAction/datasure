@@ -8,6 +8,7 @@ robust data processing and transformation operations.
 """
 
 import datetime
+from typing import Any, Literal
 
 import polars as pl
 from pydantic import BaseModel, Field, field_validator, model_validator
@@ -136,8 +137,12 @@ class DuplicatesSettings(BaseModel):
         Column name for survey date.
     enumerator : str | None
         Column name for enumerator ID.
+    team : str | None
+        Column name for the enumerator's team.
     conditions : dict
-        Dictionary of filtering conditions for duplicate detection.
+        Records to Include conditions for the survey data.
+    backcheck_conditions : dict
+        Records to Include conditions for the backcheck data.
     """
 
     filtered_data: pl.DataFrame | None = None
@@ -145,8 +150,13 @@ class DuplicatesSettings(BaseModel):
     survey_id: str | None = Field(..., min_length=1, description="Survey ID column")
     survey_date: str | None = Field(None, description="Survey date column")
     enumerator: str | None = Field(None, description="Enumerator ID column")
+    team: str | None = Field(None, description="Enumerator team column")
     conditions: dict = Field(
         default_factory=dict, description="Conditions for duplicates checks"
+    )
+    backcheck_conditions: dict = Field(
+        default_factory=dict,
+        description="Conditions for backcheck ID duplicates checks",
     )
 
     model_config = {
@@ -261,6 +271,18 @@ class GPSColumnConfig(BaseModel):
             )
         return v
 
+    @field_validator("longitude_column")
+    @classmethod
+    def validate_distinct_lat_lon_columns(cls, v: str | None, info) -> str | None:
+        """Validate latitude and longitude are different columns."""
+        if (
+            info.data.get("format_type") == GPSFormatType.SEPARATE_COLUMNS
+            and v
+            and v == info.data.get("latitude_column")
+        ):
+            raise ValueError("Latitude and longitude must be different columns")
+        return v
+
 
 ## ============================================================================
 # CHECK CONFIGURATION MODELS
@@ -325,6 +347,75 @@ class BackcheckColumnSelectors(BaseModel):
 # ============================================================================
 # DATAFRAME UTILS MODELS
 # ============================================================================
+
+
+## ============================================================================
+# PROJECT CONFIGURATION MODELS
+# =============================================================================
+
+
+class ImportSourceEntry(BaseModel):
+    """One portable import_log row: what to import and from where.
+
+    Deliberately excludes anything that can't travel between machines:
+    no password, no private key file path, no local save-to path. A local
+    storage entry's ``filename``/``sheet_name`` are kept only as a hint for
+    the person resolving the import - the actual path must be re-supplied
+    on the machine doing the import. A "Demo Data" entry is rebuilt from the
+    packaged demo files rather than imported.
+
+    The source is validated, so a bundle naming a source DataSure can't
+    import is rejected when it is read, not skipped when it is applied.
+    """
+
+    alias: str = Field(..., min_length=1)
+    source: Literal["SurveyCTO", "local storage", "Demo Data"]
+    server: str | None = None
+    form_id: str | None = None
+    username: str | None = None
+    filename: str | None = None
+    sheet_name: str | None = None
+    attachments: bool = False
+
+
+class ProjectPageBundle(BaseModel):
+    """One HFC report page: its check_config row, settings, and check tables.
+
+    ``check_tables`` holds the rows of each per-page check table, keyed by
+    table prefix (``duplicates``, ``outliers``, ...). ``check_table_schemas``
+    records each table's column dtypes, encoded as JSON, so list and date
+    columns are restored exactly. ``missing_settings`` is no longer exported
+    but is still accepted from older bundles.
+    """
+
+    config: dict = Field(default_factory=dict)
+    settings: dict = Field(default_factory=dict)
+    missing_settings: dict = Field(default_factory=dict)
+    check_tables: dict[str, list[dict]] = Field(default_factory=dict)
+    check_table_schemas: dict[str, dict[str, Any]] = Field(default_factory=dict)
+
+
+class ProjectConfigBundle(BaseModel):
+    """Portable snapshot of an entire DataSure project setup.
+
+    Bundles the layers that make up "how this project is configured": import
+    sources, prep steps, HFC (check) configurations with their check tables,
+    missing codes, and corrections. Never contains credentials,
+    machine-specific file paths, or survey data.
+
+    ``bundle_version`` is absent from bundles exported before check tables
+    and missing codes were included, so those can be detected and flagged.
+    """
+
+    datasure_config_version: int = 1
+    bundle_version: int | None = None
+    exported_from_project: str
+    exported_at: str
+    datasets: list[ImportSourceEntry] = Field(default_factory=list)
+    prep_steps: dict[str, list[dict]] = Field(default_factory=dict)
+    pages: list[ProjectPageBundle] = Field(default_factory=list)
+    missing_codes: list[dict] = Field(default_factory=list)
+    corrections: dict[str, list[dict]] = Field(default_factory=dict)
 
 
 class ColumnByType(BaseModel):

@@ -5,6 +5,13 @@ from unittest.mock import MagicMock, Mock
 
 import pytest
 
+# Import the check modules with the real streamlit before the mock goes in,
+# as happens when the whole suite runs (tests/checks is collected first).
+# They apply @st.fragment and @st.cache_data at import, which the mock would
+# turn into MagicMocks. Without this, view test files that import the check
+# catalogue (test_output_view_template.py) fail when run on their own.
+import datasure.checks.catalogue  # noqa: F401
+
 
 class MockSessionState(dict):
     """Mock session state that supports both dict and attribute access."""
@@ -65,6 +72,16 @@ _st_mock.tabs = Mock(return_value=[Mock()])
 # This is needed so that view modules (e.g. prep_view.py) can be imported
 # during test collection without requiring a running Streamlit runtime.
 sys.modules["streamlit"] = _st_mock
+
+
+def pytest_collectstart(collector):
+    """Collect view test modules with the mock streamlit.
+
+    tests/conftest.py restores the real module while collecting non-view test
+    files, so put the mock back before each view module is imported.
+    """
+    if isinstance(collector, pytest.Module):
+        sys.modules["streamlit"] = _st_mock
 
 
 @pytest.fixture(autouse=True)

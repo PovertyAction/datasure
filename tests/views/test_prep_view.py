@@ -13,8 +13,11 @@ from datasure.models.enums import (
     PrepActions,
     PrepFunctions,
     PrepMethods,
+    PrepOperations,
     PrepRowConditions,
 )
+from datasure.utils.reapply_utils import ReapplyFailure
+from datasure.utils.ui_utils import queue_notice, show_queued_notices
 
 # --- Module import setup ---
 # prep_view.py has module-level Streamlit guards and UI code.
@@ -30,7 +33,12 @@ _st.stop = MagicMock()
 _mock_col = MagicMock()
 _mock_col.__enter__ = MagicMock(return_value=_mock_col)
 _mock_col.__exit__ = MagicMock(return_value=False)
-_st.columns = MagicMock(return_value=[_mock_col, _mock_col, _mock_col])
+# Spec-aware: return as many columns as requested
+_st.columns = MagicMock(
+    side_effect=lambda spec, **kw: (
+        [_mock_col] * (spec if isinstance(spec, int) else len(spec))
+    )
+)
 
 # Patch duckdb and navigation utilities so module-level UI code doesn't fail
 with (
@@ -43,33 +51,35 @@ with (
     patch("datasure.utils.onboarding_utils.is_demo_project", return_value=False),
     patch("datasure.utils.onboarding_utils.demo_expander"),
 ):
-    from datasure.views.prep_view import (
-        PrepStepHandler,
-        PrepViewConfig,
-        RemoveRowsInputs,
-        TransformInputs,
-        _build_remove_rows_result,
-        _build_remove_rows_value,
-        _build_transform_result,
-        _build_transform_value,
-        _get_column_options_for_condition,
-        _get_unique_values_from_columns,
-        _has_none_values,
-        _is_add_column_incomplete,
-        _is_prep_form_incomplete,
-        _is_remove_row_incomplete,
-        _is_transform_column_incomplete,
-        _render_datetime_function_inputs,
-        _render_equality_value_inputs,
-        _render_numeric_function_inputs,
-        _render_pattern_value_inputs,
-        _render_range_value_inputs,
-        _render_string_function_inputs,
-        _render_substring_inputs,
-        _validate_column_types_for_range,
-        prep_add_step,
-        prep_remove_step,
-    )
+    import datasure.views.prep_view as pv
+
+# The view's names, bound once so tests can use them unqualified
+PrepStepHandler = pv.PrepStepHandler
+PrepViewConfig = pv.PrepViewConfig
+RemoveRowsInputs = pv.RemoveRowsInputs
+TransformInputs = pv.TransformInputs
+_build_remove_rows_result = pv._build_remove_rows_result
+_build_remove_rows_value = pv._build_remove_rows_value
+_build_transform_result = pv._build_transform_result
+_build_transform_value = pv._build_transform_value
+_concat_separator = pv._concat_separator
+_get_column_options_for_condition = pv._get_column_options_for_condition
+_get_unique_values_from_columns = pv._get_unique_values_from_columns
+_has_none_values = pv._has_none_values
+_is_add_column_incomplete = pv._is_add_column_incomplete
+_is_prep_form_incomplete = pv._is_prep_form_incomplete
+_is_remove_row_incomplete = pv._is_remove_row_incomplete
+_is_transform_column_incomplete = pv._is_transform_column_incomplete
+_render_datetime_function_inputs = pv._render_datetime_function_inputs
+_render_equality_value_inputs = pv._render_equality_value_inputs
+_render_numeric_function_inputs = pv._render_numeric_function_inputs
+_render_pattern_value_inputs = pv._render_pattern_value_inputs
+_render_range_value_inputs = pv._render_range_value_inputs
+_render_string_function_inputs = pv._render_string_function_inputs
+_render_substring_inputs = pv._render_substring_inputs
+_validate_column_types_for_range = pv._validate_column_types_for_range
+prep_add_step = pv.prep_add_step
+prep_remove_step = pv.prep_remove_step
 
 # Restore original stop behavior
 _st.session_state["st_project_id"] = None
@@ -248,6 +258,54 @@ class TestIsAddColumnIncomplete:
         assert _is_add_column_incomplete({}) is True
 
 
+def _concat_args(columns: list[str], choice: str, custom: str = "") -> dict:
+    """Build concat step args the way the Add Column form does."""
+    return {
+        "column_names": "uid",
+        "method": PrepFunctions.concat.value,
+        "source_columns": columns,
+        "value": _concat_separator(choice, custom),
+    }
+
+
+class TestConcatForm:
+    """Concat's separator choice and when its Add Column form is complete."""
+
+    @pytest.mark.parametrize(
+        ("choice", "expected"),
+        [
+            ("None", ""),
+            ("Space", " "),
+            ("Comma", ","),
+            ("Underscore", "_"),
+            ("Hyphen", "-"),
+        ],
+    )
+    def test_named_separators(self, choice, expected):
+        assert _concat_separator(choice, "") == expected
+
+    def test_specify_keeps_text_exactly(self):
+        assert _concat_separator("Specify", " | ") == " | "
+
+    def test_specify_with_empty_box_has_no_separator(self):
+        assert _concat_separator("Specify", "") is None
+
+    @pytest.mark.parametrize("columns", [[], ["region"]])
+    def test_incomplete_with_fewer_than_two_columns(self, columns):
+        assert _is_add_column_incomplete(_concat_args(columns, "Underscore")) is True
+
+    def test_incomplete_with_specify_and_empty_box(self):
+        args = _concat_args(["region", "hhid"], "Specify", "")
+        assert _is_add_column_incomplete(args) is True
+
+    @pytest.mark.parametrize(
+        ("choice", "custom"), [("None", ""), ("Hyphen", ""), ("Specify", "::")]
+    )
+    def test_complete_with_two_columns_and_a_separator(self, choice, custom):
+        args = _concat_args(["region", "district", "hhid"], choice, custom)
+        assert _is_add_column_incomplete(args) is False
+
+
 class TestIsTransformColumnIncomplete:
     """Test _is_transform_column_incomplete."""
 
@@ -293,6 +351,13 @@ class TestIsTransformColumnIncomplete:
 
     def test_missing_source_columns_key(self):
         assert _is_transform_column_incomplete({"method": "trim"}) is True
+
+    @pytest.mark.parametrize("op", [PrepOperations.to_string, PrepOperations.to_number])
+    def test_conversion_needs_no_input(self, op):
+        inputs = TransformInputs()
+        inputs.func = op.value
+        args = _build_transform_result("hhid", inputs)
+        assert _is_transform_column_incomplete(args) is False
 
 
 class TestIsRemoveRowIncomplete:
@@ -1255,8 +1320,24 @@ class TestPrepStepHandler:
     def test_render_transform_inputs_unknown_type(self, sample_polars_df):
         handler = PrepStepHandler(sample_polars_df, 0)
         inputs = TransformInputs()
-        result = handler._render_transform_inputs_by_type(pl.Boolean, inputs)
+        result = handler._render_transform_inputs_by_type(pl.Binary, inputs)
         assert result.func is None
+
+    @pytest.mark.parametrize(
+        ("col_type", "options"),
+        [
+            (pl.Date, ("to string",)),
+            (pl.Boolean, ("to string", "to number")),
+        ],
+    )
+    def test_render_transform_inputs_offers_conversions(
+        self, sample_polars_df, col_type, options
+    ):
+        _st.selectbox = MagicMock(return_value="to string")
+        handler = PrepStepHandler(sample_polars_df, 0)
+        result = handler._render_transform_inputs_by_type(col_type, TransformInputs())
+        assert result.func == "to string"
+        assert _st.selectbox.call_args.kwargs["options"] == options
 
     def test_render_transform_inputs_float_col(self, sample_polars_df):
         _st.selectbox = MagicMock(side_effect=["score", "round"])
@@ -1494,7 +1575,7 @@ class TestPrepAddStep:
         _st.info = MagicMock()
         _st.warning = MagicMock()
 
-        prep_add_step(sample_polars_df, step_index=0)
+        prep_add_step(sample_polars_df, step_index=0, alias="test_label")
         _st.warning.assert_called()
 
     def test_add_column_action_no_input(self, sample_polars_df):
@@ -1508,7 +1589,7 @@ class TestPrepAddStep:
         _st.info = MagicMock()
         _st.warning = MagicMock()
 
-        prep_add_step(sample_polars_df, step_index=0)
+        prep_add_step(sample_polars_df, step_index=0, alias="test_label")
         _st.warning.assert_called()
 
     def test_remove_column_action(self, sample_polars_df):
@@ -1522,7 +1603,7 @@ class TestPrepAddStep:
         _st.info = MagicMock()
         _st.button = MagicMock(return_value=False)
 
-        prep_add_step(sample_polars_df, step_index=0)
+        prep_add_step(sample_polars_df, step_index=0, alias="test_label")
         _st.button.assert_called_once()
 
     def test_transform_column_action(self, sample_polars_df):
@@ -1537,7 +1618,7 @@ class TestPrepAddStep:
         _st.info = MagicMock()
         _st.button = MagicMock(return_value=False)
 
-        prep_add_step(sample_polars_df, step_index=0)
+        prep_add_step(sample_polars_df, step_index=0, alias="test_label")
 
     def test_remove_row_action(self, sample_polars_df):
         """When remove row selected."""
@@ -1555,16 +1636,16 @@ class TestPrepAddStep:
         _st.info = MagicMock()
         _st.button = MagicMock(return_value=False)
 
-        prep_add_step(sample_polars_df, step_index=0)
+        prep_add_step(sample_polars_df, step_index=0, alias="test_label")
 
+    @patch("datasure.views.prep_view.CorrectionProcessor")
     @patch("datasure.views.prep_view.prep_apply_action")
-    def test_add_button_clicked(self, mock_prep_apply, sample_polars_df):
+    def test_add_button_clicked(
+        self, mock_prep_apply, mock_processor_cls, sample_polars_df
+    ):
         """When Add button is clicked with valid data."""
-        import datasure.views.prep_view as pv
-
         # Set module-level variables needed by prep_add_step
         pv.project_id = "test_project"
-        pv.label = "test_label"
 
         mock_popover = MagicMock()
         mock_popover.__enter__ = MagicMock(return_value=None)
@@ -1577,20 +1658,223 @@ class TestPrepAddStep:
         _st.success = MagicMock()
         _st.rerun = MagicMock()
 
-        prep_add_step(sample_polars_df, step_index=0)
+        prep_add_step(sample_polars_df, step_index=0, alias="test_label")
         mock_prep_apply.assert_called_once()
-        _st.success.assert_called_once()
         _st.rerun.assert_called_once()
+
+    @patch("datasure.views.prep_view.prep_apply_action")
+    def test_add_button_clicked_shows_error_on_failure(
+        self, mock_prep_apply, sample_polars_df
+    ):
+        """A failing transform shows st.error instead of crashing the app."""
+        from datasure.processing.prep import ValidationError
+
+        pv.project_id = "test_project"
+
+        mock_prep_apply.side_effect = ValidationError("Failed to parse datetime")
+
+        mock_popover = MagicMock()
+        mock_popover.__enter__ = MagicMock(return_value=None)
+        mock_popover.__exit__ = MagicMock(return_value=False)
+        _st.popover = MagicMock(return_value=mock_popover)
+        _st.selectbox = MagicMock(return_value=PrepActions.remove_column.value)
+        _st.multiselect = MagicMock(return_value=["name"])
+        _st.info = MagicMock()
+        _st.button = MagicMock(return_value=True)
+        _st.success = MagicMock()
+        _st.error = MagicMock()
+        _st.rerun = MagicMock()
+
+        prep_add_step(sample_polars_df, step_index=0, alias="test_label")
+
+        mock_prep_apply.assert_called_once()
+        _st.error.assert_called_once()
+        assert "Failed to parse datetime" in _st.error.call_args[0][0]
+        _st.success.assert_not_called()
+        _st.rerun.assert_not_called()
+
+
+def _open_popover():
+    mock_popover = MagicMock()
+    mock_popover.__enter__ = MagicMock(return_value=None)
+    mock_popover.__exit__ = MagicMock(return_value=False)
+    _st.popover = MagicMock(return_value=mock_popover)
+
+
+def _click_add_remove_column(pv):
+    """Drive prep_add_step through a valid "remove column" submission."""
+    pv.project_id = "test_project"
+    _open_popover()
+    _st.selectbox = MagicMock(return_value=PrepActions.remove_column.value)
+    _st.multiselect = MagicMock(return_value=["name"])
+    _st.info = MagicMock()
+    _st.button = MagicMock(return_value=True)
+    _st.success = MagicMock()
+    _st.error = MagicMock()
+    _st.rerun = MagicMock()
+
+
+def _confirm_remove_first_step(pv, mock_get_table):
+    """Drive prep_remove_step through confirming removal of step 0."""
+    import pandas as pd
+
+    pv.project_id = "test_project"
+    _open_popover()
+    mock_get_table.return_value = MagicMock()
+    mock_get_table.return_value.to_pandas.return_value = pd.DataFrame(
+        {"action": ["remove column(s)"], "description": ["Removed col1"]}
+    )
+    _st.warning = MagicMock()
+    _st.selectbox = MagicMock(return_value="0 - remove column(s) - Removed col1")
+    _st.button = MagicMock(side_effect=lambda label=None, *a, **k: label != "Cancel")
+    _st.dialog = MagicMock(side_effect=lambda *a, **k: lambda fn: fn)
+    _st.columns = MagicMock(return_value=[MagicMock(), MagicMock()])
+    _st.success = MagicMock()
+    _st.rerun = MagicMock()
+
+
+def _processor(mock_processor_cls, failures=()):
+    """Return the mocked CorrectionProcessor, set to report `failures`."""
+    processor = mock_processor_cls.return_value
+    processor.refresh_existing_corrected_data.return_value = list(failures)
+    return processor
+
+
+def _show_next_run_notices(pv):
+    """Render what the Prep tab shows for test_label on the next run."""
+    _st.success = MagicMock()
+    _st.warning = MagicMock()
+    _st.error = MagicMock()
+    show_queued_notices(pv._notice_scope("test_label"))
+
+
+class TestPrepChangeRefreshesCorrectedData:
+    """Changing prep steps rebuilds the corrected table from the new prep."""
+
+    @patch("datasure.views.prep_view.CorrectionProcessor")
+    @patch("datasure.views.prep_view.prep_apply_action")
+    def test_adding_a_step_refreshes_corrected_data(
+        self, mock_prep_apply, mock_processor_cls, sample_polars_df
+    ):
+
+        _click_add_remove_column(pv)
+        processor = _processor(mock_processor_cls)
+
+        prep_add_step(sample_polars_df, step_index=0, alias="test_label")
+
+        mock_processor_cls.assert_called_once_with("test_project")
+        processor.refresh_existing_corrected_data.assert_called_once_with("test_label")
+        _st.rerun.assert_called_once()
+
+    @patch("datasure.views.prep_view.CorrectionProcessor")
+    @patch("datasure.views.prep_view.prep_apply_action")
+    def test_rejected_step_does_not_refresh_corrected_data(
+        self, mock_prep_apply, mock_processor_cls, sample_polars_df
+    ):
+        from datasure.processing.prep import ValidationError
+
+        _click_add_remove_column(pv)
+        mock_prep_apply.side_effect = ValidationError("bad step")
+
+        prep_add_step(sample_polars_df, step_index=0, alias="test_label")
+
+        mock_processor_cls.assert_not_called()
+
+    @patch("datasure.views.prep_view.CorrectionProcessor")
+    @patch("datasure.views.prep_view.prep_apply_action")
+    def test_success_and_failures_after_adding_are_shown_after_rerun(
+        self, mock_prep_apply, mock_processor_cls, sample_polars_df
+    ):
+
+        _click_add_remove_column(pv)
+        _processor(
+            mock_processor_cls,
+            [ReapplyFailure("modify value name for key1", "column 'name' not found")],
+        )
+
+        prep_add_step(sample_polars_df, step_index=0, alias="test_label")
+        _show_next_run_notices(pv)
+
+        _st.success.assert_called_once_with("Preparation step added successfully!")
+        _st.warning.assert_called_once()
+        message = _st.warning.call_args[0][0]
+        assert "corrections could not be reapplied" in message
+        assert "column 'name' not found" in message
+
+    @patch("datasure.views.prep_view.CorrectionProcessor")
+    @patch("datasure.views.prep_view.prep_apply_action")
+    def test_refresh_error_is_shown_after_rerun(
+        self, mock_prep_apply, mock_processor_cls, sample_polars_df
+    ):
+
+        _click_add_remove_column(pv)
+        processor = _processor(mock_processor_cls)
+        processor.refresh_existing_corrected_data.side_effect = OSError("disk full")
+
+        prep_add_step(sample_polars_df, step_index=0, alias="test_label")
+        _show_next_run_notices(pv)
+
+        _st.rerun.assert_called_once()
+        _st.error.assert_called_once()
+        assert "disk full" in _st.error.call_args[0][0]
+
+    @patch("datasure.views.prep_view.CorrectionProcessor")
+    @patch("datasure.views.prep_view.prep_apply_action")
+    @patch("datasure.views.prep_view.duckdb_save_table")
+    @patch("datasure.views.prep_view.duckdb_get_table")
+    def test_removing_a_step_refreshes_corrected_data(
+        self, mock_get_table, mock_save, mock_prep_apply, mock_processor_cls
+    ):
+
+        _confirm_remove_first_step(pv, mock_get_table)
+        mock_prep_apply.return_value = []
+        processor = _processor(mock_processor_cls)
+
+        prep_remove_step("test_label", step_index=0)
+
+        processor.refresh_existing_corrected_data.assert_called_once_with("test_label")
+
+    @patch("datasure.views.prep_view.CorrectionProcessor")
+    @patch("datasure.views.prep_view.prep_apply_action")
+    @patch("datasure.views.prep_view.duckdb_save_table")
+    @patch("datasure.views.prep_view.duckdb_get_table")
+    def test_success_and_failures_after_removing_are_shown_after_rerun(
+        self, mock_get_table, mock_save, mock_prep_apply, mock_processor_cls
+    ):
+
+        _confirm_remove_first_step(pv, mock_get_table)
+        mock_prep_apply.return_value = [ReapplyFailure("add col2", "prep broke")]
+        _processor(
+            mock_processor_cls, [ReapplyFailure("remove row key1", "key not found")]
+        )
+
+        prep_remove_step("test_label", step_index=0)
+        _show_next_run_notices(pv)
+
+        _st.success.assert_called_once_with(
+            "Action 'Removed col1' removed successfully!"
+        )
+        messages = [c.args[0] for c in _st.warning.call_args_list]
+        assert len(messages) == 2
+        assert "prep broke" in messages[0]
+        assert "key not found" in messages[1]
 
 
 class TestModuleLevelPageLayout:
     """Test the module-level page layout code by reloading the module."""
 
+    @pytest.fixture(autouse=True)
+    def _settings_in_tmp(self, tmp_path):
+        """Keep the remembered dataset out of the real cache directory."""
+        with patch(
+            "datasure.utils.cache_utils.get_cache_path",
+            side_effect=lambda *parts: tmp_path.joinpath(*map(str, parts)),
+        ):
+            yield
+
     def test_page_layout_with_aliases(self):
         """Reload prep_view with aliases to cover the tab rendering code."""
         import importlib
-
-        import datasure.views.prep_view as pv_mod
 
         # Set up session state
         _st.session_state["st_project_id"] = "test_project"
@@ -1610,14 +1894,7 @@ class TestModuleLevelPageLayout:
             {"action": ["add column"], "description": ["Added col1"]}
         )
 
-        # Mock tab context manager
-        mock_tab = MagicMock()
-        mock_tab.__enter__ = MagicMock(return_value=mock_tab)
-        mock_tab.__exit__ = MagicMock(return_value=False)
-        _st.tabs = MagicMock(return_value=[mock_tab])
-
-        # Mock columns with context manager support (spec-aware: return as
-        # many columns as requested)
+        # Mock columns with context manager support
         mock_col = MagicMock()
         mock_col.__enter__ = MagicMock(return_value=mock_col)
         mock_col.__exit__ = MagicMock(return_value=False)
@@ -1673,17 +1950,280 @@ class TestModuleLevelPageLayout:
             patch("datasure.utils.onboarding_utils.demo_expander"),
             patch("datasure.processing.prep.prep_apply_action"),
         ):
-            importlib.reload(pv_mod)
+            importlib.reload(pv)
 
         # Restore session state
         _st.session_state["st_project_id"] = None
         _st.stop = _orig_stop
 
+    def test_queued_notices_show_when_prep_leaves_zero_rows(self):
+        """A step that removes every row still shows its messages next run."""
+        import importlib
+
+        _st.session_state["st_project_id"] = "test_project"
+        _st.session_state["st_import_data_page"] = "import_page"
+        _st.session_state["st_config_checks_page"] = "config_page"
+        _st.stop = MagicMock()
+
+        queue_notice(pv._notice_scope("test_data"), "success", "Rows removed")
+        zero_rows = pl.DataFrame(
+            {
+                "name": pl.Series([], dtype=pl.String),
+                "age": pl.Series([], dtype=pl.Int64),
+            }
+        )
+        prep_log_df = pl.DataFrame(
+            {"action": ["remove row(s)"], "description": ["Removed all rows"]}
+        )
+
+        _st.success = MagicMock()
+
+        with (
+            patch(
+                "datasure.utils.duckdb_utils.duckdb_get_aliases",
+                return_value=["test_data"],
+            ),
+            patch(
+                "datasure.utils.duckdb_utils.duckdb_get_table",
+                side_effect=[prep_log_df, zero_rows, prep_log_df, prep_log_df],
+            ),
+            patch("datasure.utils.duckdb_utils.duckdb_save_table"),
+            patch("datasure.utils.navigations_utils.page_navigation"),
+            patch("datasure.utils.navigations_utils.add_demo_navigation"),
+            patch("datasure.utils.navigations_utils.demo_sidebar_help"),
+            patch(
+                "datasure.utils.onboarding_utils.is_demo_project",
+                return_value=False,
+            ),
+        ):
+            importlib.reload(pv)
+
+        _st.success.assert_called_once_with("Rows removed")
+
+        _st.session_state["st_project_id"] = None
+        _st.stop = _orig_stop
+
+    def test_page_layout_with_failed_status_in_log(self):
+        """Change Log renders a status column and styles a Failed row."""
+        import importlib
+
+        _st.session_state["st_project_id"] = "test_project"
+        _st.session_state["st_import_data_page"] = "import_page"
+        _st.session_state["st_config_checks_page"] = "config_page"
+        _st.stop = MagicMock()
+
+        sample_df = pl.DataFrame({"name": ["Alice", "Bob"], "age": [25, 30]})
+        # A log with one failed and one successful step (mixed status column)
+        prep_log_df = pl.DataFrame(
+            {
+                "action": ["remove column(s)", "add column"],
+                "description": [
+                    "✗ Failed to reapply: Columns not found: ['missing']",
+                    "✓ 1 column added.",
+                ],
+                "status": ["Failed", "Successful"],
+            }
+        )
+
+        mock_col = MagicMock()
+        mock_col.__enter__ = MagicMock(return_value=mock_col)
+        mock_col.__exit__ = MagicMock(return_value=False)
+        _st.columns = MagicMock(
+            side_effect=lambda spec, **kw: (
+                [mock_col] * (spec if isinstance(spec, int) else len(spec))
+            )
+        )
+
+        mock_container = MagicMock()
+        mock_container.__enter__ = MagicMock(return_value=mock_container)
+        mock_container.__exit__ = MagicMock(return_value=False)
+        _st.container = MagicMock(return_value=mock_container)
+
+        mock_popover = MagicMock()
+        mock_popover.__enter__ = MagicMock(return_value=mock_popover)
+        mock_popover.__exit__ = MagicMock(return_value=False)
+        _st.popover = MagicMock(return_value=mock_popover)
+
+        _st.button = MagicMock(return_value=False)
+        _st.selectbox = MagicMock(return_value=None)
+        _st.multiselect = MagicMock(return_value=[])
+        _st.dataframe = MagicMock()
+
+        with (
+            patch(
+                "datasure.utils.duckdb_utils.duckdb_get_aliases",
+                return_value=["test_data"],
+            ),
+            patch(
+                "datasure.utils.duckdb_utils.duckdb_get_table",
+                side_effect=[
+                    prep_log_df,
+                    sample_df,
+                    prep_log_df,
+                    prep_log_df,
+                ],
+            ),
+            patch("datasure.utils.duckdb_utils.duckdb_save_table"),
+            patch("datasure.utils.navigations_utils.page_navigation"),
+            patch("datasure.utils.navigations_utils.add_demo_navigation"),
+            patch("datasure.utils.navigations_utils.demo_sidebar_help"),
+            patch("datasure.utils.navigations_utils.demo_callout"),
+            patch("datasure.utils.navigations_utils.show_demo_next_action"),
+            patch(
+                "datasure.utils.onboarding_utils.is_demo_project",
+                return_value=False,
+            ),
+            patch("datasure.utils.onboarding_utils.demo_expander"),
+            patch("datasure.processing.prep.prep_apply_action"),
+            patch(
+                "datasure.processing.pii.load_pii_flags", return_value=pl.DataFrame()
+            ),
+        ):
+            importlib.reload(pv)
+
+        # The Change Log table (first st.dataframe call) is a styled pandas
+        # DataFrame with the status column positioned right after action
+        rendered = _st.dataframe.call_args_list[0][0][0]
+        assert list(rendered.data.columns) == ["action", "status", "description"]
+
+        _st.session_state["st_project_id"] = None
+        _st.stop = _orig_stop
+
+    def _render_zero_row_prep_page(
+        self, prep_log_df: pl.DataFrame, get_table_side_effect: list
+    ) -> MagicMock:
+        """Render the Prep page for prep data with columns but no rows."""
+        import importlib
+
+        _st.session_state["st_project_id"] = "test_project"
+        _st.session_state["st_import_data_page"] = "import_page"
+        _st.session_state["st_config_checks_page"] = "config_page"
+        _st.stop = MagicMock()
+        _st.warning = MagicMock()
+
+        mock_col = MagicMock()
+        mock_col.__enter__ = MagicMock(return_value=mock_col)
+        mock_col.__exit__ = MagicMock(return_value=False)
+        _st.columns = MagicMock(
+            side_effect=lambda spec, **kw: (
+                [mock_col] * (spec if isinstance(spec, int) else len(spec))
+            )
+        )
+
+        mock_container = MagicMock()
+        mock_container.__enter__ = MagicMock(return_value=mock_container)
+        mock_container.__exit__ = MagicMock(return_value=False)
+        _st.container = MagicMock(return_value=mock_container)
+
+        mock_popover = MagicMock()
+        mock_popover.__enter__ = MagicMock(return_value=mock_popover)
+        mock_popover.__exit__ = MagicMock(return_value=False)
+        _st.popover = MagicMock(return_value=mock_popover)
+
+        _st.button = MagicMock(return_value=False)
+        _st.selectbox = MagicMock(return_value=None)
+        _st.multiselect = MagicMock(return_value=[])
+        _st.dataframe = MagicMock()
+
+        try:
+            with (
+                patch(
+                    "datasure.utils.duckdb_utils.duckdb_get_aliases",
+                    return_value=["test_data"],
+                ),
+                patch(
+                    "datasure.utils.duckdb_utils.duckdb_get_table",
+                    side_effect=get_table_side_effect,
+                ),
+                patch("datasure.utils.duckdb_utils.duckdb_save_table") as mock_save,
+                patch("datasure.utils.navigations_utils.page_navigation"),
+                patch("datasure.utils.navigations_utils.add_demo_navigation"),
+                patch("datasure.utils.navigations_utils.demo_sidebar_help"),
+                patch("datasure.utils.navigations_utils.demo_callout"),
+                patch("datasure.utils.navigations_utils.show_demo_next_action"),
+                patch(
+                    "datasure.utils.onboarding_utils.is_demo_project",
+                    return_value=False,
+                ),
+                patch("datasure.utils.onboarding_utils.demo_expander"),
+                patch("datasure.processing.prep.prep_apply_action"),
+                patch(
+                    "datasure.processing.pii.load_pii_flags",
+                    return_value=pl.DataFrame(),
+                ),
+            ):
+                importlib.reload(pv)
+        finally:
+            _st.session_state["st_project_id"] = None
+            _st.stop = _orig_stop
+        return mock_save
+
+    def test_page_layout_with_zero_row_prep_data(self):
+        """Prep data with columns but no rows keeps the Change Log and controls."""
+        zero_rows = pl.DataFrame(
+            {
+                "name": pl.Series([], dtype=pl.String),
+                "age": pl.Series([], dtype=pl.Int64),
+            }
+        )
+        prep_log_df = pl.DataFrame(
+            {
+                "action": ["remove row(s)"],
+                "description": ["Removed all rows"],
+                "status": ["Successful"],
+            }
+        )
+
+        mock_save = self._render_zero_row_prep_page(
+            prep_log_df,
+            [
+                prep_log_df,  # prep_log
+                zero_rows,  # prep_data (columns, no rows)
+                prep_log_df,  # prep_log in prep_remove_step
+                prep_log_df,  # prep_log re-fetch in change log
+            ],
+        )
+
+        # The zero-row prep table is kept, not reseeded from raw
+        mock_save.assert_not_called()
+        warnings = [c.args[0] for c in _st.warning.call_args_list]
+        assert not any("No data available" in w for w in warnings)
+        assert any("removed every row" in w for w in warnings)
+        # The Remove control and the Change Log render so the step can be undone
+        popover_labels = [c.args[0] for c in _st.popover.call_args_list]
+        assert ":material/delete: Remove data prep step" in popover_labels
+        rendered = _st.dataframe.call_args_list[0][0][0]
+        assert list(rendered.data.columns) == ["action", "status", "description"]
+
+    def test_page_layout_with_zero_row_raw_data(self):
+        """Raw data imported with no rows is not blamed on prep steps."""
+        zero_rows = pl.DataFrame({"name": pl.Series([], dtype=pl.String)})
+        empty_log = pl.DataFrame(
+            {
+                "action": pl.Series([], dtype=pl.String),
+                "description": pl.Series([], dtype=pl.String),
+                "status": pl.Series([], dtype=pl.String),
+            }
+        )
+
+        self._render_zero_row_prep_page(
+            empty_log,
+            [
+                empty_log,  # prep_log
+                pl.DataFrame(),  # prep_data (no table yet)
+                zero_rows,  # raw data, imported with no rows
+                empty_log,  # prep_log in prep_remove_step
+                empty_log,  # prep_log re-fetch in change log
+            ],
+        )
+
+        warnings = [c.args[0] for c in _st.warning.call_args_list]
+        assert any("Import Data" in w for w in warnings)
+        assert not any("removed every row" in w for w in warnings)
+
     def test_page_layout_with_empty_prep_data(self):
         """Test when prep_data and prep_log are both empty (falls back to raw)."""
         import importlib
-
-        import datasure.views.prep_view as pv_mod
 
         _st.session_state["st_project_id"] = "test_project"
         _st.session_state["st_import_data_page"] = "import_page"
@@ -1699,11 +2239,6 @@ class TestModuleLevelPageLayout:
                 "description": pl.Series([], dtype=pl.String),
             }
         )
-
-        mock_tab = MagicMock()
-        mock_tab.__enter__ = MagicMock(return_value=mock_tab)
-        mock_tab.__exit__ = MagicMock(return_value=False)
-        _st.tabs = MagicMock(return_value=[mock_tab])
 
         mock_col = MagicMock()
         mock_col.__enter__ = MagicMock(return_value=mock_col)
@@ -1760,7 +2295,7 @@ class TestModuleLevelPageLayout:
             patch("datasure.utils.onboarding_utils.demo_expander"),
             patch("datasure.processing.prep.prep_apply_action"),
         ):
-            importlib.reload(pv_mod)
+            importlib.reload(pv)
             # Verify that raw data was saved as prep data
             mock_save.assert_called()
 
@@ -1770,8 +2305,6 @@ class TestModuleLevelPageLayout:
     def test_page_layout_no_project_id(self):
         """Test page guard when no project_id is set."""
         import importlib
-
-        import datasure.views.prep_view as pv_mod
 
         _st.session_state["st_project_id"] = None
         _st.stop = MagicMock()
@@ -1793,7 +2326,7 @@ class TestModuleLevelPageLayout:
             ),
             patch("datasure.utils.onboarding_utils.demo_expander"),
         ):
-            importlib.reload(pv_mod)
+            importlib.reload(pv)
 
         _st.session_state["st_project_id"] = None
         _st.stop = _orig_stop
@@ -1805,11 +2338,7 @@ class TestPrepRemoveStep:
     @patch("datasure.views.prep_view.duckdb_get_table")
     def test_empty_prep_log(self, mock_get_table):
         """When prep log is empty."""
-        import datasure.views.prep_view as pv
-
         pv.project_id = "test_project"
-        pv.label = "test_label"
-        pv.i = 0
 
         mock_popover = MagicMock()
         mock_popover.__enter__ = MagicMock(return_value=None)
@@ -1826,7 +2355,7 @@ class TestPrepRemoveStep:
         )
         _st.info = MagicMock()
 
-        prep_remove_step()
+        prep_remove_step("test_label", step_index=0)
         _st.info.assert_called()
 
     @patch("datasure.views.prep_view.duckdb_get_table")
@@ -1834,11 +2363,7 @@ class TestPrepRemoveStep:
         """When prep log has entries but no action selected."""
         import pandas as pd
 
-        import datasure.views.prep_view as pv
-
         pv.project_id = "test_project"
-        pv.label = "test_label"
-        pv.i = 0
 
         mock_popover = MagicMock()
         mock_popover.__enter__ = MagicMock(return_value=None)
@@ -1855,22 +2380,21 @@ class TestPrepRemoveStep:
         _st.selectbox = MagicMock(return_value=None)
         _st.button = MagicMock(return_value=False)
 
-        prep_remove_step()
+        prep_remove_step("test_label", step_index=0)
         # With entries present, the action selector is rendered.
         _st.selectbox.assert_called()
 
+    @patch("datasure.views.prep_view.CorrectionProcessor")
     @patch("datasure.views.prep_view.prep_apply_action")
     @patch("datasure.views.prep_view.duckdb_save_table")
     @patch("datasure.views.prep_view.duckdb_get_table")
-    def test_remove_confirm(self, mock_get_table, mock_save_table, mock_prep_apply):
+    def test_remove_confirm(
+        self, mock_get_table, mock_save_table, mock_prep_apply, mock_processor_cls
+    ):
         """When remove button clicked with valid selection."""
         import pandas as pd
 
-        import datasure.views.prep_view as pv
-
         pv.project_id = "test_project"
-        pv.label = "test_label"
-        pv.i = 0
 
         mock_popover = MagicMock()
         mock_popover.__enter__ = MagicMock(return_value=None)
@@ -1901,8 +2425,245 @@ class TestPrepRemoveStep:
         _st.success = MagicMock()
         _st.rerun = MagicMock()
 
-        prep_remove_step()
+        prep_remove_step("test_label", step_index=0)
         mock_save_table.assert_called_once()
         mock_prep_apply.assert_called_once()
-        _st.success.assert_called_once()
         _st.rerun.assert_called_once()
+
+
+# === DATASET NAVIGATION === #
+
+
+def _context_mock() -> MagicMock:
+    mock = MagicMock()
+    mock.__enter__ = MagicMock(return_value=mock)
+    mock.__exit__ = MagicMock(return_value=False)
+    return mock
+
+
+def _render_prep_page(
+    tables: dict[tuple[str, str], pl.DataFrame],
+    aliases: list[str],
+    settings_dir,
+    query_params: dict | None = None,
+    shown_columns: list[str] | None = None,
+):
+    """Load Prepare Data with fake tables keyed by (alias, database).
+
+    Returns the mocked ``duckdb_save_table`` and the frames shown as the
+    "Preview Prepared Data" table, which only the selected dataset renders.
+    """
+    import importlib
+
+    def fake_get_table(project_id=None, alias=None, db_name="raw"):
+        return tables.get((alias, db_name), pl.DataFrame())
+
+    def fake_cache_path(*parts):
+        return settings_dir.joinpath(*[str(p) for p in parts])
+
+    _st.session_state["st_project_id"] = "test_project"
+    _st.session_state["st_import_data_page"] = "import_page"
+    _st.session_state["st_config_checks_page"] = "config_page"
+    _st.query_params = dict(query_params or {})
+    _st.stop = MagicMock()
+    _st.warning = MagicMock()
+    _st.info = MagicMock()
+    _st.columns = MagicMock(
+        side_effect=lambda spec, **kw: (
+            [_context_mock()] * (spec if isinstance(spec, int) else len(spec))
+        )
+    )
+    _st.container = MagicMock(return_value=_context_mock())
+    _st.popover = MagicMock(return_value=_context_mock())
+    _st.button = MagicMock(return_value=False)
+    _st.selectbox = MagicMock(return_value=None)
+    _st.multiselect = MagicMock(return_value=shown_columns or [])
+    _st.dataframe = MagicMock()
+    _st.pills = MagicMock()
+
+    try:
+        with (
+            patch(
+                "datasure.utils.duckdb_utils.duckdb_get_aliases",
+                return_value=aliases,
+            ),
+            patch(
+                "datasure.utils.duckdb_utils.duckdb_get_table",
+                side_effect=fake_get_table,
+            ),
+            patch("datasure.utils.duckdb_utils.duckdb_save_table") as mock_save,
+            patch(
+                "datasure.utils.cache_utils.get_cache_path",
+                side_effect=fake_cache_path,
+            ),
+            patch("datasure.utils.navigations_utils.page_navigation"),
+            patch("datasure.utils.navigations_utils.add_demo_navigation"),
+            patch("datasure.utils.navigations_utils.demo_sidebar_help"),
+            patch("datasure.utils.navigations_utils.demo_callout"),
+            patch("datasure.utils.navigations_utils.show_demo_next_action"),
+            patch(
+                "datasure.utils.onboarding_utils.is_demo_project",
+                return_value=False,
+            ),
+            patch("datasure.utils.onboarding_utils.demo_expander"),
+        ):
+            importlib.reload(pv)
+    finally:
+        _st.session_state["st_project_id"] = None
+        _st.stop = _orig_stop
+    previews = [
+        c.args[0]
+        for c in _st.dataframe.call_args_list
+        if c.args and isinstance(c.args[0], pl.DataFrame)
+    ]
+    return mock_save, previews
+
+
+def _rows(name: str) -> pl.DataFrame:
+    return pl.DataFrame({"dataset": [name, name]})
+
+
+class TestDatasetNavigation:
+    """Prepare Data shows datasets as pills and renders only the selected one."""
+
+    def test_every_dataset_is_seeded_whichever_is_selected(self, tmp_path):
+        tables = {
+            ("alpha", "raw"): _rows("alpha"),
+            ("beta", "raw"): _rows("beta"),
+            ("gamma", "raw"): _rows("gamma"),
+        }
+
+        mock_save, _ = _render_prep_page(
+            tables, ["gamma", "alpha", "beta"], tmp_path, {"dataset": "beta"}
+        )
+
+        seeded = {c.args[2] for c in mock_save.call_args_list if c.args[3] == "prep"}
+        assert seeded == {"alpha", "beta", "gamma"}
+
+    def test_only_the_dataset_in_the_url_renders(self, tmp_path):
+        tables = {
+            ("alpha", "prep"): _rows("alpha"),
+            ("beta", "prep"): _rows("beta"),
+        }
+
+        _, previews = _render_prep_page(
+            tables, ["alpha", "beta"], tmp_path, {"dataset": "beta"}
+        )
+
+        assert [p["dataset"][0] for p in previews] == ["beta"]
+
+    def test_datasets_show_as_wrapping_pills(self, tmp_path):
+        tables = {("alpha", "prep"): _rows("alpha"), ("beta", "prep"): _rows("beta")}
+
+        _render_prep_page(tables, ["beta", "alpha"], tmp_path)
+
+        _st.pills.assert_called_once()
+        assert _st.pills.call_args.args[1] == ["alpha", "beta"]
+        assert _st.pills.call_args.kwargs["wrap"] is True
+
+    def test_without_a_url_the_first_dataset_renders(self, tmp_path):
+        tables = {("alpha", "prep"): _rows("alpha"), ("beta", "prep"): _rows("beta")}
+
+        _, previews = _render_prep_page(tables, ["beta", "alpha"], tmp_path)
+
+        assert [p["dataset"][0] for p in previews] == ["alpha"]
+
+    def test_the_selected_dataset_is_remembered_in_a_new_session(self, tmp_path):
+        tables = {("alpha", "prep"): _rows("alpha"), ("beta", "prep"): _rows("beta")}
+        _render_prep_page(tables, ["alpha", "beta"], tmp_path, {"dataset": "beta"})
+        # A new session: nothing in session state, no URL parameter
+        _st.session_state.clear()
+
+        _, previews = _render_prep_page(tables, ["alpha", "beta"], tmp_path)
+
+        assert [p["dataset"][0] for p in previews] == ["beta"]
+
+    def test_an_unknown_url_dataset_falls_back_to_the_first(self, tmp_path):
+        tables = {("alpha", "prep"): _rows("alpha"), ("beta", "prep"): _rows("beta")}
+
+        _, previews = _render_prep_page(
+            tables, ["alpha", "beta"], tmp_path, {"dataset": "gone"}
+        )
+
+        assert [p["dataset"][0] for p in previews] == ["alpha"]
+        assert _st.query_params["dataset"] == "alpha"
+
+    def test_datasets_without_rows_are_dimmed_with_a_reason(self, tmp_path):
+        tables = {
+            ("alpha", "prep"): _rows("alpha"),
+            ("empty", "raw"): pl.DataFrame({"dataset": pl.Series([], dtype=pl.String)}),
+        }
+
+        _render_prep_page(tables, ["alpha", "empty", "missing"], tmp_path)
+
+        format_func = _st.pills.call_args.kwargs["format_func"]
+        assert "not set up" not in format_func("alpha")
+        assert "not set up" in format_func("empty")
+        assert "not set up" in format_func("missing")
+
+    def test_a_dimmed_dataset_explains_why_when_opened(self, tmp_path):
+        tables = {("alpha", "prep"): _rows("alpha")}
+
+        _, previews = _render_prep_page(
+            tables, ["alpha", "missing"], tmp_path, {"dataset": "missing"}
+        )
+
+        warnings = [c.args[0] for c in _st.warning.call_args_list]
+        assert any("Import Data" in w for w in warnings)
+        assert previews == []
+
+    def test_a_dataset_whose_steps_removed_every_row_is_not_dimmed(self, tmp_path):
+        steps = pl.DataFrame({"action": ["remove row(s)"], "description": ["all"]})
+        tables = {
+            ("alpha", "prep"): pl.DataFrame(
+                {"dataset": pl.Series([], dtype=pl.String)}
+            ),
+            ("prep_log_alpha", "logs"): steps,
+        }
+
+        _render_prep_page(tables, ["alpha"], tmp_path)
+
+        format_func = _st.pills.call_args.kwargs["format_func"]
+        assert "not set up" not in format_func("alpha")
+
+    def test_a_status_that_raises_marks_only_that_dataset(self):
+        from datasure.utils.dataframe_utils import TableState
+        from datasure.utils.navigation import CheckStatus
+
+        broken = pv.PrepTables(pl.DataFrame(), None, TableState.NO_ROWS)
+        fine = pv.PrepTables(_rows("beta"), pl.DataFrame(), TableState.HAS_ROWS)
+
+        items = pv.dataset_nav_items(["alpha", "beta"], {"alpha": broken, "beta": fine})
+
+        assert [item.status for item in items] == [
+            CheckStatus.ERROR,
+            CheckStatus.READY,
+        ]
+        assert "AttributeError" in items[0].reason
+
+    def test_the_preview_shows_only_the_chosen_columns(self, tmp_path):
+        wide = pl.DataFrame({"dataset": ["alpha"], "extra": [1]})
+        _, previews = _render_prep_page(
+            {("alpha", "prep"): wide}, ["alpha"], tmp_path, shown_columns=["extra"]
+        )
+
+        assert [p.columns for p in previews] == [["extra"]]
+
+    def test_reset_filters_clears_only_the_shown_datasets_view_state(self, tmp_path):
+        from datasure.utils.view_state import ViewState
+
+        tables = {("alpha", "prep"): _rows("alpha"), ("beta", "prep"): _rows("beta")}
+        settings = tmp_path / "test_project" / "settings" / pv.PREP_SETTINGS_FILE
+        ViewState(settings, "beta").save("prep_preview_columns_1", ["dataset"])
+        ViewState(settings, "alpha").save("prep_preview_columns_0", ["dataset"])
+
+        _render_prep_page(tables, ["alpha", "beta"], tmp_path, {"dataset": "beta"})
+        reset = next(
+            c for c in _st.button.call_args_list if c.args[:1] == ("Reset filters",)
+        )
+        reset.kwargs["on_click"]()
+
+        assert ViewState(settings, "beta").values() == {}
+        assert ViewState(settings, "alpha").values() == {
+            "prep_preview_columns_0": ["dataset"]
+        }

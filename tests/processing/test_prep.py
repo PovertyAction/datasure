@@ -1,6 +1,7 @@
 """Comprehensive tests for the prep module."""
 
 import json
+from datetime import date, datetime
 from unittest.mock import patch
 
 import polars as pl
@@ -322,6 +323,22 @@ class TestRemoveColumnsOperation:
         with pytest.raises(OperationError, match="Columns not found"):
             op.execute(data, prep_args)
 
+    def test_remove_columns_partial_missing(self):
+        """Removing 4 columns where 2 no longer exist removes the other 2."""
+        op = RemoveColumnsOperation()
+        data = pl.DataFrame({"a": [1], "b": [2], "c": [3], "d": [4]})
+        prep_args = PrepActionResult(
+            action="remove column(s)",
+            source_columns=["a", "c", "missing1", "missing2"],
+        )
+        result, args = op.execute(data, prep_args)
+        assert set(result.columns) == {"b", "d"}
+        assert args.affected_count == 2
+        assert args.failed_count == 2
+        assert args.source_columns == ["a", "c"]
+        assert "missing1" in args.additional_info
+        assert "missing2" in args.additional_info
+
     def test_validate_columns_exist_valid(self):
         """Test Validate columns exist valid."""
         op = RemoveColumnsOperation()
@@ -373,6 +390,51 @@ class TestRemoveRowsOperation:
         result, _ = op.execute(data, prep_args)
         assert result.shape[0] == 3
 
+    @pytest.mark.parametrize(
+        ("value", "removed"),
+        [
+            (["3"], [3]),
+            (["1", "3"], [1, 3]),
+            (["2:4"], [2, 3, 4]),
+            (["-5"], [5]),
+            (["5:-2"], [5, 6, 7, 8]),
+            (["-3:-2"], [7, 8]),
+            ([1, "7:-1"], [1, 7, 8, 9]),
+            (["0", ",", None, "2"], [0, 2]),
+            (["1, 4"], [1, 4]),
+            (["20", "-20"], []),
+        ],
+    )
+    def test_remove_by_index_forms(self, value, removed):
+        """Each row-index form removes the rows it names, counting from 0."""
+        data = pl.DataFrame({"a": list(range(10))})
+        prep_args = PrepActionResult(
+            action="remove row(s)", method="by row index", value=value
+        )
+        result, args = RemoveRowsOperation().execute(data, prep_args)
+        assert result["a"].to_list() == [i for i in range(10) if i not in removed]
+        assert args.affected_count == len(removed)
+
+    def test_remove_by_index_range_on_issue_442_dataset(self):
+        """A 0:30 range on 2,937 rows leaves 2,906 rows."""
+        data = pl.DataFrame({"a": list(range(2937))})
+        prep_args = PrepActionResult(
+            action="remove row(s)", method="by row index", value=["0:30"]
+        )
+        result, _ = RemoveRowsOperation().execute(data, prep_args)
+        assert result.height == 2906
+        assert result["a"][0] == 31
+
+    @pytest.mark.parametrize("bad", [["abc"], ["1:"], ["1:2:3"], ["1.5"]])
+    def test_remove_by_index_rejects_invalid_values(self, bad):
+        """Values that are not row indices raise a validation error."""
+        data = pl.DataFrame({"a": [1, 2, 3]})
+        prep_args = PrepActionResult(
+            action="remove row(s)", method="by row index", value=bad
+        )
+        with pytest.raises(ValidationError, match="row index"):
+            RemoveRowsOperation().execute(data, prep_args)
+
     def test_remove_by_unknown_method(self):
         """Test Remove by unknown method."""
         op = RemoveRowsOperation()
@@ -421,8 +483,8 @@ class TestRemoveRowsOperation:
             value=[2],
         )
         result, _ = op.execute(data, prep_args)
-        # equal_to keeps matching rows (removes non-matching)
-        assert result.shape[0] == 2
+        # equal_to removes matching rows, keeps everything else
+        assert sorted(result["a"].to_list()) == [1, 3, 5]
 
     def test_remove_by_condition_not_equal_to(self):
         """Test Remove by condition not equal to."""
@@ -436,8 +498,8 @@ class TestRemoveRowsOperation:
             value=[2],
         )
         result, _ = op.execute(data, prep_args)
-        # not_equal_to removes matching rows
-        assert result.shape[0] == 3
+        # not_equal_to removes non-matching rows, keeps only matches
+        assert result["a"].to_list() == [2, 2]
 
     def test_remove_by_condition_greater_than(self):
         """Test Remove by condition greater than."""
@@ -626,7 +688,8 @@ class TestRemoveRowsOperation:
             value=[2, 4],
         )
         result, _ = op.execute(data, prep_args)
-        assert sorted(result["a"].to_list()) == [2, 4]
+        # removes rows matching any value in the list, keeps the rest
+        assert sorted(result["a"].to_list()) == [1, 3, 5]
 
     def test_filter_by_range_single_value(self):
         """Test range filter with single value (not a list) - uses [val, val]."""
@@ -643,6 +706,253 @@ class TestRemoveRowsOperation:
         # between with single value becomes [20, 20], keeps outside
         values = result["a"].to_list()
         assert all(v < 20 or v > 20 for v in values)
+
+    def test_filter_by_range_string_bounds_on_numeric_column(self):
+        """Test range bounds given as strings are compared as numbers."""
+        op = RemoveRowsOperation()
+        data = pl.DataFrame({"a": [10, 20, 30, 40, 50]})
+        prep_args = PrepActionResult(
+            action="remove row(s)",
+            method="by condition",
+            source_columns=["a"],
+            condition="value is between",
+            value=["20", "40"],
+        )
+        result, _ = op.execute(data, prep_args)
+        assert result["a"].to_list() == [10, 50]
+
+
+class TestRemoveRowsMissingValues:
+    """Rows are removed only when the condition is definitely true (#351)."""
+
+    @pytest.mark.parametrize(
+        ("condition", "value", "expected_kept"),
+        [
+            ("value is greater than", [60], ["A", "C"]),
+            ("value is greater than or equal to", [70], ["A", "C"]),
+            ("value is less than", [50], ["B", "C"]),
+            ("value is less than or equal to", [45], ["B", "C"]),
+            ("value is equal to", [70], ["A", "C"]),
+            ("value is not equal to", [70], ["B", "C"]),
+            ("value is between", [60, 80], ["A", "C"]),
+            ("value is not between", [60, 80], ["B", "C"]),
+        ],
+    )
+    def test_numeric_conditions_keep_missing_age(self, condition, value, expected_kept):
+        """Household C has no age, so every numeric condition keeps it."""
+        op = RemoveRowsOperation()
+        data = pl.DataFrame({"hh": ["A", "B", "C"], "age": [45, 70, None]})
+        prep_args = PrepActionResult(
+            action="remove row(s)",
+            method="by condition",
+            source_columns=["age"],
+            condition=condition,
+            value=value,
+        )
+        result, args = op.execute(data, prep_args)
+        assert result["hh"].to_list() == expected_kept
+        assert args.affected_count == 1
+        assert args.additional_info == '1 row kept because a value is missing in "age".'
+
+    @pytest.mark.parametrize(
+        ("condition", "expected_kept"),
+        [
+            ("value is like", ["A", "C"]),
+            ("value is not like", ["B", "C"]),
+        ],
+    )
+    def test_pattern_conditions_keep_missing_village(self, condition, expected_kept):
+        """Household C has no village, so both pattern conditions keep it."""
+        op = RemoveRowsOperation()
+        data = pl.DataFrame(
+            {"hh": ["A", "B", "C"], "village": ["north", "south", None]}
+        )
+        prep_args = PrepActionResult(
+            action="remove row(s)",
+            method="by condition",
+            source_columns=["village"],
+            condition=condition,
+            value="^s",
+        )
+        result, args = op.execute(data, prep_args)
+        assert result["hh"].to_list() == expected_kept
+        assert args.affected_count == 1
+        assert "1 row kept" in args.additional_info
+
+    def test_no_missing_values_has_no_notice(self):
+        """additional_info stays empty when no row was kept for a missing value."""
+        op = RemoveRowsOperation()
+        data = pl.DataFrame({"age": [45, 70]})
+        prep_args = PrepActionResult(
+            action="remove row(s)",
+            method="by condition",
+            source_columns=["age"],
+            condition="value is greater than",
+            value=[60],
+        )
+        _, args = op.execute(data, prep_args)
+        assert args.additional_info is None
+
+    def test_notice_counts_every_kept_row(self):
+        """The notice counts each row kept for a missing value."""
+        op = RemoveRowsOperation()
+        data = pl.DataFrame({"age": [45, 70, None, None]})
+        prep_args = PrepActionResult(
+            action="remove row(s)",
+            method="by condition",
+            source_columns=["age"],
+            condition="value is greater than",
+            value=[60],
+        )
+        _, args = op.execute(data, prep_args)
+        assert args.additional_info.startswith("2 rows kept")
+
+    # Rows: r1 a matches; r2 nothing matches; r3 a missing, b matches;
+    # r4 a missing, b does not match.
+    @pytest.mark.parametrize(
+        ("condition", "value", "match", "no_match"),
+        [
+            ("value is greater than", [60], 70, 10),
+            ("value is greater than or equal to", [60], 60, 10),
+            ("value is less than", [60], 10, 70),
+            ("value is less than or equal to", [60], 60, 70),
+            ("value is equal to", [5], 5, 1),
+            ("value is not equal to", [5], 1, 5),
+            ("value is between", [60, 80], 70, 10),
+            ("value is not between", [60, 80], 10, 70),
+            ("value is like", "^s", "south", "north"),
+            ("value is not like", "^s", "north", "south"),
+        ],
+    )
+    def test_multi_column_removes_when_any_column_matches(
+        self, condition, value, match, no_match
+    ):
+        """A row is removed if any selected column definitely matches."""
+        op = RemoveRowsOperation()
+        data = pl.DataFrame(
+            {
+                "id": ["r1", "r2", "r3", "r4"],
+                "a": [match, no_match, None, None],
+                "b": [no_match, no_match, match, no_match],
+            }
+        )
+        prep_args = PrepActionResult(
+            action="remove row(s)",
+            method="by condition",
+            source_columns=["a", "b"],
+            condition=condition,
+            value=value,
+        )
+        result, args = op.execute(data, prep_args)
+        assert result["id"].to_list() == ["r2", "r4"]
+        assert args.affected_count == 2
+        assert args.additional_info == (
+            '1 row kept because a value is missing in "a", "b".'
+        )
+
+    def test_multi_column_not_missing_removes_when_any_column_has_value(self):
+        """Not missing also removes a row if any selected column has a value."""
+        op = RemoveRowsOperation()
+        data = pl.DataFrame(
+            {"id": ["r1", "r2", "r3"], "a": [1, None, 1], "b": [None, None, 1]}
+        )
+        prep_args = PrepActionResult(
+            action="remove row(s)",
+            method="by condition",
+            source_columns=["a", "b"],
+            condition="value is not missing",
+        )
+        result, args = op.execute(data, prep_args)
+        assert result["id"].to_list() == ["r2"]
+        assert args.additional_info is None
+
+    @pytest.mark.parametrize(
+        ("condition", "value", "expected_kept"),
+        [
+            ("value is not like", "^s", ["B", "C"]),
+            ("value is not equal to", ["south"], ["B", "C"]),
+            ("value is missing", None, ["A", "B"]),
+        ],
+    )
+    def test_empty_string_is_missing(self, condition, value, expected_kept):
+        """An empty string counts as missing, as it does in Stata."""
+        op = RemoveRowsOperation()
+        data = pl.DataFrame({"hh": ["A", "B", "C"], "village": ["north", "south", ""]})
+        prep_args = PrepActionResult(
+            action="remove row(s)",
+            method="by condition",
+            source_columns=["village"],
+            condition=condition,
+            value=value,
+        )
+        result, _ = op.execute(data, prep_args)
+        assert result["hh"].to_list() == expected_kept
+        assert result["village"].to_list() == (
+            ["north", "south"] if condition == "value is missing" else ["south", ""]
+        )
+
+
+VISIT_DATES = (date(2024, 1, 1), date(2024, 1, 15), date(2024, 2, 1), None)
+VISIT_DATETIMES = (
+    datetime(2024, 1, 1, 8),
+    datetime(2024, 1, 15, 8),
+    datetime(2024, 2, 1, 8),
+    None,
+)
+
+
+class TestRemoveRowsTemporalBounds:
+    """Comparison and range conditions work on date and datetime columns."""
+
+    @pytest.mark.parametrize(
+        ("column", "lower", "upper"),
+        [
+            (VISIT_DATES, date(2024, 1, 10), date(2024, 1, 20)),
+            (VISIT_DATES, "2024-01-10", "2024-01-20"),
+            (VISIT_DATETIMES, datetime(2024, 1, 10), datetime(2024, 1, 20)),
+            (VISIT_DATETIMES, "2024-01-10 00:00:00", "2024-01-20 00:00:00"),
+        ],
+    )
+    @pytest.mark.parametrize(
+        ("condition", "expected_kept"),
+        [
+            ("value is between", ["A", "C", "D"]),
+            ("value is not between", ["B", "D"]),
+        ],
+    )
+    def test_range_on_temporal_column(
+        self, column, lower, upper, condition, expected_kept
+    ):
+        """Date bounds, live or saved as text, filter a date column."""
+        op = RemoveRowsOperation()
+        data = pl.DataFrame({"hh": ["A", "B", "C", "D"], "visit": list(column)})
+        prep_args = PrepActionResult(
+            action="remove row(s)",
+            method="by condition",
+            source_columns=["visit"],
+            condition=condition,
+            value=[lower, upper],
+        )
+        result, args = op.execute(data, prep_args)
+        assert result["hh"].to_list() == expected_kept
+        assert (
+            args.additional_info == '1 row kept because a value is missing in "visit".'
+        )
+
+    @pytest.mark.parametrize("bound", [date(2024, 1, 10), "2024-01-10"])
+    def test_comparison_on_date_column(self, bound):
+        """A date bound, live or saved as text, filters a date column."""
+        op = RemoveRowsOperation()
+        data = pl.DataFrame({"hh": ["A", "B", "C", "D"], "visit": list(VISIT_DATES)})
+        prep_args = PrepActionResult(
+            action="remove row(s)",
+            method="by condition",
+            source_columns=["visit"],
+            condition="value is greater than",
+            value=[bound],
+        )
+        result, _ = op.execute(data, prep_args)
+        assert result["hh"].to_list() == ["A", "D"]
 
 
 # === TRANSFORM COLUMNS OPERATION TESTS === #
@@ -960,6 +1270,48 @@ class TestTransformColumnsOperation:
         """Test String to datetime slash format."""
         op = TransformColumnsOperation()
         data = pl.DataFrame({"d": ["01/15/2023 10:30:00", "02/20/2023 14:00:00"]})
+        prep_args = PrepActionResult(
+            action="transform column(s)",
+            source_columns=["d"],
+            method="string to datetime",
+        )
+        result, _ = op.execute(data, prep_args)
+        assert result["d"].dtype == pl.Datetime
+
+    def test_string_to_datetime_slash_format_no_seconds(self):
+        """A timestamp with no seconds (e.g. spreadsheet exports) still parses."""
+        from datetime import datetime
+
+        op = TransformColumnsOperation()
+        data = pl.DataFrame({"d": ["3/15/2026 17:28", "4/1/2026 9:05"]})
+        prep_args = PrepActionResult(
+            action="transform column(s)",
+            source_columns=["d"],
+            method="string to datetime",
+        )
+        result, _ = op.execute(data, prep_args)
+        assert result["d"].dtype == pl.Datetime
+        assert result["d"].to_list()[0] == datetime(2026, 3, 15, 17, 28)
+
+    def test_string_to_datetime_iso_format_no_seconds(self):
+        """ISO-shaped timestamps with no seconds also parse."""
+        from datetime import datetime
+
+        op = TransformColumnsOperation()
+        data = pl.DataFrame({"d": ["2026-03-15 17:28", "2026-04-01 09:05"]})
+        prep_args = PrepActionResult(
+            action="transform column(s)",
+            source_columns=["d"],
+            method="string to datetime",
+        )
+        result, _ = op.execute(data, prep_args)
+        assert result["d"].dtype == pl.Datetime
+        assert result["d"].to_list()[0] == datetime(2026, 3, 15, 17, 28)
+
+    def test_string_to_datetime_stata_format_no_seconds(self):
+        """Stata-shaped timestamps with no seconds also parse."""
+        op = TransformColumnsOperation()
+        data = pl.DataFrame({"d": ["18aug2025 19:49", "20sep2025 10:00"]})
         prep_args = PrepActionResult(
             action="transform column(s)",
             source_columns=["d"],
@@ -1332,7 +1684,7 @@ class TestAddNewColumnOperation:
         assert result["l"].to_list() == [3.0, 4.0]
 
     def test_add_count_column(self):
-        """Test Add count column."""
+        """Count should tally non-null values, not just the column count."""
         op = AddNewColumnOperation()
         data = pl.DataFrame({"a": [1.0, None], "b": [3.0, 4.0]})
         prep_args = PrepActionResult(
@@ -1342,7 +1694,22 @@ class TestAddNewColumnOperation:
             source_columns=["a", "b"],
         )
         result, _ = op.execute(data, prep_args)
-        assert result["cnt"].to_list() == [2, 2]
+        assert result["cnt"].to_list() == [2, 1]
+
+    def test_add_count_column_all_missing(self):
+        """A row with no non-null values across the source columns counts 0."""
+        op = AddNewColumnOperation()
+        data = pl.DataFrame(
+            {"a": [1.0, None, None], "b": [3.0, None, 4.0], "c": [5.0, None, None]}
+        )
+        prep_args = PrepActionResult(
+            action="add new column",
+            column_names="cnt",
+            method="count",
+            source_columns=["a", "b", "c"],
+        )
+        result, _ = op.execute(data, prep_args)
+        assert result["cnt"].to_list() == [3, 0, 1]
 
     def test_add_nunique_column(self):
         """Test Add nunique column."""
@@ -1498,16 +1865,18 @@ class TestPrepProcessor:
                 )
             ),
         ]
-        result = processor.execute_all_actions(data, actions)
+        result, outcomes = processor.execute_all_actions(data, actions)
         assert "c" not in result.columns
         assert "new" in result.columns
+        assert [o.status for o in outcomes] == ["Successful", "Successful"]
 
     def test_execute_all_actions_empty(self):
         """Test Execute all actions empty."""
         processor = PrepProcessor()
         data = pl.DataFrame({"a": [1, 2]})
-        result = processor.execute_all_actions(data, [])
+        result, outcomes = processor.execute_all_actions(data, [])
         assert result.equals(data)
+        assert outcomes == []
 
     def test_execute_all_actions_failure(self):
         """Test Execute all actions failure."""
@@ -1520,9 +1889,208 @@ class TestPrepProcessor:
                 )
             )
         ]
-        # Domain errors raised by individual actions propagate unwrapped
-        with pytest.raises(OperationError, match="Columns not found"):
-            processor.execute_all_actions(data, actions)
+        # A failing action is skipped (not raised) and reported as a failure
+        result, outcomes = processor.execute_all_actions(data, actions)
+        assert result.equals(data)
+        assert len(outcomes) == 1
+        assert outcomes[0].status == "Failed"
+        assert "Columns not found" in outcomes[0].error
+
+    def test_execute_all_actions_partial_failure_continues(self):
+        """A failing action is skipped but later actions still apply."""
+        processor = PrepProcessor()
+        data = pl.DataFrame({"a": [1, 2], "b": [3, 4]})
+        actions = [
+            PrepAction.from_args(
+                PrepActionResult(
+                    action="remove column(s)", source_columns=["nonexistent"]
+                )
+            ),
+            PrepAction.from_args(
+                PrepActionResult(action="remove column(s)", source_columns=["b"])
+            ),
+        ]
+        result, outcomes = processor.execute_all_actions(data, actions)
+        assert "b" not in result.columns
+        assert "a" in result.columns
+        assert [o.status for o in outcomes] == ["Failed", "Successful"]
+        assert "Columns not found" in outcomes[0].error
+
+    def test_execute_all_actions_partial_column_removal(self):
+        """Removing 4 columns where 2 no longer exist removes the other 2."""
+        processor = PrepProcessor()
+        data = pl.DataFrame({"a": [1], "b": [2], "c": [3], "d": [4]})
+        actions = [
+            PrepAction.from_args(
+                PrepActionResult(
+                    action="remove column(s)",
+                    source_columns=["a", "b", "missing1", "missing2"],
+                )
+            )
+        ]
+        result, outcomes = processor.execute_all_actions(data, actions)
+        assert set(result.columns) == {"c", "d"}
+        assert outcomes[0].status == "Successful"
+        assert outcomes[0].prep_args.affected_count == 2
+        assert outcomes[0].prep_args.failed_count == 2
+        assert outcomes[0].prep_args.source_columns == ["a", "b"]
+
+
+def _run_step(data: pl.DataFrame, **args) -> pl.DataFrame:
+    """Run one prep step, built the way the form builds it, through the processor."""
+    action = PrepAction.from_args(PrepActionResult(**args))
+    result, _ = PrepProcessor().execute_single_action(data, action)
+    return result
+
+
+def _concat(data: pl.DataFrame, columns: list[str], separator: str | None):
+    """Add a "joined" column concatenating ``columns`` with ``separator``."""
+    return _run_step(
+        data,
+        action="add new column",
+        column_names="joined",
+        method="concat",
+        source_columns=columns,
+        value=separator,
+    )["joined"].to_list()
+
+
+class TestConcatColumns:
+    """Add Column's concat method, run through the prep processor."""
+
+    @pytest.fixture
+    def ids(self) -> pl.DataFrame:
+        return pl.DataFrame(
+            {
+                "region": ["R01", "R02"],
+                "district": ["D05", "D07"],
+                "hhid": ["123", "456"],
+            }
+        )
+
+    def test_joins_with_underscore(self, ids):
+        assert _concat(ids, ["region", "district", "hhid"], "_") == [
+            "R01_D05_123",
+            "R02_D07_456",
+        ]
+
+    @pytest.mark.parametrize(
+        ("separator", "expected"),
+        [
+            ("", "R01D05123"),
+            (" ", "R01 D05 123"),
+            (",", "R01,D05,123"),
+            ("-", "R01-D05-123"),
+            (" | ", "R01 | D05 | 123"),
+            ("::", "R01::D05::123"),
+            # A saved "" separator can come back from the log as null.
+            (None, "R01D05123"),
+        ],
+    )
+    def test_joins_with_separator(self, ids, separator, expected):
+        assert _concat(ids, ["region", "district", "hhid"], separator)[0] == expected
+
+    def test_joins_in_selection_order(self, ids):
+        assert _concat(ids, ["hhid", "region"], "-") == ["123-R01", "456-R02"]
+
+    def test_missing_value_counts_as_empty(self):
+        names = pl.DataFrame({"first": ["Ama", None], "last": [None, "Mensah"]})
+        assert _concat(names, ["first", "last"], " ") == ["Ama", "Mensah"]
+
+    def test_all_missing_gives_missing(self):
+        names = pl.DataFrame(
+            {"first": ["Ama", None], "last": ["Owusu", None]},
+            schema={"first": pl.String, "last": pl.String},
+        )
+        assert _concat(names, ["first", "last"], "_") == ["Ama_Owusu", None]
+
+    def test_rejects_non_text_columns(self):
+        data = pl.DataFrame({"region": ["R01"], "hhid": [123], "score": [1.5]})
+        with pytest.raises(ValidationError, match=r"not text.*hhid.*score"):
+            _concat(data, ["region", "hhid", "score"], "_")
+
+    def test_rejects_missing_columns(self, ids):
+        with pytest.raises(ValidationError, match="village"):
+            _concat(ids, ["region", "village"], "_")
+
+    def test_reapply_skips_concat_when_source_is_no_longer_text(self):
+        """A re-import that made a source numeric skips only the concat step."""
+        reimported = pl.DataFrame({"region": ["R01"], "hhid": [123], "x": [1]})
+        steps = [
+            PrepActionResult(
+                action="add new column",
+                column_names="uid",
+                method="concat",
+                source_columns=["region", "hhid"],
+                value="_",
+            ),
+            PrepActionResult(action="remove column(s)", source_columns=["x"]),
+        ]
+        result, outcomes = PrepProcessor().execute_all_actions(
+            reimported, [PrepAction.from_args(s) for s in steps]
+        )
+        assert [o.status for o in outcomes] == ["Failed", "Successful"]
+        assert "hhid" in outcomes[0].error
+        assert result.columns == ["region", "hhid"]
+
+
+def _to_string(values: pl.Series) -> pl.Series:
+    """Run "to string" on a one-column frame and return the converted column."""
+    data = pl.DataFrame({"col": values})
+    return _run_step(
+        data,
+        action="transform column(s)",
+        method="to string",
+        source_columns=["col"],
+        value=[],
+    )["col"]
+
+
+class TestToString:
+    """Transform Column's to string operation, run through the prep processor."""
+
+    def test_floats_drop_trailing_zero_only_when_whole(self):
+        result = _to_string(pl.Series([12.0, 12.5, None, -3.0]))
+        assert result.dtype == pl.String
+        assert result.to_list() == ["12", "12.5", None, "-3"]
+
+    @pytest.mark.parametrize(
+        ("values", "expected"),
+        [
+            (pl.Series([12, None, -4]), ["12", None, "-4"]),
+            (
+                pl.Series([date(2025, 8, 18), None]),
+                ["2025-08-18", None],
+            ),
+            (
+                pl.Series([datetime(2025, 8, 18, 19, 49), None]),
+                ["2025-08-18 19:49:00.000000", None],
+            ),
+            (pl.Series([True, False, None]), ["true", "false", None]),
+        ],
+        ids=["integer", "date", "datetime", "boolean"],
+    )
+    def test_converts_to_text_keeping_missing(self, values, expected):
+        result = _to_string(values)
+        assert result.dtype == pl.String
+        assert result.to_list() == expected
+
+
+class TestToNumber:
+    """Transform Column's to number operation, run through the prep processor."""
+
+    def test_booleans_become_zero_one_keeping_missing(self):
+        data = pl.DataFrame({"consent": [True, False, None]})
+        result = _run_step(
+            data,
+            action="transform column(s)",
+            method="to number",
+            source_columns=["consent"],
+            value=[],
+        )
+        assert result.columns == ["consent"]
+        assert result["consent"].dtype == pl.Int64
+        assert result["consent"].to_list() == [1, 0, None]
 
 
 # === LOG MANAGEMENT TESTS === #
@@ -1738,10 +2306,70 @@ class TestLogManagement:
             }
         )
         processor = PrepProcessor()
-        _reapply_all_actions("proj", "alias", log, processor)
-        mock_save.assert_called_once()
-        saved_data = mock_save.call_args[0][1]
+        failures = _reapply_all_actions("proj", "alias", log, processor)
+        # Saves both the reapplied data and the refreshed log
+        assert mock_save.call_count == 2
+        saved_data = mock_save.call_args_list[0][0][1]
         assert "b" not in saved_data.columns
+        assert failures == []
+
+    @patch("datasure.processing.prep.duckdb_get_table")
+    @patch("datasure.processing.prep.duckdb_save_table")
+    def test_reapply_all_actions_partial_failure(self, mock_save, mock_get):
+        """A step referencing a column dropped upstream is skipped, not raised.
+
+        The rest of the log (a step on a still-present column) still applies,
+        and the save reflects that partial result plus the reported failure.
+        """
+        raw_data = pl.DataFrame({"a": [1, 2, 3], "b": [4, 5, 6]})
+        mock_get.return_value = raw_data
+        log = pl.DataFrame(
+            {
+                "prep_args": [
+                    str(
+                        {
+                            "action": "remove column(s)",
+                            "source_columns": ["missing_column"],
+                            "column_names": None,
+                            "affected_count": None,
+                            "remaining_count": None,
+                            "value": None,
+                            "method": None,
+                            "condition": None,
+                            "failed_count": None,
+                            "additional_info": None,
+                        }
+                    ),
+                    str(
+                        {
+                            "action": "remove column(s)",
+                            "source_columns": ["b"],
+                            "column_names": None,
+                            "affected_count": None,
+                            "remaining_count": None,
+                            "value": None,
+                            "method": None,
+                            "condition": None,
+                            "failed_count": None,
+                            "additional_info": None,
+                        }
+                    ),
+                ]
+            }
+        )
+        processor = PrepProcessor()
+        failures = _reapply_all_actions("proj", "alias", log, processor)
+
+        saved_data = mock_save.call_args_list[0][0][1]
+        assert "b" not in saved_data.columns
+        assert "a" in saved_data.columns
+        assert len(failures) == 1
+        assert "Columns not found" in failures[0].reason
+
+        # The refreshed log records the failed step's status and description
+        saved_log = mock_save.call_args_list[1][0][1]
+        assert saved_log["status"].to_list() == ["Failed", "Successful"]
+        assert "Failed to reapply" in saved_log["description"][0]
 
     @patch("datasure.processing.prep.duckdb_get_table")
     @patch("datasure.processing.prep.duckdb_save_table")
@@ -1761,6 +2389,58 @@ class TestLogManagement:
         prep_args = PrepActionResult(action="remove column(s)", source_columns=["b"])
         _apply_single_action("proj", "alias", prep_args, empty_log, processor)
         assert mock_save.call_count == 2  # log and data
+
+    @patch("datasure.processing.prep.duckdb_get_table")
+    @patch("datasure.processing.prep.duckdb_save_table")
+    def test_concat_without_separator_reapplies_the_same(self, mock_save, mock_get):
+        """A saved concat step with no separator rebuilds the same IDs."""
+        raw = pl.DataFrame({"region": ["R01", "R02"], "hhid": ["123", None]})
+        mock_get.return_value = raw
+        empty_log = pl.DataFrame(
+            {"action": [], "description": [], "prep_args": [], "action_index": []}
+        )
+        step = PrepActionResult(
+            action="add new column",
+            column_names="uid",
+            method="concat",
+            source_columns=["region", "hhid"],
+            value="",
+        )
+        _apply_single_action("proj", "alias", step, empty_log, PrepProcessor())
+        saved_log = _convert_prep_args_to_string(mock_save.call_args_list[0][0][1])
+        first_result = mock_save.call_args_list[1][0][1]
+
+        mock_save.reset_mock()
+        failures = _reapply_all_actions("proj", "alias", saved_log, PrepProcessor())
+
+        reapplied = mock_save.call_args_list[0][0][1]
+        assert failures == []
+        assert reapplied["uid"].to_list() == ["R01123", "R02"]
+        assert reapplied.equals(first_result)
+
+    @patch("datasure.processing.prep.duckdb_get_table")
+    @patch("datasure.processing.prep.duckdb_save_table")
+    def test_to_number_reapplies_the_same(self, mock_save, mock_get):
+        """A saved to number step converts booleans again after a refresh."""
+        mock_get.return_value = pl.DataFrame({"consent": [True, None, False]})
+        empty_log = pl.DataFrame(
+            {"action": [], "description": [], "prep_args": [], "action_index": []}
+        )
+        step = PrepActionResult(
+            action="transform column(s)",
+            method="to number",
+            source_columns=["consent"],
+            value=[],
+        )
+        _apply_single_action("proj", "alias", step, empty_log, PrepProcessor())
+        saved_log = _convert_prep_args_to_string(mock_save.call_args_list[0][0][1])
+
+        mock_save.reset_mock()
+        failures = _reapply_all_actions("proj", "alias", saved_log, PrepProcessor())
+
+        reapplied = mock_save.call_args_list[0][0][1]
+        assert failures == []
+        assert reapplied["consent"].to_list() == [1, None, 0]
 
 
 # === PUBLIC API TESTS === #
@@ -1814,9 +2494,41 @@ class TestPrepApplyAction:
         )
         raw_data = pl.DataFrame({"a": [1, 2], "b": [3, 4]})
         mock_get.side_effect = [log, raw_data]
-        prep_apply_action("proj", "alias", prep_args=None)
+        failures = prep_apply_action("proj", "alias", prep_args=None)
         assert mock_get.call_count == 2
         mock_save.assert_called()
+        assert failures == []
+
+    @patch("datasure.processing.prep.duckdb_get_table")
+    @patch("datasure.processing.prep.duckdb_save_table")
+    def test_reapply_all_reports_partial_failure(self, mock_save, mock_get):
+        """A failing step during reapply-all is reported, not raised."""
+        log = pl.DataFrame(
+            {
+                "prep_args": [
+                    str(
+                        {
+                            "action": "remove column(s)",
+                            "source_columns": ["missing_column"],
+                            "column_names": None,
+                            "affected_count": None,
+                            "remaining_count": None,
+                            "value": None,
+                            "method": None,
+                            "condition": None,
+                            "failed_count": None,
+                            "additional_info": None,
+                        }
+                    )
+                ]
+            }
+        )
+        raw_data = pl.DataFrame({"a": [1, 2], "b": [3, 4]})
+        mock_get.side_effect = [log, raw_data]
+        failures = prep_apply_action("proj", "alias", prep_args=None)
+        assert mock_save.called  # data still saved, unmodified
+        assert len(failures) == 1
+        assert "Columns not found" in failures[0].reason
 
     @patch("datasure.processing.prep.duckdb_get_table")
     @patch("datasure.processing.prep.duckdb_save_table")

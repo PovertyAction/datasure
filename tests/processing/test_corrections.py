@@ -6,7 +6,7 @@ from unittest.mock import patch
 import polars as pl
 import pytest
 
-from datasure.processing.corrections import CorrectionProcessor
+from datasure.processing.corrections import CorrectionEntry, CorrectionProcessor
 
 
 @pytest.fixture(autouse=True)
@@ -77,6 +77,9 @@ def correction_processor(mock_streamlit):
     with (
         patch("datasure.processing.corrections.duckdb_get_table") as mock_get,
         patch("datasure.processing.corrections.duckdb_save_table") as mock_save,
+        # No check config: keep the mocked `duckdb_get_table` sequences to data
+        # and logs, and find records by the first column holding the KEY.
+        patch.object(CorrectionProcessor, "_configured_key_column", return_value=None),
     ):
         processor = CorrectionProcessor("test_project")
         # Clear all caches before each test
@@ -123,6 +126,33 @@ class TestCorrectionProcessor:
         # Note: save_corrected_data is called from get_corrected_data
         mock_save.assert_called_once()
 
+    def test_get_corrected_data_keeps_a_table_with_no_rows(
+        self, correction_processor, sample_data
+    ):
+        """A corrected table whose every record was dropped is not reseeded."""
+        processor, mock_get, mock_save = correction_processor
+        mock_get.return_value = sample_data.clear()
+
+        result = processor.get_corrected_data("test_alias")
+
+        assert result.is_empty()
+        assert result.columns == sample_data.columns
+        mock_get.assert_called_once()
+        mock_save.assert_not_called()
+
+    def test_get_corrected_data_initialize_from_prep_with_no_rows(
+        self, correction_processor, sample_data
+    ):
+        """Prep data a step emptied seeds a corrected table with no rows."""
+        processor, mock_get, mock_save = correction_processor
+        mock_get.side_effect = [pl.DataFrame(), sample_data.clear()]
+
+        result = processor.get_corrected_data("test_alias")
+
+        assert result.is_empty()
+        assert result.columns == sample_data.columns
+        mock_save.assert_called_once()
+
     def test_get_corrected_data_both_empty(self, correction_processor):
         """Test getting corrected data when both corrected and prep are empty."""
         processor, mock_get, _ = correction_processor
@@ -131,7 +161,7 @@ class TestCorrectionProcessor:
         result = processor.get_corrected_data("test_alias")
 
         assert result.is_empty()
-        assert mock_get.call_count == 2  # Called for both corrected and prep
+        assert mock_get.call_count == 3  # Called for corrected, prep and raw
 
     def test_save_corrected_data(self, correction_processor, sample_data):
         """Test saving corrected data."""
@@ -153,7 +183,10 @@ class TestCorrectionProcessor:
 
         result = processor.get_correction_log("test_alias")
 
-        assert result.equals(sample_corrections_log)
+        # Persisted columns come back unchanged; later columns are backfilled.
+        assert result.select(sample_corrections_log.columns).equals(
+            sample_corrections_log
+        )
         mock_get.assert_called_once_with(
             project_id="test_project", alias="corr_log_test_alias", db_name="logs"
         )
@@ -197,11 +230,63 @@ class TestCorrectionProcessor:
         assert saved_df["action"][0] == "modify value"
         assert saved_df["new_value"][0] == "Johnny"
         assert saved_df["KEY"][0] == "key1"
+        # A freshly applied correction is always logged as successful
+        assert saved_df["status"][0] == "Successful"
+        assert saved_df["status_reason"][0] is None
+
+    def test_add_correction_entry_clears_log_cache(self, correction_processor):
+        """Adding an entry must invalidate the cached log/summary.
+
+        Without clearing the cache, the correction log and summary keep
+        serving the pre-add snapshot for up to the cache TTL, so a freshly
+        added correction doesn't show up right away.
+        """
+        processor, mock_get, _ = correction_processor
+
+        empty_log = pl.DataFrame(
+            {
+                "date": [],
+                "KEY": [],
+                "ID": [],
+                "action": [],
+                "column": [],
+                "current_value": [],
+                "new_value": [],
+                "reason": [],
+            }
+        )
+        mock_get.return_value = empty_log
+
+        # Prime the cache (simulates the log already having been displayed)
+        processor.get_correction_log("test_alias")
+        processor.get_correction_summary("test_alias")
+        calls_before = mock_get.call_count
+
+        processor.add_correction_entry(
+            alias="test_alias",
+            key_value="key1",
+            current_id=None,
+            action="modify value",
+            column="name",
+            current_value="John",
+            new_value="Johnny",
+            reason="Name correction",
+        )
+
+        # A fresh read after adding must hit the database again, not the
+        # stale cached snapshot from before the correction was added.
+        processor.get_correction_log("test_alias")
+        processor.get_correction_summary("test_alias")
+        assert mock_get.call_count > calls_before
 
     def test_add_correction_entry_with_existing_log(
         self, correction_processor, sample_corrections_log
     ):
-        """Test adding correction entry to existing log."""
+        """Test adding correction entry to existing log.
+
+        `sample_corrections_log` predates the status columns, so this also
+        exercises backfilling a legacy log before concatenating the new row.
+        """
         processor, mock_get, mock_save = correction_processor
         mock_get.return_value = sample_corrections_log
 
@@ -222,6 +307,9 @@ class TestCorrectionProcessor:
         call_args = mock_save.call_args
         saved_df = call_args[1]["table_data"]
         assert len(saved_df) == 4  # 3 original + 1 new
+        # Legacy rows backfilled, new row logged as successful
+        assert saved_df["status"].to_list() == ["Successful"] * 4
+        assert saved_df["status_reason"].to_list() == [None] * 4
 
     def test_apply_correction_modify_value_string(
         self, correction_processor, sample_data
@@ -414,6 +502,73 @@ class TestCorrectionProcessor:
         # Should only save data, not log (since no reason)
         assert mock_save.call_count == 1
 
+    def test_apply_correction_records_survey_id(
+        self, correction_processor, sample_data
+    ):
+        """The Survey ID for the corrected KEY is recorded in the log's ID column."""
+        processor, mock_get, mock_save = correction_processor
+        empty_log = pl.DataFrame(
+            {
+                "date": [],
+                "KEY": [],
+                "ID": [],
+                "action": [],
+                "column": [],
+                "current_value": [],
+                "new_value": [],
+                "reason": [],
+            }
+        )
+        mock_get.side_effect = [sample_data, empty_log]
+
+        processor.apply_correction(
+            alias="test_alias",
+            key_col="survey_key",
+            key_value="key2",
+            action="modify value",
+            column="name",
+            current_value="Jane",
+            new_value="Janet",
+            reason="Name correction",
+            survey_id_value="HH002",
+        )
+
+        saved_log = mock_save.call_args[1]["table_data"]
+        assert saved_log["ID"][0] == "HH002"
+
+    def test_apply_correction_without_survey_id_leaves_id_blank(
+        self, correction_processor, sample_data
+    ):
+        """No Survey ID configured/available means the ID column stays blank."""
+        processor, mock_get, mock_save = correction_processor
+        empty_log = pl.DataFrame(
+            {
+                "date": [],
+                "KEY": [],
+                "ID": [],
+                "action": [],
+                "column": [],
+                "current_value": [],
+                "new_value": [],
+                "reason": [],
+            }
+        )
+        mock_get.side_effect = [sample_data, empty_log]
+
+        processor.apply_correction(
+            alias="test_alias",
+            key_col="survey_key",
+            key_value="key2",
+            action="modify value",
+            column="name",
+            current_value="Jane",
+            new_value="Janet",
+            reason="Name correction",
+        )
+
+        saved_log = mock_save.call_args[1]["table_data"]
+        assert saved_log["ID"][0] is None
+
     def test_get_data_summary(self, correction_processor, sample_data):
         """Test getting data summary."""
         processor, _, _ = correction_processor
@@ -602,17 +757,19 @@ class TestCorrectionProcessor:
         processor, mock_get, mock_save = correction_processor
 
         # Mock sequence: get log for removal, get prep data for reapply,
-        # get updated log (empty)
+        # get updated log
         mock_get.side_effect = [
             sample_corrections_log,
             sample_data,  # prep data for reapply
-            pl.DataFrame(),  # empty log after removal
+            sample_corrections_log[[0, 2]],  # log after removal
         ]
 
-        processor.remove_correction_entry("test_alias", 1)
+        failures = processor.remove_correction_entry("test_alias", 1)
 
-        # Should save the updated log and reapplied data
-        assert mock_save.call_count == 2
+        # Should save: the trimmed log, the reapply's refreshed log (with
+        # status), and the reapplied corrected data
+        assert mock_save.call_count == 3
+        assert failures == []
 
     def test_remove_correction_entry_invalid_index(
         self, correction_processor, sample_corrections_log
@@ -647,10 +804,11 @@ class TestCorrectionProcessor:
         processor, mock_get, mock_save = correction_processor
         mock_get.return_value = pl.DataFrame()  # Empty prep data
 
-        processor._reapply_all_corrections("test_alias")
+        failures = processor._reapply_all_corrections("test_alias")
 
         # Should not save anything when prep data is empty
         mock_save.assert_not_called()
+        assert failures == []
 
     def test_reapply_all_corrections_empty_log(self, correction_processor, sample_data):
         """Test reapplying corrections when correction log is empty."""
@@ -658,10 +816,12 @@ class TestCorrectionProcessor:
         # Mock sequence: get prep data, get empty log
         mock_get.side_effect = [sample_data, pl.DataFrame()]
 
-        processor._reapply_all_corrections("test_alias")
+        failures = processor._reapply_all_corrections("test_alias")
 
-        # Should save the fresh prep data as corrected data
+        # Should save only the fresh prep data, with no partial log
         mock_save.assert_called_once()
+        assert mock_save.call_args.kwargs["db_name"] == "corrected"
+        assert failures == []
 
     def test_reapply_all_corrections_with_data(
         self, correction_processor, sample_data, sample_corrections_log
@@ -671,13 +831,19 @@ class TestCorrectionProcessor:
         # Mock sequence: get prep data, get correction log
         mock_get.side_effect = [sample_data, sample_corrections_log]
 
-        processor._reapply_all_corrections("test_alias")
+        failures = processor._reapply_all_corrections("test_alias")
 
-        # Should save corrected data after applying all corrections
-        mock_save.assert_called_once()
-        call_args = mock_save.call_args
+        # Should save the refreshed log, then corrected data after applying
+        # all corrections
+        assert mock_save.call_count == 2
+        call_args = mock_save.call_args_list[-1]
         assert call_args[1]["alias"] == "test_alias"
         assert call_args[1]["db_name"] == "corrected"
+        assert failures == []
+
+        # The refreshed log records every step as successful
+        saved_log = mock_save.call_args_list[0][1]["table_data"]
+        assert saved_log["status"].to_list() == ["Successful"] * 3
 
     def test_reapply_corrections_key_not_found(self, correction_processor, sample_data):
         """Test reapplying corrections when key value not found in data."""
@@ -699,10 +865,141 @@ class TestCorrectionProcessor:
 
         mock_get.side_effect = [sample_data, invalid_log]
 
-        processor._reapply_all_corrections("test_alias")
+        failures = processor._reapply_all_corrections("test_alias")
 
         # Should still save data even if some corrections fail
-        mock_save.assert_called_once()
+        assert mock_save.call_count == 2
+        # ... and the skipped correction should be reported, not swallowed
+        assert len(failures) == 1
+        assert "nonexistent_key" in failures[0].reason
+
+        # ... and the log itself records the failure
+        saved_log = mock_save.call_args_list[0][1]["table_data"]
+        assert saved_log["status"][0] == "Failed"
+        assert "nonexistent_key" in saved_log["status_reason"][0]
+
+    def test_reapply_corrections_column_no_longer_available(
+        self, correction_processor, sample_data
+    ):
+        """Failure reason 1: the targeted column was dropped upstream."""
+        processor, mock_get, mock_save = correction_processor
+
+        log = pl.DataFrame(
+            {
+                "date": [datetime.now()],
+                "KEY": ["key1"],
+                "ID": [None],
+                "action": ["modify value"],
+                "column": ["retired_column"],
+                "current_value": ["old"],
+                "new_value": ["new"],
+                "reason": ["test correction"],
+            }
+        )
+        mock_get.side_effect = [sample_data, log]
+
+        failures = processor._reapply_all_corrections("test_alias")
+
+        assert len(failures) == 1
+        assert "retired_column" in failures[0].reason
+        assert "no longer available" in failures[0].reason
+
+        saved_log = mock_save.call_args_list[0][1]["table_data"]
+        assert saved_log["status"][0] == "Failed"
+        assert "no longer available" in saved_log["status_reason"][0]
+
+    def test_reapply_corrections_current_value_changed(
+        self, correction_processor, sample_data
+    ):
+        """Failure reason 2: the value has changed since the correction was
+        logged, so blindly reapplying could clobber a legitimate update.
+        """
+        processor, mock_get, mock_save = correction_processor
+
+        # Recorded current_value ("Something Else") no longer matches
+        # sample_data's actual value for key1's name column ("John").
+        log = pl.DataFrame(
+            {
+                "date": [datetime.now()],
+                "KEY": ["key1"],
+                "ID": [None],
+                "action": ["modify value"],
+                "column": ["name"],
+                "current_value": ["Something Else"],
+                "new_value": ["Johnny"],
+                "reason": ["test correction"],
+            }
+        )
+        mock_get.side_effect = [sample_data, log]
+
+        failures = processor._reapply_all_corrections("test_alias")
+
+        assert len(failures) == 1
+        assert "changed since this correction was recorded" in failures[0].reason
+        assert "Something Else" in failures[0].reason
+        assert "John" in failures[0].reason
+
+        # The name column must be untouched since the correction was skipped
+        saved_data = mock_save.call_args_list[-1][1]["table_data"]
+        assert saved_data.filter(pl.col("survey_key") == "key1")["name"][0] == "John"
+
+    def test_reapply_corrections_current_value_unchanged_still_applies(
+        self, correction_processor, sample_data
+    ):
+        """No recorded current_value, or a matching one, applies normally."""
+        processor, mock_get, mock_save = correction_processor
+
+        log = pl.DataFrame(
+            {
+                "date": [datetime.now()],
+                "KEY": ["key1"],
+                "ID": [None],
+                "action": ["modify value"],
+                "column": ["name"],
+                "current_value": ["John"],
+                "new_value": ["Johnny"],
+                "reason": ["test correction"],
+            }
+        )
+        mock_get.side_effect = [sample_data, log]
+
+        failures = processor._reapply_all_corrections("test_alias")
+
+        assert failures == []
+        saved_data = mock_save.call_args_list[-1][1]["table_data"]
+        assert saved_data.filter(pl.col("survey_key") == "key1")["name"][0] == "Johnny"
+
+    def test_reapply_corrections_partial_failure_continues(
+        self, correction_processor, sample_data
+    ):
+        """One bad correction is skipped and reported; the rest still apply."""
+        processor, mock_get, mock_save = correction_processor
+
+        mixed_log = pl.DataFrame(
+            {
+                "date": [datetime.now()] * 2,
+                "KEY": ["nonexistent_key", "key1"],
+                "ID": [None, None],
+                "action": ["modify value", "modify value"],
+                "column": ["name", "name"],
+                "current_value": ["test", "John"],
+                "new_value": ["changed", "Johnny"],
+                "reason": ["bad correction", "good correction"],
+            }
+        )
+
+        mock_get.side_effect = [sample_data, mixed_log]
+
+        failures = processor._reapply_all_corrections("test_alias")
+
+        assert mock_save.call_count == 2
+        saved_data = mock_save.call_args_list[-1][1]["table_data"]
+        assert saved_data.filter(pl.col("survey_key") == "key1")["name"][0] == "Johnny"
+        assert len(failures) == 1
+        assert "nonexistent_key" in failures[0].reason
+
+        saved_log = mock_save.call_args_list[0][1]["table_data"]
+        assert saved_log["status"].to_list() == ["Failed", "Successful"]
 
     def test_reapply_corrections_exception_handling(
         self, correction_processor, sample_data
@@ -727,10 +1024,15 @@ class TestCorrectionProcessor:
         mock_get.side_effect = [sample_data, problematic_log]
 
         # Should not raise exception, just skip problematic corrections
-        processor._reapply_all_corrections("test_alias")
+        failures = processor._reapply_all_corrections("test_alias")
 
         # Should still save data
-        mock_save.assert_called_once()
+        assert mock_save.call_count == 2
+        # ... and report the skipped correction instead of swallowing it
+        assert len(failures) == 1
+        assert failures[0].reason
+        assert "nonexistent_column" in failures[0].reason
+        assert "key1" in failures[0].step
 
     def test_private_apply_modify_value_string(self, correction_processor, sample_data):
         """Test private method _apply_modify_value with string column."""
@@ -775,3 +1077,1563 @@ class TestCorrectionProcessor:
 
         assert len(result) == 2
         assert not (result["survey_key"] == "key1").any()
+
+
+# ---------------------------------------------------------------------------
+# Behavior tests against an in-memory store
+#
+# Storage is the only collaborator replaced here: the fake keeps tables in a
+# dict keyed by (project_id, db_name, alias), so these tests observe behavior
+# through the processor's public methods rather than inspecting save calls.
+# ---------------------------------------------------------------------------
+
+
+@pytest.fixture
+def store():
+    """Patch DuckDB storage with an in-memory dict and reset processor caches."""
+    tables: dict[tuple[str, str, str], pl.DataFrame] = {}
+
+    def fake_get(project_id, alias, db_name, type="pl"):
+        return tables.get((project_id, db_name, alias), pl.DataFrame())
+
+    def fake_save(project_id, table_data, alias, db_name="raw"):
+        tables[(project_id, db_name, alias)] = table_data
+
+    def fake_exists(project_id, alias, db_name):
+        return (project_id, db_name, alias) in tables
+
+    with (
+        patch("datasure.processing.corrections.duckdb_get_table", fake_get),
+        patch("datasure.processing.corrections.duckdb_save_table", fake_save),
+        patch("datasure.processing.corrections.duckdb_table_exists", fake_exists),
+    ):
+        _clear_processor_caches()
+        yield tables
+        _clear_processor_caches()
+
+
+def _clear_processor_caches():
+    processor = CorrectionProcessor("any")
+    processor.get_corrected_data.clear()
+    processor.get_correction_log.clear()
+    processor.get_data_summary.clear()
+    processor.get_correction_summary.clear()
+
+
+def _seed_prep(store, data: pl.DataFrame, project_id="p1", alias="survey"):
+    store[(project_id, "prep", alias)] = data
+
+
+class TestCorrectionLogSource:
+    """Every log entry records which page produced it."""
+
+    def test_new_entry_defaults_source_to_corrections_page(self, store, sample_data):
+        _seed_prep(store, sample_data)
+        processor = CorrectionProcessor("p1")
+
+        processor.apply_correction(
+            alias="survey",
+            key_col="survey_key",
+            key_value="key1",
+            action="modify value",
+            column="name",
+            current_value="John",
+            new_value="Johnny",
+            reason="typo",
+        )
+
+        log = processor.get_correction_log("survey")
+        assert log["source"].to_list() == ["corrections_page"]
+
+    def test_new_entry_records_given_source(self, store, sample_data):
+        _seed_prep(store, sample_data)
+        processor = CorrectionProcessor("p1")
+
+        processor.add_correction_entry(
+            alias="survey",
+            key_value="key1",
+            current_id=None,
+            action="remove row",
+            column=None,
+            current_value=None,
+            new_value=None,
+            reason="duplicate",
+            source="duplicates",
+        )
+
+        log = processor.get_correction_log("survey")
+        assert log["source"].to_list() == ["duplicates"]
+
+    def test_legacy_log_loads_with_backfilled_source_and_no_data_loss(
+        self, store, sample_corrections_log
+    ):
+        store[("p1", "logs", "corr_log_survey")] = sample_corrections_log
+        processor = CorrectionProcessor("p1")
+
+        log = processor.get_correction_log("survey")
+
+        assert log["source"].to_list() == ["corrections_page"] * 3
+        assert log["status"].to_list() == ["Successful"] * 3
+        assert log.select(sample_corrections_log.columns).equals(sample_corrections_log)
+
+    def test_removing_the_only_entry_leaves_an_empty_log_with_full_schema(
+        self, store, sample_corrections_log
+    ):
+        # No prep table, so removal does not replay (and re-save) the log.
+        store[("p1", "logs", "corr_log_survey")] = sample_corrections_log[:1]
+        processor = CorrectionProcessor("p1")
+
+        processor.remove_correction_entry("survey", 0)
+
+        persisted = store[("p1", "logs", "corr_log_survey")]
+        assert persisted.is_empty()
+        assert persisted.columns == [
+            "date",
+            "KEY",
+            "ID",
+            "action",
+            "column",
+            "current_value",
+            "new_value",
+            "reason",
+            "status",
+            "status_reason",
+            "source",
+            "check_type",
+            "severity",
+            "user",
+        ]
+
+
+class TestCorrectionLogUser:
+    """Every log entry records who made it."""
+
+    @pytest.fixture(autouse=True)
+    def reviewer(self, monkeypatch):
+        monkeypatch.setattr(
+            "datasure.processing.corrections.get_reviewer_name", lambda: "ama"
+        )
+
+    def test_apply_correction_records_the_reviewer(self, store, sample_data):
+        _seed_prep(store, sample_data)
+        processor = CorrectionProcessor("p1")
+
+        processor.apply_correction(
+            alias="survey",
+            key_col="survey_key",
+            key_value="key1",
+            action="modify value",
+            column="name",
+            current_value="John",
+            new_value="Johnny",
+            reason="typo",
+        )
+
+        assert processor.get_correction_log("survey")["user"].to_list() == ["ama"]
+
+    def test_accept_value_records_the_reviewer(self, store, sample_data):
+        _seed_prep(store, sample_data)
+        processor = CorrectionProcessor("p1")
+
+        processor.accept_value(
+            alias="survey",
+            key_col="survey_key",
+            key_value="key1",
+            check_type="outliers",
+            column="age",
+            current_value=25,
+            reason="verified",
+        )
+
+        assert processor.get_correction_log("survey")["user"].to_list() == ["ama"]
+
+    def test_apply_corrections_records_the_reviewer_on_every_entry(
+        self, store, sample_data
+    ):
+        _seed_prep(store, sample_data)
+        processor = CorrectionProcessor("p1")
+
+        processor.apply_corrections(
+            alias="survey",
+            key_col="survey_key",
+            entries=[
+                CorrectionEntry(
+                    key_value="key1",
+                    action="modify value",
+                    column="name",
+                    current_value="John",
+                    new_value="Jon",
+                    reason="typo",
+                ),
+                CorrectionEntry(
+                    key_value="key2", action="remove row", reason="duplicate"
+                ),
+            ],
+            source="duplicates",
+        )
+
+        log = processor.get_correction_log("survey")
+        assert log["user"].to_list() == ["ama", "ama"]
+
+    def test_legacy_log_loads_with_an_empty_user_and_no_data_loss(
+        self, store, sample_data, sample_corrections_log
+    ):
+        _seed_prep(store, sample_data)
+        legacy_log = sample_corrections_log.with_columns(
+            pl.lit("corrections_page").alias("source")
+        )
+        store[("p1", "logs", "corr_log_survey")] = legacy_log
+        processor = CorrectionProcessor("p1")
+
+        log = processor.get_correction_log("survey")
+        assert log["user"].to_list() == [None] * 3
+        assert log.select(legacy_log.columns).equals(legacy_log)
+
+        processor.add_correction_entry(
+            alias="survey",
+            key_value="key1",
+            current_id=None,
+            action="remove row",
+            column=None,
+            current_value=None,
+            new_value=None,
+            reason="duplicate",
+        )
+
+        log = processor.get_correction_log("survey")
+        assert log["user"].to_list() == [None, None, None, "ama"]
+        assert log.head(3).select(legacy_log.columns).equals(legacy_log)
+
+
+class TestCorrectionsCheckTheValueTheyChange:
+    """Modify/remove entries are checked against the data when applied and
+    compare values, not string forms, on replay.
+    """
+
+    def _modify_age(self, processor, current_value, new_value):
+        processor.apply_corrections(
+            alias="survey",
+            key_col="survey_key",
+            entries=[
+                CorrectionEntry(
+                    key_value="key1",
+                    action="modify value",
+                    reason="r",
+                    column="age",
+                    current_value=current_value,
+                    new_value=new_value,
+                )
+            ],
+            source="outliers",
+        )
+
+    def test_float_form_of_an_integer_survives_replay(self, store, sample_data):
+        _seed_prep(store, sample_data)
+        processor = CorrectionProcessor("p1")
+        self._modify_age(processor, 25.0, "30")
+
+        failures = processor.refresh_corrected_data("survey")
+
+        assert failures == []
+        assert processor.get_corrected_data("survey")["age"][0] == 30
+
+    def test_correction_of_an_already_corrected_value_is_rejected(
+        self, store, sample_data
+    ):
+        _seed_prep(store, sample_data)
+        processor = CorrectionProcessor("p1")
+        self._modify_age(processor, 25, "26")
+
+        with pytest.raises(ValueError, match="has changed since it was flagged"):
+            self._modify_age(processor, 25, "40")
+
+        assert processor.get_corrected_data("survey")["age"][0] == 26
+        assert len(processor.get_correction_log("survey")) == 1
+
+    def test_string_cell_matches_the_float_form_of_its_number(self, store):
+        _seed_prep(store, pl.DataFrame({"KEY": ["k1"], "age": ["25"]}))
+        processor = CorrectionProcessor("p1")
+
+        processor.accept_value(
+            alias="survey",
+            key_col="KEY",
+            key_value="k1",
+            check_type="outliers",
+            column="age",
+            current_value=25.0,
+            reason="verified",
+        )
+
+        active = processor.get_active_acceptances("survey", "outliers", "KEY")
+        assert active["KEY"].to_list() == ["k1"]
+
+    def test_replay_marks_an_acceptance_that_no_longer_holds_inactive(
+        self, store, sample_data
+    ):
+        _seed_prep(store, sample_data)
+        processor = CorrectionProcessor("p1")
+        processor.accept_value(
+            alias="survey",
+            key_col="survey_key",
+            key_value="key1",
+            check_type="outliers",
+            column="age",
+            current_value=25,
+            reason="verified",
+        )
+        _seed_prep(store, sample_data.with_columns(pl.lit(99).alias("age")))
+
+        failures = processor.refresh_corrected_data("survey")
+
+        assert failures == []
+        log = processor.get_correction_log("survey")
+        assert log["status"].to_list() == ["Inactive"]
+        assert "has changed" in log["status_reason"][0]
+
+
+class TestAcceptAction:
+    """Accepting a flagged value records a decision without changing data."""
+
+    def _accept_age(self, processor, key="key1", value=25, reason="verified"):
+        processor.accept_value(
+            alias="survey",
+            key_col="survey_key",
+            key_value=key,
+            check_type="outliers",
+            column="age",
+            current_value=value,
+            reason=reason,
+        )
+
+    def test_accept_logs_entry_and_leaves_corrected_data_unchanged(
+        self, store, sample_data
+    ):
+        _seed_prep(store, sample_data)
+        processor = CorrectionProcessor("p1")
+
+        self._accept_age(processor)
+
+        assert processor.get_corrected_data("survey").equals(sample_data)
+        log = processor.get_correction_log("survey")
+        assert log.select(
+            "KEY", "action", "check_type", "column", "current_value", "reason"
+        ).rows() == [("key1", "accept", "outliers", "age", "25", "verified")]
+
+    def test_accept_requires_a_reason(self, store, sample_data):
+        _seed_prep(store, sample_data)
+        processor = CorrectionProcessor("p1")
+
+        with pytest.raises(ValueError, match="reason"):
+            self._accept_age(processor, reason="  ")
+
+        assert processor.get_correction_log("survey").is_empty()
+
+    # Backcheck results measure data quality, so a mismatch can't be accepted
+    # away; it can only be attributed on the Backchecks page. An ID belongs to
+    # one record, so a duplicate ID can't be accepted either; it is resolved
+    # on the duplicate cards.
+    @pytest.mark.parametrize("check_type", ["missing", "backchecks", "duplicates"])
+    def test_accept_rejects_unknown_check_type(self, store, sample_data, check_type):
+        _seed_prep(store, sample_data)
+        processor = CorrectionProcessor("p1")
+
+        with pytest.raises(ValueError, match="check type"):
+            processor.accept_value(
+                alias="survey",
+                key_col="survey_key",
+                key_value="key1",
+                check_type=check_type,
+                column="age",
+                current_value=25,
+                reason="ok",
+            )
+
+    def test_acceptance_is_active_while_value_is_unchanged(self, store, sample_data):
+        _seed_prep(store, sample_data)
+        processor = CorrectionProcessor("p1")
+        self._accept_age(processor)
+
+        active = processor.get_active_acceptances("survey", "outliers", "survey_key")
+
+        assert active.select("KEY", "column").rows() == [("key1", "age")]
+
+    def test_acceptance_is_inactive_once_value_changes(self, store, sample_data):
+        _seed_prep(store, sample_data)
+        processor = CorrectionProcessor("p1")
+        self._accept_age(processor)
+
+        processor.apply_correction(
+            alias="survey",
+            key_col="survey_key",
+            key_value="key1",
+            action="modify value",
+            column="age",
+            current_value=25,
+            new_value=26,
+            reason="re-interview",
+        )
+
+        active = processor.get_active_acceptances("survey", "outliers", "survey_key")
+        assert active.is_empty()
+
+    def test_acceptances_are_scoped_to_their_check_type(self, store, sample_data):
+        _seed_prep(store, sample_data)
+        processor = CorrectionProcessor("p1")
+        self._accept_age(processor)
+
+        active = processor.get_active_acceptances("survey", "constraints", "survey_key")
+
+        assert active.is_empty()
+
+    def _gps_data(self):
+        return pl.DataFrame(
+            {
+                "survey_key": ["key1", "key2"],
+                "gps_lat": [5.6037, 6.6885],
+                "gps_lon": [-0.187, -1.6244],
+            }
+        )
+
+    def _accept_gps(self, processor):
+        processor.accept_value(
+            alias="survey",
+            key_col="survey_key",
+            key_value="key1",
+            check_type="gps",
+            column=None,
+            current_value={"gps_lat": 5.6037, "gps_lon": -0.187},
+            reason="Household relocated",
+        )
+
+    def test_gps_acceptance_is_active_while_both_coordinates_match(self, store):
+        _seed_prep(store, self._gps_data())
+        processor = CorrectionProcessor("p1")
+        self._accept_gps(processor)
+
+        active = processor.get_active_acceptances("survey", "gps", "survey_key")
+
+        assert active["KEY"].to_list() == ["key1"]
+        assert active["column"].to_list() == [None]
+
+    def test_gps_acceptance_is_inactive_when_one_coordinate_changes(self, store):
+        _seed_prep(store, self._gps_data())
+        processor = CorrectionProcessor("p1")
+        self._accept_gps(processor)
+
+        processor.apply_correction(
+            alias="survey",
+            key_col="survey_key",
+            key_value="key1",
+            action="modify value",
+            column="gps_lon",
+            current_value=-0.187,
+            new_value=-0.2,
+            reason="re-recorded",
+        )
+
+        assert processor.get_active_acceptances(
+            "survey", "gps", "survey_key"
+        ).is_empty()
+
+    def test_gps_acceptance_requires_a_coordinate_mapping(self, store):
+        _seed_prep(store, self._gps_data())
+        processor = CorrectionProcessor("p1")
+
+        with pytest.raises(ValueError, match="GPS"):
+            processor.accept_value(
+                alias="survey",
+                key_col="survey_key",
+                key_value="key1",
+                check_type="gps",
+                column="gps_lat",
+                current_value=5.6037,
+                reason="ok",
+            )
+
+    @pytest.mark.parametrize(
+        "current_value",
+        [{}, {"gps_lat": 5.6037}],
+        ids=["empty", "latitude_only"],
+    )
+    def test_gps_acceptance_requires_both_coordinates(self, store, current_value):
+        _seed_prep(store, self._gps_data())
+        processor = CorrectionProcessor("p1")
+
+        with pytest.raises(ValueError, match="GPS"):
+            processor.accept_value(
+                alias="survey",
+                key_col="survey_key",
+                key_value="key1",
+                check_type="gps",
+                column=None,
+                current_value=current_value,
+                reason="ok",
+            )
+
+        assert processor.get_correction_log("survey").is_empty()
+
+    def test_accept_rejects_a_value_that_changed_since_it_was_flagged(
+        self, store, sample_data
+    ):
+        # key1's age is 25; the check page still shows the stale value 99
+        _seed_prep(store, sample_data)
+        processor = CorrectionProcessor("p1")
+
+        with pytest.raises(ValueError, match="has changed since it was flagged"):
+            self._accept_age(processor, value=99)
+
+        assert processor.get_correction_log("survey").is_empty()
+
+    def test_gps_accept_rejects_a_changed_coordinate(self, store):
+        _seed_prep(store, self._gps_data())
+        processor = CorrectionProcessor("p1")
+
+        with pytest.raises(ValueError, match=r"'gps_lon'.*has changed"):
+            processor.accept_value(
+                alias="survey",
+                key_col="survey_key",
+                key_value="key1",
+                check_type="gps",
+                column=None,
+                current_value={"gps_lat": 5.6037, "gps_lon": -0.2},
+                reason="ok",
+            )
+
+        assert processor.get_correction_log("survey").is_empty()
+
+    @pytest.mark.parametrize(
+        ("key", "column", "message"),
+        [
+            ("missing", "age", "Key value 'missing' not found"),
+            ("key1", "height", "Column 'height' not found"),
+        ],
+    )
+    def test_accept_rejects_unknown_key_or_column(
+        self, store, sample_data, key, column, message
+    ):
+        _seed_prep(store, sample_data)
+        processor = CorrectionProcessor("p1")
+
+        with pytest.raises(ValueError, match=message):
+            processor.accept_value(
+                alias="survey",
+                key_col="survey_key",
+                key_value=key,
+                check_type="outliers",
+                column=column,
+                current_value=25,
+                reason="ok",
+            )
+
+        assert processor.get_correction_log("survey").is_empty()
+
+    def test_apply_corrections_rejects_a_stale_acceptance_atomically(
+        self, store, sample_data
+    ):
+        _seed_prep(store, sample_data)
+        processor = CorrectionProcessor("p1")
+
+        with pytest.raises(ValueError, match="has changed since it was flagged"):
+            processor.apply_corrections(
+                alias="survey",
+                key_col="survey_key",
+                entries=[
+                    CorrectionEntry(
+                        key_value="key2",
+                        action="modify value",
+                        column="age",
+                        current_value=30,
+                        new_value=31,
+                        reason="typo",
+                    ),
+                    CorrectionEntry(
+                        key_value="key1",
+                        action="accept",
+                        check_type="outliers",
+                        column="age",
+                        current_value=99,
+                        reason="verified",
+                    ),
+                ],
+                source="outliers",
+            )
+
+        assert processor.get_corrected_data("survey").equals(sample_data)
+        assert processor.get_correction_log("survey").is_empty()
+
+    def test_replay_skips_accept_rows(self, store, sample_data):
+        _seed_prep(store, sample_data)
+        processor = CorrectionProcessor("p1")
+        self._accept_age(processor, key="key1", value=25)
+        processor.apply_correction(
+            alias="survey",
+            key_col="survey_key",
+            key_value="key2",
+            action="modify value",
+            column="name",
+            current_value="Jane",
+            new_value="Janet",
+            reason="typo",
+        )
+        # The accepted record is later dropped from prep, so a replayed
+        # accept row would have no KEY to match.
+        _seed_prep(store, sample_data.filter(pl.col("survey_key") != "key1"))
+
+        failures = processor.refresh_corrected_data("survey")
+
+        assert failures == []
+        corrected = processor.get_corrected_data("survey")
+        assert corrected["name"].to_list() == ["Janet", "Bob"]
+        assert processor.get_correction_log("survey")["status"].to_list() == [
+            "Inactive",
+            "Successful",
+        ]
+
+    def test_accept_rows_can_be_removed(self, store, sample_data):
+        _seed_prep(store, sample_data)
+        processor = CorrectionProcessor("p1")
+        self._accept_age(processor)
+
+        summaries = processor.get_correction_summary("survey")
+        processor.remove_correction_entry("survey", summaries[0]["index"])
+
+        assert processor.get_correction_log("survey").is_empty()
+        assert processor.get_active_acceptances(
+            "survey", "outliers", "survey_key"
+        ).is_empty()
+
+
+class TestCacheIsScopedToProject:
+    """Cached reads are keyed on project as well as alias."""
+
+    def test_projects_sharing_an_alias_do_not_share_corrected_data(self, store):
+        _seed_prep(store, pl.DataFrame({"KEY": ["a"]}), project_id="p1")
+        _seed_prep(store, pl.DataFrame({"KEY": ["b"]}), project_id="p2")
+
+        first = CorrectionProcessor("p1").get_corrected_data("survey")
+        second = CorrectionProcessor("p2").get_corrected_data("survey")
+
+        assert first["KEY"].to_list() == ["a"]
+        assert second["KEY"].to_list() == ["b"]
+
+    def test_projects_sharing_an_alias_do_not_share_correction_logs(
+        self, store, sample_corrections_log
+    ):
+        store[("p1", "logs", "corr_log_survey")] = sample_corrections_log
+
+        assert CorrectionProcessor("p1").get_correction_log("survey").height == 3
+        assert CorrectionProcessor("p2").get_correction_log("survey").is_empty()
+        assert CorrectionProcessor("p2").get_correction_summary("survey") == []
+
+
+class TestApplyCorrectionsAtomically:
+    """Several entries apply together, or not at all."""
+
+    def test_applies_every_entry_and_logs_each_with_the_source(
+        self, store, sample_data
+    ):
+        _seed_prep(store, sample_data)
+        processor = CorrectionProcessor("p1")
+
+        processor.apply_corrections(
+            alias="survey",
+            key_col="survey_key",
+            entries=[
+                CorrectionEntry(
+                    key_value="key1",
+                    action="modify value",
+                    column="name",
+                    current_value="John",
+                    new_value="Jon",
+                    reason="keep first",
+                ),
+                CorrectionEntry(
+                    key_value="key1",
+                    action="modify value",
+                    column="age",
+                    current_value=25,
+                    new_value=26,
+                    reason="keep first",
+                ),
+                CorrectionEntry(
+                    key_value="key2", action="remove row", reason="duplicate"
+                ),
+            ],
+            source="duplicates",
+        )
+
+        corrected = processor.get_corrected_data("survey")
+        assert corrected.select("survey_key", "name", "age").rows() == [
+            ("key1", "Jon", 26),
+            ("key3", "Bob", 35),
+        ]
+        log = processor.get_correction_log("survey")
+        assert log["action"].to_list() == ["modify value", "modify value", "remove row"]
+        assert log["source"].to_list() == ["duplicates"] * 3
+
+    def test_an_invalid_entry_applies_nothing(self, store, sample_data):
+        _seed_prep(store, sample_data)
+        processor = CorrectionProcessor("p1")
+
+        with pytest.raises(ValueError, match="no_such_column"):
+            processor.apply_corrections(
+                alias="survey",
+                key_col="survey_key",
+                entries=[
+                    CorrectionEntry(
+                        key_value="key1",
+                        action="modify value",
+                        column="name",
+                        current_value="John",
+                        new_value="Jon",
+                        reason="fix",
+                    ),
+                    CorrectionEntry(
+                        key_value="key2",
+                        action="modify value",
+                        column="no_such_column",
+                        new_value="x",
+                        reason="fix",
+                    ),
+                ],
+            )
+
+        assert processor.get_corrected_data("survey").equals(sample_data)
+        assert processor.get_correction_log("survey").is_empty()
+
+    def test_an_entry_invalidated_by_an_earlier_entry_applies_nothing(
+        self, store, sample_data
+    ):
+        _seed_prep(store, sample_data)
+        processor = CorrectionProcessor("p1")
+
+        with pytest.raises(ValueError, match="key1"):
+            processor.apply_corrections(
+                alias="survey",
+                key_col="survey_key",
+                entries=[
+                    CorrectionEntry(
+                        key_value="key1", action="remove row", reason="dup"
+                    ),
+                    CorrectionEntry(
+                        key_value="key1",
+                        action="remove value",
+                        column="name",
+                        reason="dup",
+                    ),
+                ],
+            )
+
+        assert processor.get_corrected_data("survey").equals(sample_data)
+        assert processor.get_correction_log("survey").is_empty()
+
+    def test_can_mix_an_acceptance_with_corrections(self, store, sample_data):
+        _seed_prep(store, sample_data)
+        processor = CorrectionProcessor("p1")
+
+        processor.apply_corrections(
+            alias="survey",
+            key_col="survey_key",
+            entries=[
+                CorrectionEntry(
+                    key_value="key1",
+                    action="accept",
+                    check_type="outliers",
+                    column="age",
+                    current_value=25,
+                    reason="verified",
+                ),
+                CorrectionEntry(
+                    key_value="key2",
+                    action="modify value",
+                    column="age",
+                    current_value=30,
+                    new_value=31,
+                    reason="typo",
+                ),
+            ],
+            source="outliers",
+        )
+
+        assert processor.get_corrected_data("survey")["age"].to_list() == [25, 31, 35]
+        active = processor.get_active_acceptances("survey", "outliers", "survey_key")
+        assert active["KEY"].to_list() == ["key1"]
+
+    def test_every_entry_needs_a_reason(self, store, sample_data):
+        _seed_prep(store, sample_data)
+        processor = CorrectionProcessor("p1")
+
+        with pytest.raises(ValueError, match="reason"):
+            processor.apply_corrections(
+                alias="survey",
+                key_col="survey_key",
+                entries=[
+                    CorrectionEntry(key_value="key1", action="remove row", reason="")
+                ],
+            )
+
+
+class TestCorrectionSummaryDescribesAcceptances:
+    def test_accept_rows_are_listed_with_their_check_type(self, store, sample_data):
+        _seed_prep(store, sample_data)
+        processor = CorrectionProcessor("p1")
+        processor.accept_value(
+            alias="survey",
+            key_col="survey_key",
+            key_value="key1",
+            check_type="outliers",
+            column="age",
+            current_value=25,
+            reason="verified",
+        )
+
+        (summary,) = processor.get_correction_summary("survey")
+
+        assert summary["action"] == "accept"
+        assert summary["check_type"] == "outliers"
+        assert summary["description"] == "Accept outliers flag on age for key key1"
+
+    def test_gps_accept_rows_describe_the_coordinates(self, store):
+        _seed_prep(store, pl.DataFrame({"KEY": ["k1"], "lat": [1.0], "lon": [2.0]}))
+        processor = CorrectionProcessor("p1")
+        processor.accept_value(
+            alias="survey",
+            key_col="KEY",
+            key_value="k1",
+            check_type="gps",
+            column=None,
+            current_value={"lat": 1.0, "lon": 2.0},
+            reason="verified",
+        )
+
+        (summary,) = processor.get_correction_summary("survey")
+
+        assert summary["description"] == "Accept gps flag on coordinates for key k1"
+
+
+class TestAcceptanceMatching:
+    """Acceptances compare values, not their pandas/polars string forms."""
+
+    def _accept(self, processor, key, column, value, key_col="KEY"):
+        processor.accept_value(
+            alias="survey",
+            key_col=key_col,
+            key_value=key,
+            check_type="constraints",
+            column=column,
+            current_value=value,
+            reason="verified",
+        )
+
+    def test_nan_accepted_value_matches_a_missing_cell(self, store):
+        _seed_prep(
+            store,
+            pl.DataFrame(
+                {"KEY": ["k1"], "age": [None]},
+                schema={"KEY": pl.String, "age": pl.Int64},
+            ),
+        )
+        processor = CorrectionProcessor("p1")
+        self._accept(processor, "k1", "age", float("nan"))
+
+        active = processor.get_active_acceptances("survey", "constraints", "KEY")
+
+        assert active["KEY"].to_list() == ["k1"]
+
+    def test_float_form_of_an_integer_matches(self, store):
+        # pandas turns an int column with nulls into floats: 25 arrives as 25.0
+        _seed_prep(store, pl.DataFrame({"KEY": ["k1"], "age": [25]}))
+        processor = CorrectionProcessor("p1")
+        self._accept(processor, "k1", "age", 25.0)
+
+        active = processor.get_active_acceptances("survey", "constraints", "KEY")
+
+        assert active["KEY"].to_list() == ["k1"]
+
+    def test_a_different_number_does_not_match(self, store):
+        _seed_prep(store, pl.DataFrame({"KEY": ["k1"], "age": [25]}))
+        processor = CorrectionProcessor("p1")
+
+        with pytest.raises(ValueError, match="has changed since it was flagged"):
+            self._accept(processor, "k1", "age", 25.5)
+
+        assert processor.get_correction_log("survey").is_empty()
+
+    def test_non_string_key_column_is_supported(self, store):
+        _seed_prep(store, pl.DataFrame({"hhid": [101, 102], "age": [25, 30]}))
+        processor = CorrectionProcessor("p1")
+        self._accept(processor, "102", "age", 30, key_col="hhid")
+
+        active = processor.get_active_acceptances("survey", "constraints", "hhid")
+
+        assert active["KEY"].to_list() == ["102"]
+
+    def test_duplicate_keys_must_all_hold_the_accepted_value(self, store):
+        _seed_prep(store, pl.DataFrame({"KEY": ["k1", "k1"], "age": [25, 40]}))
+        processor = CorrectionProcessor("p1")
+
+        with pytest.raises(ValueError, match="has changed since it was flagged"):
+            self._accept(processor, "k1", "age", 25)
+
+        assert processor.get_correction_log("survey").is_empty()
+
+
+class TestApplyCorrectionsStorageFailure:
+    def test_failed_log_save_leaves_corrected_data_unchanged(self, store, sample_data):
+        _seed_prep(store, sample_data)
+        processor = CorrectionProcessor("p1")
+        processor.get_corrected_data("survey")  # materialize the corrected table
+
+        def failing_save(project_id, table_data, alias, db_name="raw"):
+            if db_name == "logs":
+                raise OSError("disk full")
+            store[(project_id, db_name, alias)] = table_data
+
+        with (
+            patch("datasure.processing.corrections.duckdb_save_table", failing_save),
+            pytest.raises(OSError, match="disk full"),
+        ):
+            processor.apply_corrections(
+                alias="survey",
+                key_col="survey_key",
+                entries=[
+                    CorrectionEntry(key_value="key1", action="remove row", reason="dup")
+                ],
+            )
+
+        assert processor.get_corrected_data("survey").equals(sample_data)
+        assert processor.get_correction_log("survey").is_empty()
+
+
+class TestRefreshExistingCorrectedData:
+    """Replays corrections after an upstream change, only once corrections exist."""
+
+    def _fix_name(self, processor):
+        processor.apply_correction(
+            alias="survey",
+            key_col="survey_key",
+            key_value="key1",
+            action="modify value",
+            column="name",
+            current_value="John",
+            new_value="Johnny",
+            reason="typo",
+        )
+
+    def test_does_nothing_without_a_corrected_table(self, store, sample_data):
+        _seed_prep(store, sample_data)
+
+        failures = CorrectionProcessor("p1").refresh_existing_corrected_data("survey")
+
+        assert failures == []
+        assert ("p1", "corrected", "survey") not in store
+
+    def test_rebuilds_corrected_table_from_new_prep(self, store, sample_data):
+        _seed_prep(store, sample_data)
+        processor = CorrectionProcessor("p1")
+        self._fix_name(processor)
+
+        # A prep step drops a column after the correction was made.
+        _seed_prep(store, sample_data.drop("age"))
+        failures = processor.refresh_existing_corrected_data("survey")
+
+        assert failures == []
+        corrected = processor.get_corrected_data("survey")
+        assert "age" not in corrected.columns
+        assert corrected["name"].to_list() == ["Johnny", "Jane", "Bob"]
+
+    def test_reports_corrections_that_no_longer_apply(self, store, sample_data):
+        _seed_prep(store, sample_data)
+        processor = CorrectionProcessor("p1")
+        self._fix_name(processor)
+
+        # A prep step drops the corrected column.
+        _seed_prep(store, sample_data.drop("name"))
+        failures = processor.refresh_existing_corrected_data("survey")
+
+        assert len(failures) == 1
+        assert processor.get_correction_log("survey")["status"].to_list() == ["Failed"]
+
+    def test_does_not_create_a_log_without_corrections(self, store, sample_data):
+        """Reapplying with no log saves the data but writes no partial log."""
+        _seed_prep(store, sample_data)
+        processor = CorrectionProcessor("p1")
+        processor.get_corrected_data("survey")
+        store[("p1", "corrected", "survey")] = sample_data.head(1)
+
+        failures = processor.refresh_existing_corrected_data("survey")
+
+        assert failures == []
+        assert store[("p1", "corrected", "survey")].equals(sample_data)
+        assert ("p1", "logs", "corr_log_survey") not in store
+        assert processor.get_active_acceptances(
+            "survey", "outliers", "survey_key"
+        ).is_empty()
+        assert processor.get_active_corrections("survey", "survey_key").is_empty()
+
+
+class TestLogWithoutActionColumn:
+    """Projects can hold the 0-row status-only log 1.1.0 saved on re-import."""
+
+    @pytest.fixture
+    def broken_log_store(self, store, sample_data):
+        _seed_prep(store, sample_data)
+        store[("p1", "corrected", "survey")] = sample_data
+        store[("p1", "logs", "corr_log_survey")] = pl.DataFrame(
+            schema={"status": pl.String, "status_reason": pl.String}
+        )
+        return store
+
+    def test_active_acceptances_are_empty(self, broken_log_store):
+        processor = CorrectionProcessor("p1")
+        result = processor.get_active_acceptances("survey", "outliers", "survey_key")
+        assert result.is_empty()
+
+    def test_active_corrections_are_empty(self, broken_log_store):
+        processor = CorrectionProcessor("p1")
+        assert processor.get_active_corrections("survey", "survey_key").is_empty()
+
+    def test_reapply_does_not_fail(self, broken_log_store):
+        processor = CorrectionProcessor("p1")
+        assert processor.refresh_existing_corrected_data("survey") == []
+        assert processor.get_active_corrections("survey", "survey_key").is_empty()
+
+    def test_adding_a_correction_replaces_the_broken_log(
+        self, broken_log_store, sample_data
+    ):
+        processor = CorrectionProcessor("p1")
+        processor.apply_correction(
+            alias="survey",
+            key_col="survey_key",
+            key_value="key1",
+            action="modify value",
+            column="name",
+            current_value="John",
+            new_value="Johnny",
+            reason="typo",
+        )
+        log = processor.get_correction_log("survey")
+        assert log["action"].to_list() == ["modify value"]
+        assert log["status"].to_list() == ["Successful"]
+
+
+class TestAcceptanceSeverity:
+    """Hard constraint acceptances record their severity in the log."""
+
+    def _hard_accept(self, **overrides):
+        values = {
+            "key_value": "key1",
+            "action": "accept",
+            "check_type": "constraints",
+            "column": "age",
+            "current_value": 25,
+            "reason": "verified with respondent",
+            "severity": "hard",
+        }
+        return CorrectionEntry(**(values | overrides))
+
+    def test_apply_corrections_logs_the_severity(self, store, sample_data):
+        _seed_prep(store, sample_data)
+        processor = CorrectionProcessor("p1")
+
+        processor.apply_corrections(
+            alias="survey",
+            key_col="survey_key",
+            entries=[self._hard_accept()],
+            source="constraints",
+        )
+
+        log = processor.get_correction_log("survey")
+        assert log.select("action", "source", "severity").rows() == [
+            ("accept", "constraints", "hard")
+        ]
+
+    def test_entries_without_severity_log_null(self, store, sample_data):
+        _seed_prep(store, sample_data)
+        processor = CorrectionProcessor("p1")
+
+        processor.apply_corrections(
+            alias="survey",
+            key_col="survey_key",
+            entries=[self._hard_accept(severity=None)],
+            source="constraints",
+        )
+
+        assert processor.get_correction_log("survey")["severity"].to_list() == [None]
+
+    def test_severity_is_only_recorded_on_acceptances(self, store, sample_data):
+        _seed_prep(store, sample_data)
+        processor = CorrectionProcessor("p1")
+
+        with pytest.raises(ValueError, match="severity"):
+            processor.apply_corrections(
+                alias="survey",
+                key_col="survey_key",
+                entries=[
+                    self._hard_accept(
+                        action="modify value", new_value=26, check_type=None
+                    )
+                ],
+                source="constraints",
+            )
+
+        assert processor.get_correction_log("survey").is_empty()
+
+    @pytest.mark.parametrize(
+        "overrides",
+        [{"check_type": "outliers"}, {"severity": "soft"}],
+        ids=["hard-outlier-acceptance", "unknown-severity"],
+    )
+    def test_invalid_acceptance_severity_is_rejected(
+        self, store, sample_data, overrides
+    ):
+        """Only constraint acceptances can be hard; nothing else is logged."""
+        _seed_prep(store, sample_data)
+        processor = CorrectionProcessor("p1")
+
+        with pytest.raises(ValueError, match="Severity"):
+            processor.apply_corrections(
+                alias="survey",
+                key_col="survey_key",
+                entries=[self._hard_accept(**overrides)],
+                source="outliers",
+            )
+
+        assert processor.get_correction_log("survey").is_empty()
+
+    def test_legacy_logs_load_with_null_severity(self, store, sample_corrections_log):
+        store[("p1", "logs", "corr_log_survey")] = sample_corrections_log
+
+        log = CorrectionProcessor("p1").get_correction_log("survey")
+
+        assert log["severity"].to_list() == [None] * 3
+
+    def test_summary_carries_the_severity(self, store, sample_data):
+        _seed_prep(store, sample_data)
+        processor = CorrectionProcessor("p1")
+        processor.apply_corrections(
+            alias="survey",
+            key_col="survey_key",
+            entries=[self._hard_accept()],
+            source="constraints",
+        )
+
+        (summary,) = processor.get_correction_summary("survey")
+
+        assert summary["severity"] == "hard"
+
+
+class TestActiveCorrections:
+    """Value corrections whose result the data still holds."""
+
+    def _correct(self, processor, *entries):
+        processor.apply_corrections(
+            alias="survey",
+            key_col="survey_key",
+            entries=list(entries),
+            source="outliers",
+        )
+
+    def _modify(self, key, column, new_value, current_value, reason="typo"):
+        return CorrectionEntry(
+            key_value=key,
+            action="modify value",
+            column=column,
+            current_value=current_value,
+            new_value=new_value,
+            reason=reason,
+        )
+
+    def test_returns_modify_and_remove_value_corrections(self, store, sample_data):
+        _seed_prep(store, sample_data)
+        processor = CorrectionProcessor("p1")
+        self._correct(
+            processor,
+            self._modify("key1", "age", 26, 25),
+            CorrectionEntry(
+                key_value="key2",
+                action="remove value",
+                column="age",
+                current_value=30,
+                reason="impossible",
+            ),
+        )
+
+        active = processor.get_active_corrections("survey", "survey_key")
+
+        assert active.select("KEY", "action", "column", "reason").rows() == [
+            ("key1", "modify value", "age", "typo"),
+            ("key2", "remove value", "age", "impossible"),
+        ]
+
+    def test_a_correction_overwritten_later_is_inactive(self, store, sample_data):
+        _seed_prep(store, sample_data)
+        processor = CorrectionProcessor("p1")
+        self._correct(processor, self._modify("key1", "age", 26, 25, reason="first"))
+        self._correct(processor, self._modify("key1", "age", 27, 26, reason="second"))
+
+        active = processor.get_active_corrections("survey", "survey_key")
+
+        assert active["reason"].to_list() == ["second"]
+
+    def test_excludes_acceptances_and_removed_rows(self, store, sample_data):
+        _seed_prep(store, sample_data)
+        processor = CorrectionProcessor("p1")
+        self._correct(
+            processor,
+            CorrectionEntry(
+                key_value="key1",
+                action="accept",
+                check_type="outliers",
+                column="age",
+                current_value=25,
+                reason="ok",
+            ),
+            CorrectionEntry(key_value="key3", action="remove row", reason="dup"),
+        )
+
+        assert processor.get_active_corrections("survey", "survey_key").is_empty()
+
+    def test_a_correction_that_failed_to_reapply_is_inactive(self, store, sample_data):
+        """Prep data that holds the new value doesn't make a failed correction
+        look applied.
+        """
+        _seed_prep(store, sample_data)
+        processor = CorrectionProcessor("p1")
+        self._correct(processor, self._modify("key1", "age", 26, 25))
+        # Prep now supplies 26 itself, so replay finds 26 where the
+        # correction expects 25 and rejects it.
+        _seed_prep(
+            store,
+            sample_data.with_columns(
+                pl.when(pl.col("survey_key") == "key1")
+                .then(26)
+                .otherwise(pl.col("age"))
+                .alias("age")
+            ),
+        )
+
+        failures = processor.refresh_existing_corrected_data("survey")
+
+        assert len(failures) == 1
+        assert processor.get_corrected_data("survey")["age"][0] == 26
+        assert processor.get_active_corrections("survey", "survey_key").is_empty()
+
+    def test_empty_log_returns_no_corrections(self, store, sample_data):
+        _seed_prep(store, sample_data)
+
+        active = CorrectionProcessor("p1").get_active_corrections(
+            "survey", "survey_key"
+        )
+
+        assert active.is_empty()
+
+
+class TestActiveCorrectionsMatchStoredValues:
+    """A correction is active if the cell holds the value it stored."""
+
+    @staticmethod
+    def _modify(key, new_value, current_value):
+        return CorrectionEntry(
+            key_value=key,
+            action="modify value",
+            column="age",
+            current_value=current_value,
+            new_value=new_value,
+            reason="typo",
+        )
+
+    def test_float32_modification_is_active(self, store):
+        """70.1 is stored as 70.0999984741211 in a Float32 column."""
+        _seed_prep(
+            store,
+            pl.DataFrame(
+                {"KEY": ["a", "b"], "age": [150.0, 30.0]},
+                schema={"KEY": pl.String, "age": pl.Float32},
+            ),
+        )
+        processor = CorrectionProcessor("p1")
+        processor.apply_corrections(
+            "survey", "KEY", [self._modify("a", "70.1", 150.0)], source="outliers"
+        )
+
+        active = processor.get_active_corrections("survey", "KEY")
+
+        assert active["KEY"].to_list() == ["a"]
+
+    def test_numeric_key_correction_applies_and_is_active(self, store):
+        _seed_prep(store, pl.DataFrame({"KEY": [7, 8], "age": [150, 30]}))
+        processor = CorrectionProcessor("p1")
+
+        processor.apply_corrections(
+            "survey", "KEY", [self._modify(7, "90", 150)], source="outliers"
+        )
+
+        assert processor.get_corrected_data("survey")["age"].to_list() == [90, 30]
+        active = processor.get_active_corrections("survey", "KEY")
+        assert active["KEY"].to_list() == ["7"]
+
+    def test_duplicate_keys_must_all_hold_the_value(self, store):
+        _seed_prep(
+            store,
+            pl.DataFrame({"KEY": ["a", "a", "b"], "age": [150, 150, 30]}),
+        )
+        processor = CorrectionProcessor("p1")
+        processor.apply_corrections(
+            "survey", "KEY", [self._modify("a", "90", 150)], source="outliers"
+        )
+        # Another step changes one of the duplicate rows afterwards.
+        data = processor.get_corrected_data("survey")
+        processor.save_corrected_data(
+            "survey",
+            data.with_columns(
+                pl.when(pl.int_range(pl.len()) == 1)
+                .then(pl.lit(91))
+                .otherwise(pl.col("age"))
+                .alias("age")
+            ),
+        )
+
+        assert processor.get_active_corrections("survey", "KEY").is_empty()
+
+
+def _tables(tables: dict):
+    """A `duckdb_get_table` stand-in serving `tables[(alias, db_name)]`.
+
+    Missing tables come back empty, with no columns, as from DuckDB.
+    """
+
+    def get(project_id, alias, db_name):
+        return tables.get((alias, db_name), pl.DataFrame())
+
+    return get
+
+
+class TestRawFallback:
+    """An alias with no prep table is corrected from its raw table."""
+
+    def test_uncorrected_data_prefers_prep(self, correction_processor, sample_data):
+        processor, mock_get, _ = correction_processor
+        raw = sample_data.with_columns(pl.lit("raw").alias("name"))
+        mock_get.side_effect = _tables(
+            {("bc", "prep"): sample_data, ("bc", "raw"): raw}
+        )
+
+        assert processor.get_uncorrected_data("bc").equals(sample_data)
+
+    def test_uncorrected_data_falls_back_to_raw(
+        self, correction_processor, sample_data
+    ):
+        processor, mock_get, _ = correction_processor
+        mock_get.side_effect = _tables({("bc", "raw"): sample_data})
+
+        assert processor.get_uncorrected_data("bc").equals(sample_data)
+
+    def test_corrected_data_is_seeded_from_raw(self, correction_processor, sample_data):
+        processor, mock_get, mock_save = correction_processor
+        mock_get.side_effect = _tables({("bc", "raw"): sample_data})
+
+        result = processor.get_corrected_data("bc")
+
+        assert result.equals(sample_data)
+        saved = mock_save.call_args.kwargs
+        assert saved["db_name"] == "corrected"
+        assert saved["table_data"].equals(sample_data)
+
+    def test_reapply_starts_from_raw(self, correction_processor, sample_data):
+        processor, mock_get, mock_save = correction_processor
+        log = pl.DataFrame(
+            {
+                "date": [datetime.now()],
+                "KEY": ["key2"],
+                "ID": [None],
+                "action": ["remove row"],
+                "column": [None],
+                "current_value": [None],
+                "new_value": [None],
+                "reason": ["Duplicate"],
+            },
+            schema_overrides={"ID": pl.String, "column": pl.String},
+        )
+        mock_get.side_effect = _tables(
+            {("bc", "raw"): sample_data, ("corr_log_bc", "logs"): log}
+        )
+
+        failures = processor._reapply_all_corrections("bc")
+
+        assert failures == []
+        corrected = mock_save.call_args_list[-1].kwargs["table_data"]
+        assert corrected["survey_key"].to_list() == ["key1", "key3"]
+
+
+class TestReplayOfCorrectionsOfMissingValues:
+    """A correction of a missing value is rechecked on replay like any other:
+    it reapplies while the source value is still missing, and fails with a
+    reason if the source value was filled in since (#337).
+    """
+
+    @pytest.fixture
+    def processor(self, store):
+        _seed_prep(store, pl.DataFrame({"KEY": ["k1", "k2"], "age": [None, 30]}))
+        processor = CorrectionProcessor("p1")
+        processor.apply_corrections(
+            "survey",
+            "KEY",
+            [CorrectionEntry("k1", "modify value", "r", "age", None, "5")],
+        )
+        return processor
+
+    def test_reapplies_while_the_source_value_is_still_missing(self, processor):
+        failures = processor.refresh_corrected_data("survey")
+
+        assert failures == []
+        assert processor.get_corrected_data("survey")["age"].to_list() == [5, 30]
+        assert processor.get_correction_log("survey")["status"].to_list() == [
+            "Successful"
+        ]
+
+    def test_fails_when_the_source_value_was_filled_in(self, store, processor):
+        _seed_prep(store, pl.DataFrame({"KEY": ["k1", "k2"], "age": [8, 30]}))
+
+        failures = processor.refresh_corrected_data("survey")
+
+        assert len(failures) == 1
+        assert "changed since this correction was recorded" in failures[0].reason
+        assert processor.get_corrected_data("survey")["age"].to_list() == [8, 30]
+        log = processor.get_correction_log("survey")
+        assert log["status"].to_list() == ["Failed"]
+        assert "found '8'" in log["status_reason"][0]
+
+    def test_a_correction_of_a_filled_in_value_is_rejected_when_applied(self, store):
+        _seed_prep(store, pl.DataFrame({"KEY": ["k1"], "age": [8]}))
+        processor = CorrectionProcessor("p1")
+
+        with pytest.raises(ValueError, match="has changed since it was flagged"):
+            processor.apply_corrections(
+                "survey",
+                "KEY",
+                [CorrectionEntry("k1", "modify value", "r", "age", None, "5")],
+            )
+
+        assert processor.get_correction_log("survey").is_empty()
+
+
+class TestAcceptanceStatusMatchesActiveAcceptances:
+    """An accept row's Status agrees with `get_active_acceptances`, which
+    judges it against the final corrected data, not the data at the accept
+    row's position in the log (#337).
+    """
+
+    def _accept_then_modify(self, store):
+        _seed_prep(store, pl.DataFrame({"KEY": ["k1"], "age": [25]}))
+        processor = CorrectionProcessor("p1")
+        processor.accept_value("survey", "KEY", "k1", "outliers", "age", 25, "ok")
+        processor.apply_corrections(
+            "survey",
+            "KEY",
+            [CorrectionEntry("k1", "modify value", "r", "age", 25, "30")],
+        )
+        return processor
+
+    def test_replay_marks_an_acceptance_of_a_later_corrected_value_inactive(
+        self, store
+    ):
+        processor = self._accept_then_modify(store)
+
+        processor.refresh_corrected_data("survey")
+
+        assert processor.get_active_acceptances("survey", "outliers", "KEY").is_empty()
+        log = processor.get_correction_log("survey")
+        assert log["status"].to_list() == ["Inactive", "Successful"]
+        assert "has changed" in log["status_reason"][0]
+
+    def test_saving_a_correction_marks_the_acceptance_it_overrides_inactive(
+        self, store
+    ):
+        processor = self._accept_then_modify(store)
+
+        assert processor.get_active_acceptances("survey", "outliers", "KEY").is_empty()
+        log = processor.get_correction_log("survey")
+        assert log["status"].to_list() == ["Inactive", "Successful"]
+
+    def test_an_acceptance_of_the_corrected_value_stays_successful(self, store):
+        processor = self._accept_then_modify(store)
+        processor.accept_value("survey", "KEY", "k1", "outliers", "age", 30, "ok")
+
+        processor.refresh_corrected_data("survey")
+
+        active = processor.get_active_acceptances("survey", "outliers", "KEY")
+        assert active["current_value"].to_list() == ["30"]
+        log = processor.get_correction_log("survey")
+        assert log["status"].to_list() == ["Inactive", "Successful", "Successful"]
+
+
+class TestKeyColumnWhenAnotherColumnHoldsTheKey:
+    """Records are found by the configured KEY column, not the first column
+    that happens to hold the KEY value, when saving and when replaying.
+    """
+
+    DATA = pl.DataFrame(
+        {"other_id": ["k2", "k1"], "KEY": ["k1", "k2"], "age": [25, 30]}
+    )
+
+    @staticmethod
+    def _seed_config(store, **page):
+        store[("p1", "logs", "check_config")] = pl.DataFrame(
+            [{"page_name": "Page", "survey_id": None, **page}]
+        )
+
+    def test_saving_an_acceptance_keeps_it_successful(self, store):
+        _seed_prep(store, self.DATA)
+        processor = CorrectionProcessor("p1")
+
+        processor.accept_value("survey", "KEY", "k1", "outliers", "age", 25, "ok")
+
+        assert processor.get_correction_log("survey")["status"].to_list() == [
+            "Successful"
+        ]
+        assert processor.get_active_acceptances("survey", "outliers", "KEY").height
+
+    def test_replay_uses_the_configured_survey_key(self, store):
+        _seed_prep(store, self.DATA)
+        self._seed_config(store, survey_data_name="survey", survey_key="KEY")
+        processor = CorrectionProcessor("p1")
+        processor.accept_value("survey", "KEY", "k1", "outliers", "age", 25, "ok")
+        processor.apply_corrections(
+            "survey",
+            "KEY",
+            [CorrectionEntry("k2", "modify value", "r", "age", 30, "31")],
+        )
+
+        failures = processor.refresh_corrected_data("survey")
+
+        assert failures == []
+        assert processor.get_corrected_data("survey")["age"].to_list() == [25, 31]
+        assert processor.get_correction_log("survey")["status"].to_list() == [
+            "Successful",
+            "Successful",
+        ]
+
+    def test_replay_uses_the_configured_backcheck_key(self, store):
+        _seed_prep(store, self.DATA, alias="backcheck")
+        self._seed_config(
+            store,
+            survey_data_name="survey",
+            survey_key="other_id",
+            backcheck_data_name="backcheck",
+        )
+        processor = CorrectionProcessor("p1")
+        processor.apply_corrections(
+            "backcheck",
+            "KEY",
+            [CorrectionEntry("k1", "modify value", "r", "age", 25, "26")],
+        )
+
+        with patch(
+            "datasure.processing.corrections.backcheck_id_columns",
+            return_value=("KEY", None),
+        ):
+            failures = processor.refresh_corrected_data("backcheck")
+
+        assert failures == []
+        assert processor.get_corrected_data("backcheck")["age"].to_list() == [26, 30]

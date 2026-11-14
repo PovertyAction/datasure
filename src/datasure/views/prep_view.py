@@ -1,4 +1,5 @@
 import logging
+from typing import NamedTuple
 
 import pandas as pd
 import polars as pl
@@ -18,12 +19,36 @@ from datasure.models.enums import (
     PrepRowConditions,
 )
 from datasure.processing import pii
-from datasure.processing.prep import prep_apply_action
-from datasure.utils.dataframe_utils import ColumnByType, get_df_columns
+from datasure.processing.corrections import CorrectionProcessor
+from datasure.processing.prep import (
+    OperationError,
+    ValidationError,
+    prep_apply_action,
+)
+from datasure.utils.cache_utils import get_cache_path
+from datasure.utils.dataframe_utils import (
+    ColumnByType,
+    TableState,
+    get_df_columns,
+    get_table_state,
+)
 from datasure.utils.duckdb_utils import (
     duckdb_get_aliases,
     duckdb_get_table,
     duckdb_save_table,
+)
+from datasure.utils.nav_ui import (
+    draw_nav,
+    guarded_status,
+    project_nav_key,
+    resolve_selection,
+    run_guarded,
+)
+from datasure.utils.navigation import (
+    READY,
+    CheckStatus,
+    NavItem,
+    StatusResult,
 )
 from datasure.utils.navigations_utils import (
     add_demo_navigation,
@@ -33,6 +58,8 @@ from datasure.utils.navigations_utils import (
     show_demo_next_action,
 )
 from datasure.utils.onboarding_utils import (
+    DemoBackcheckColumn,
+    DemoColumn,
     ImportDemoInfo,
     demo_expander,
     is_demo_project,
@@ -41,14 +68,43 @@ from datasure.utils.prep_utils import (
     PrepActionResult,
     PrepDescriptions,
 )
+from datasure.utils.reapply_utils import (
+    ReapplyFailure,
+    format_reapply_failures,
+    highlight_status,
+)
 from datasure.utils.ui_utils import (
     confirm_dialog,
     metric_row,
     page_header,
+    queue_notice,
     section_header,
+    show_queued_notices,
+)
+from datasure.utils.view_state import (
+    ViewState,
+    reset_filters_beside,
+    save_selection,
+    saved_selection,
 )
 
 logger = logging.getLogger(__name__)
+
+# The dataset navigation's session state key (before ``project_nav_key``) and
+# URL query parameter, and the
+# settings file holding the remembered dataset (its view_state section).
+PREP_NAV_KEY = "prep_nav"
+DATASET_PARAM = "dataset"
+PREP_SETTINGS_FILE = "prep_view_settings.json"
+
+
+class PrepTables(NamedTuple):
+    """A dataset's prep data and log, loaded once per run."""
+
+    data: pl.DataFrame
+    log: pl.DataFrame
+    state: TableState
+
 
 # === PAGE GUARDS === #
 
@@ -102,6 +158,12 @@ class PrepViewConfig:
         # Get datetime functions from prep_utils
         self.DP_DATETIME_FUNCS = tuple(self.descriptions.DATETIME_FUNCTIONS.keys())
 
+        # Functions for date-only columns
+        self.DP_CONVERSION_FUNCS = tuple(self.descriptions.CONVERSION_FUNCTIONS.keys())
+
+        # Functions for boolean columns
+        self.DP_BOOLEAN_FUNCS = tuple(self.descriptions.BOOLEAN_FUNCTIONS.keys())
+
         # Get row conditions from prep_utils
         self.DP_ROW_CONDITIONS = tuple(self.descriptions.ROW_CONDITIONS.keys())
 
@@ -136,6 +198,30 @@ class RemoveRowsInputs:
 # Initialize configuration
 config = PrepViewConfig()
 
+# Concat's separator choices and the separator each one stores. "Specify"
+# stores the text the user typed instead.
+CONCAT_SEPARATORS = {
+    "None": "",
+    "Space": " ",
+    "Comma": ",",
+    "Underscore": "_",
+    "Hyphen": "-",
+}
+CONCAT_SPECIFY = "Specify"
+
+
+def _concat_separator(choice: str, custom: str) -> str | None:
+    """Return the separator a concat step stores for the user's choice.
+
+    "Specify" keeps the typed text exactly, spaces included. An empty box
+    gives None, which marks the form incomplete rather than silently
+    meaning no separator.
+    """
+    if choice == CONCAT_SPECIFY:
+        return custom or None
+    return CONCAT_SEPARATORS[choice]
+
+
 # === FORM VALIDATION HELPERS === #
 
 
@@ -149,6 +235,11 @@ def _is_add_column_incomplete(prep_args: dict) -> bool:
     if not prep_args.get("column_names"):
         return True
     method = prep_args.get("method")
+    if method == PrepFunctions.concat.value:
+        return (
+            len(prep_args.get("source_columns") or []) < 2
+            or prep_args.get("value") is None
+        )
     if method == PrepFunctions.quotient.value:
         return (
             method in COL_FUNC_WITH_VALUES
@@ -355,6 +446,28 @@ def _render_datetime_function_inputs(
     return inputs
 
 
+def _render_conversion_function_inputs(
+    step_index: int, inputs: TransformInputs, options: tuple[str, ...]
+) -> TransformInputs:
+    """Render UI inputs for date-only and boolean columns.
+
+    Args:
+        step_index: Current step index for unique widget keys
+        inputs: TransformInputs object to populate
+        options: Conversion functions offered for the column type
+
+    Returns
+    -------
+        Updated TransformInputs with user selections
+    """
+    inputs.func = st.selectbox(
+        label="Select Function",
+        options=options,
+        key=f"st_sb_trf_func{step_index}",
+    )
+    return inputs
+
+
 def _build_transform_value(inputs: TransformInputs) -> list:
     """Build the value list from transform inputs based on selected function.
 
@@ -502,7 +615,7 @@ def _get_unique_values_from_columns(
     value_options = []
     for col in columns:
         value_options.extend(prep_data[col].unique().to_list())
-    return sorted(value_options)
+    return sorted(v for v in value_options if v is not None)
 
 
 def _render_range_value_inputs(
@@ -671,6 +784,9 @@ class PrepStepHandler:
                     key=f"st_sb_add_val{self.step_index}",
                 )
 
+            elif dp_prep_add_col_med == PrepFunctions.concat.value:
+                dp_prep_add_col_select, dp_prep_add_val = self._concat_inputs()
+
             elif dp_prep_add_col_med in COL_FUNC_WITH_VALUES:
                 if dp_prep_add_col_med in [
                     PrepFunctions.quotient.value,
@@ -690,7 +806,8 @@ class PrepStepHandler:
             # define custom message values
             value = (
                 dp_prep_add_val
-                if dp_prep_add_col_med == PrepFunctions.constant.value
+                if dp_prep_add_col_med
+                in (PrepFunctions.constant.value, PrepFunctions.concat.value)
                 else None
             )
             source_columns = (
@@ -713,6 +830,40 @@ class PrepStepHandler:
             }
 
         return None
+
+    def _concat_inputs(self) -> tuple[list[str], str | None]:
+        """Render concat's column picker and separator choice.
+
+        Only text columns are offered: other columns are converted with the
+        "to string" transform first. The selection order is the join order.
+
+        Returns
+        -------
+            The selected columns and the separator to store, or None when
+            "Specify" is chosen with an empty box.
+        """
+        columns = st.multiselect(
+            label="Select columns to join",
+            options=self.string_cols,
+            key=f"st_sb_add_col_concat_select{self.step_index}",
+            help="Columns are joined in the order you select them. Only text "
+            "columns are listed: convert other columns with the 'to string' "
+            "transform first.",
+        )
+        choice = st.selectbox(
+            label="Separator",
+            options=(*CONCAT_SEPARATORS, CONCAT_SPECIFY),
+            key=f"st_sb_add_col_concat_sep{self.step_index}",
+            help="Text placed between joined values",
+        )
+        custom = ""
+        if choice == CONCAT_SPECIFY:
+            custom = st.text_input(
+                label="Enter separator",
+                help="Used exactly as typed, including spaces",
+                key=f"st_sb_add_col_concat_custom{self.step_index}",
+            )
+        return columns, _concat_separator(choice, custom)
 
     def transform_column_handler(self) -> dict | None:
         """Handle transform column UI and logic.
@@ -760,6 +911,14 @@ class PrepStepHandler:
             return _render_datetime_function_inputs(self.step_index, inputs)
         elif hasattr(col_type, "is_numeric") and col_type.is_numeric():
             return _render_numeric_function_inputs(self.step_index, inputs)
+        elif col_type == pl.Date:
+            return _render_conversion_function_inputs(
+                self.step_index, inputs, config.DP_CONVERSION_FUNCS
+            )
+        elif col_type == pl.Boolean:
+            return _render_conversion_function_inputs(
+                self.step_index, inputs, config.DP_BOOLEAN_FUNCS
+            )
         return inputs
 
     def remove_column_handler(self) -> dict | None:
@@ -853,7 +1012,12 @@ class PrepStepHandler:
         """
         row_index_text = st.text_input(
             label="Enter row index",
-            help="Enter row index to remove eg. 1, 2, 3, -5, 5:-2",
+            help=(
+                "Row positions to remove, separated by commas. The first row "
+                "is 0. Use a:b for a range that includes both ends, and a "
+                "negative number to count from the end (-1 is the last row). "
+                "E.g. 0, 3, 10:20, -5, 5:-2"
+            ),
             key=f"st_sb_del_rows_idx{self.step_index}",
         )
         if row_index_text:
@@ -916,9 +1080,61 @@ class PrepStepHandler:
 # === STEP MANAGEMENT === #
 
 
+# --- Next-Run Notices ---#
+# Both step handlers end in a rerun, which would clear any message rendered
+# straight away, so their messages are queued and shown on the next run.
+def _notice_scope(alias: str) -> str:
+    """Return the queued-notice scope for a dataset on Prepare Data."""
+    return f"prep_{alias}"
+
+
+def _queue_reapply_failures(
+    alias: str, failures: list[ReapplyFailure], context: str
+) -> None:
+    """Queue a warning listing reapply failures, if there are any."""
+    if failures:
+        queue_notice(
+            _notice_scope(alias), "warning", format_reapply_failures(failures, context)
+        )
+
+
+def _refresh_corrected_data(alias: str) -> None:
+    """Rebuild the alias's corrected table after its prep data changed."""
+    # UI boundary: the prep change is already saved, so a failed rebuild is
+    # reported rather than allowed to crash the page.
+    try:
+        failures = CorrectionProcessor(project_id).refresh_existing_corrected_data(
+            alias
+        )
+    except Exception as e:
+        logger.exception("Failed to rebuild corrected data for %s", alias)
+        queue_notice(
+            _notice_scope(alias),
+            "error",
+            f"The preparation change was saved, but corrected data could not be "
+            f"rebuilt: {e!s}",
+        )
+        return
+    _queue_reapply_failures(
+        alias, failures, "Some corrections could not be reapplied to the new prep data"
+    )
+
+
 # --- Add Preparation Step ---#
-def prep_add_step(prep_data: pl.DataFrame | pd.DataFrame, step_index: int):
-    """Add a data preparation step."""
+def prep_add_step(
+    prep_data: pl.DataFrame | pd.DataFrame, step_index: int, alias: str
+) -> None:
+    """Add a data preparation step to a dataset.
+
+    Parameters
+    ----------
+    prep_data : pl.DataFrame | pd.DataFrame
+        The dataset's prep data.
+    step_index : int
+        The dataset's position in the sorted dataset list; namespaces widget keys.
+    alias : str
+        The dataset.
+    """
     with st.popover(":material/add: Add data prep step", width="stretch"):
         st.info("Add a new data preparation step to the log.")
         prep_handler = PrepStepHandler(prep_data, step_index)
@@ -963,19 +1179,35 @@ def prep_add_step(prep_data: pl.DataFrame | pd.DataFrame, step_index: int):
             disabled=disable_add,
         ):
             # apply action and re-run
-            prep_apply_action(project_id, label, PrepActionResult(**prep_args))
-
-            st.success("Preparation step added successfully!")
-            st.rerun()
+            try:
+                prep_apply_action(project_id, alias, PrepActionResult(**prep_args))
+            except (ValidationError, OperationError) as e:
+                st.error(f"Error adding preparation step: {e!s}")
+            else:
+                queue_notice(
+                    _notice_scope(alias),
+                    "success",
+                    "Preparation step added successfully!",
+                )
+                _refresh_corrected_data(alias)
+                st.rerun()
 
 
 # --- Remove Preparation Step ---#
-def prep_remove_step():
-    """Remove a data preparation step."""
+def prep_remove_step(alias: str, step_index: int) -> None:
+    """Remove a data preparation step from a dataset.
+
+    Parameters
+    ----------
+    alias : str
+        The dataset.
+    step_index : int
+        The dataset's position in the sorted dataset list; namespaces widget keys.
+    """
     with st.popover(":material/delete: Remove data prep step", width="stretch"):
         prep_log = duckdb_get_table(
             project_id=project_id,
-            alias=f"prep_log_{label}",
+            alias=f"prep_log_{alias}",
             db_name="logs",
         ).to_pandas()
 
@@ -994,12 +1226,12 @@ def prep_remove_step():
             dp_prep_remove_action = st.selectbox(
                 label="Select Action to Remove",
                 options=unique_actions,
-                key=f"st_sb_remove_action{i}",
+                key=f"st_sb_remove_action{step_index}",
                 index=None,
                 help="Select the action you want to remove from the log",
             )
 
-            def _remove_prep_step(action_index: str, log=prep_log, alias=label):
+            def _remove_prep_step(action_index: str, log=prep_log):
                 """Remove a prep step from the log and reapply remaining steps."""
                 action_desc = log.loc[
                     log["action_index"] == action_index, "description"
@@ -1010,12 +1242,20 @@ def prep_remove_step():
                     alias=f"prep_log_{alias}",
                     db_name="logs",
                 )
-                prep_apply_action(project_id, alias)
-                st.success(f"Action '{action_desc}' removed successfully!")
+                failures = prep_apply_action(project_id, alias)
+                queue_notice(
+                    _notice_scope(alias),
+                    "success",
+                    f"Action '{action_desc}' removed successfully!",
+                )
+                _queue_reapply_failures(
+                    alias, failures, "Some preparation steps could not be reapplied"
+                )
+                _refresh_corrected_data(alias)
 
             if st.button(
                 label="Remove",
-                key=f"st_sb_remove_confirm{i}",
+                key=f"st_sb_remove_confirm{step_index}",
                 width="stretch",
                 type="primary",
                 help="Remove the selected data preparation step from the log",
@@ -1275,6 +1515,200 @@ def pii_review_section(prep_data: pl.DataFrame, alias: str, section_index: int) 
         )
 
 
+# === DATASET NAVIGATION === #
+
+
+def seed_prep_from_raw(project_id: str, alias: str) -> PrepTables:
+    """Load a dataset's prep table, copying raw data into it when needed.
+
+    With no steps logged, prep must match raw, so it is seeded from raw. A
+    zero-row prep table with steps logged is a step's result: keep it.
+    Configure Checks and the replication package read columns only from
+    prep, so this runs for every dataset, not just the selected one.
+    """
+    prep_log = duckdb_get_table(project_id, f"prep_log_{alias}", "logs")
+    prep_data = duckdb_get_table(project_id, alias, "prep")
+    prep_state = get_table_state(prep_data)
+    if prep_state is not TableState.HAS_ROWS and prep_log.is_empty():
+        prep_data = duckdb_get_table(project_id, alias, "raw")
+        prep_state = get_table_state(prep_data)
+        if prep_state is TableState.HAS_ROWS:
+            duckdb_save_table(project_id, prep_data, alias, "prep")
+    return PrepTables(prep_data, prep_log, prep_state)
+
+
+def dataset_status(tables: PrepTables) -> StatusResult:
+    """Return whether a dataset has rows to prepare, and why not.
+
+    A table whose rows a step removed stays ready, so the step can be
+    removed again.
+    """
+    if tables.state is TableState.MISSING:
+        return StatusResult(
+            CheckStatus.NOT_SET_UP,
+            "No data imported yet. Import this dataset on the Import Data page.",
+        )
+    if tables.state is TableState.NO_ROWS and tables.log.is_empty():
+        return StatusResult(
+            CheckStatus.NOT_SET_UP,
+            "This dataset has no rows. Import data with rows on the Import Data page.",
+        )
+    return READY
+
+
+def dataset_nav_items(
+    datasets: list[str], tables: dict[str, PrepTables]
+) -> list[NavItem]:
+    """Return one navigation item per dataset, dimmed when it has no rows.
+
+    A status that raises gives that dataset the error status.
+    """
+    items = []
+    for alias in datasets:
+        status, reason = guarded_status(
+            alias, lambda alias=alias: dataset_status(tables[alias])
+        )
+        items.append(
+            NavItem(
+                slug=alias,
+                label=alias,
+                icon=":material/table_chart:",
+                status=status,
+                reason=reason,
+            )
+        )
+    return items
+
+
+def render_dataset(item: NavItem, step_index: int, tables: PrepTables) -> None:
+    """Render the preparation UI of one dataset.
+
+    ``item`` is the dataset's navigation item, whose status was computed
+    once for the navigation.
+    """
+    alias = item.slug
+    prep_data, prep_log, prep_state = tables
+
+    # Before the empty check: a step that removes every row still
+    # queued messages for this run.
+    show_queued_notices(_notice_scope(alias))
+
+    if item.status is CheckStatus.ERROR:
+        st.error(
+            f"Could not check whether **{alias}** is ready. {item.reason}",
+            icon=":material/error:",
+        )
+    elif item.dimmed:
+        st.warning(item.reason)
+    # A table with no rows had every row removed by a step, which must
+    # stay removable, so only a missing table skips the controls.
+    if prep_state is TableState.MISSING:
+        return
+    if prep_state is TableState.NO_ROWS and not prep_log.is_empty():
+        st.warning(
+            "Your preparation steps removed every row. Remove the step "
+            "that caused this from the Change Log to restore the data."
+        )
+
+    # count rows, columns, number missing & percent missing
+    row_count = prep_data.height
+    col_count = prep_data.width
+    miss_count = prep_data.null_count().sum().sum_horizontal()[0]
+    total_values = row_count * col_count if row_count and col_count else 1
+    miss_perc = (miss_count / total_values) * 100
+
+    section_header("Apply Changes")
+
+    # Demo guidance for apply changes section
+    if is_demo_project():
+        demo_callout(
+            "Use **:material/add: Add data prep step** to transform your data. "
+            f"The only required step is converting **{DemoColumn.SUBMISSIONDATE}** "
+            "to datetime — "
+            "all other transformations are optional.",
+        )
+
+    # create for text and form
+    pt1, pt2, _ = st.columns((0.4, 0.3, 0.3))
+
+    with pt1:
+        prep_add_step(prep_data, step_index=step_index, alias=alias)
+
+    with pt2:
+        prep_remove_step(alias=alias, step_index=step_index)
+
+    pii_review_section(prep_data, alias, section_index=step_index)
+
+    with st.container(border=True):
+        section_header("Change Log")
+
+        prep_log = duckdb_get_table(
+            project_id=project_id,
+            alias=f"prep_log_{alias}",
+            db_name="logs",
+        )
+
+        if prep_log.is_empty():
+            st.info(
+                "No changes added yet. Click on the **Add**(:material/add:) button above to add a new data preparation step."
+            )
+        else:
+            if "status" not in prep_log.columns:
+                prep_log = prep_log.with_columns(pl.lit("Successful").alias("status"))
+
+            change_log = prep_log[["action", "status", "description"]].to_pandas()
+            st.dataframe(
+                change_log.style.map(highlight_status, subset=["status"]),
+                width="stretch",
+                key=alias,
+                hide_index=False,
+            )
+
+    # display preview of peppered data
+    with st.container(border=True):
+        # The preview's column choice is the dataset's only saved view state.
+        view = ViewState(
+            get_cache_path(project_id, "settings", PREP_SETTINGS_FILE), alias
+        )
+        with reset_filters_beside(view, vertical_alignment="center"):
+            section_header("Preview Prepared Data")
+
+        # Demo guidance for data preview
+        if is_demo_project():
+            demo_callout(
+                f"Here's your **{alias}** data. Notice the data quality issues like missing values "
+                f"({miss_perc:.1f}% missing) that the quality reports will find once "
+                "you configure your checks.",
+                "info",
+            )
+
+        st.divider()
+
+        metric_row(
+            [
+                ("Rows", f"{row_count:,}"),
+                ("Columns", f"{col_count:,}"),
+                ("Percentage missing values", f"{miss_perc:.2f}%"),
+            ]
+        )
+
+        shown_columns = st.multiselect(
+            "Columns to show",
+            options=prep_data.columns,
+            placeholder="All columns",
+            **view.bind(
+                f"prep_preview_columns_{step_index}",
+                options=prep_data.columns,
+                multi=True,
+            ),
+        )
+        st.dataframe(
+            prep_data.select(shown_columns) if shown_columns else prep_data,
+            width="stretch",
+            hide_index=False,
+        )
+
+
 # === PAGE LAYOUT === #
 
 # -- DATA PREP PAGE --#
@@ -1291,116 +1725,36 @@ page_header(
 
 
 if show_prep_page_info:
-    tabs = st.tabs(sorted(alias_list))
-    for i, (label, tab) in enumerate(zip(sorted(alias_list), tabs, strict=False)):
-        prep_log = duckdb_get_table(
-            project_id,
-            f"prep_log_{label}",
-            "logs",
-        )
+    # The step index namespaces widget keys: a dataset's position in the
+    # sorted list, whichever dataset is selected.
+    datasets = sorted(alias_list)
+    prep_tables = {alias: seed_prep_from_raw(project_id, alias) for alias in datasets}
+    prep_settings_file = get_cache_path(project_id, "settings", PREP_SETTINGS_FILE)
 
-        prep_data = duckdb_get_table(
-            project_id,
-            label,
-            "prep",
-        )
+    # The pills sit above the dataset but are drawn after it, so a dataset
+    # that fails while rendering is already marked in them.
+    nav_slot = st.container()
+    nav_key = project_nav_key(PREP_NAV_KEY, project_id)
+    nav_state = resolve_selection(
+        dataset_nav_items(datasets, prep_tables),
+        key=nav_key,
+        param=DATASET_PARAM,
+        saved=saved_selection(prep_settings_file),
+    )
+    save_selection(prep_settings_file, nav_state.selected)
+    selected_alias = nav_state.selected
+    run_guarded(
+        nav_key,
+        nav_state.selected_item,
+        lambda: render_dataset(
+            nav_state.selected_item,
+            datasets.index(selected_alias),
+            prep_tables[selected_alias],
+        ),
+    )
+    with nav_slot:
+        draw_nav(nav_state, key=nav_key, param=DATASET_PARAM, label="Dataset")
 
-        if prep_data.is_empty() and prep_log.is_empty():
-            prep_data = duckdb_get_table(
-                project_id,
-                label,
-                "raw",
-            )
-
-            if not prep_data.is_empty():
-                duckdb_save_table(
-                    project_id,
-                    prep_data,
-                    label,
-                    "prep",
-                )
-
-        # display tab features
-        with tab:
-            if prep_data.is_empty():
-                st.warning(
-                    "No data available to prepare. Please upload a dataset in the Import Data step."
-                )
-                continue
-
-            # count rows, columns, number missing & percent missing
-            row_count = prep_data.height
-            col_count = prep_data.width
-            miss_count = prep_data.null_count().sum().sum_horizontal()[0]
-            total_values = row_count * col_count if row_count and col_count else 1
-            miss_perc = (miss_count / total_values) * 100
-            all_cols = prep_data.columns
-
-            section_header("Apply Changes")
-
-            # Demo guidance for apply changes section
-            if is_demo_project():
-                demo_callout(
-                    "Use **:material/add: Add data prep step** to transform your data. "
-                    "The only required step is converting **submissiondate** to datetime — "
-                    "all other transformations are optional.",
-                )
-
-            # create for text and form
-            pt1, pt2, _ = st.columns((0.4, 0.3, 0.3))
-
-            with pt1:
-                prep_add_step(prep_data, step_index=i)
-
-            with pt2:
-                prep_remove_step()
-
-            pii_review_section(prep_data, label, section_index=i)
-
-            with st.container(border=True):
-                section_header("Change Log")
-
-                prep_log: pl.DataFrame = duckdb_get_table(
-                    project_id=project_id,
-                    alias=f"prep_log_{label}",
-                    db_name="logs",
-                )
-
-                if prep_log.is_empty():
-                    st.info(
-                        "No changes added yet. Click on the **Add**(:material/add:) button above to add a new data preparation step."
-                    )
-                else:
-                    prep_logs_mod = st.dataframe(
-                        prep_log[["action", "description"]],
-                        width="stretch",
-                        key=label,
-                        hide_index=False,
-                    )
-
-            # display preview of peppered data
-            with st.container(border=True):
-                section_header("Preview Prepared Data")
-
-                # Demo guidance for data preview
-                if is_demo_project():
-                    demo_callout(
-                        f"Here's your **{label}** data. Notice the data quality issues like missing values "
-                        f"({miss_perc:.1f}% missing) that we'll identify in **Configure Quality Checks**.",
-                        "info",
-                    )
-
-                st.divider()
-
-                metric_row(
-                    [
-                        ("Rows", f"{row_count:,}"),
-                        ("Columns", f"{col_count:,}"),
-                        ("Percentage missing values", f"{miss_perc:.2f}%"),
-                    ]
-                )
-
-                st.dataframe(prep_data, width="stretch", hide_index=False)
 
 # Demo next action or regular navigation
 if is_demo_project():
@@ -1422,17 +1776,19 @@ if is_demo_project():
 
     if not prep_log_survey.is_empty() and not prep_log_backcheck.is_empty():
         # check that the correct prep steps have been added
-        pattern = r'"submissiondate"\s+updated\s+using\s+string\s+to\s+datetime'
-        if prep_log_survey["description"].str.contains(pattern).any():
-            enable_next_count += 1
-
-        if prep_log_backcheck["description"].str.contains(pattern).any():
-            enable_next_count += 1
+        for prep_log, date_column in (
+            (prep_log_survey, DemoColumn.SUBMISSIONDATE),
+            (prep_log_backcheck, DemoBackcheckColumn.SUBMISSIONDATE),
+        ):
+            pattern = rf'"{date_column}"\s+updated\s+using\s+string\s+to\s+datetime'
+            if prep_log["description"].str.contains(pattern).any():
+                enable_next_count += 1
 
     if enable_next_count < 2:
         demo_callout(
             "The **Configure Quality Checks** button will be enabled once you have converted "
-            "the **submissiondate** column to datetime in both **demo_survey** and **demo_backcheck**. "
+            f"the **{DemoColumn.SUBMISSIONDATE}** column to datetime in both "
+            "**demo_survey** and **demo_backcheck**. "
             "Follow the guidance at the top of the page to complete this step.",
             "warning",
         )
