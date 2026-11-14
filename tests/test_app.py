@@ -5,6 +5,7 @@ controlled mocks to exercise all branches without running a real server.
 """
 
 import importlib
+import json
 import sys
 from pathlib import Path
 from unittest.mock import MagicMock, patch
@@ -44,6 +45,7 @@ def _import_app(
     assets_dir_exists: bool = True,
     logo_exists: bool = True,
     footer_assets_exist: bool = True,
+    query_params: dict | None = None,
 ) -> tuple:
     """Remove datasure.app from sys.modules, then re-import under controlled mocks.
 
@@ -54,6 +56,7 @@ def _import_app(
     ss = MockSessionState(session_state or {})
     st_mock = MagicMock()
     st_mock.session_state = ss
+    st_mock.query_params = dict(query_params or {})
 
     nav_mock = MagicMock()
     st_mock.navigation.return_value = nav_mock
@@ -412,6 +415,45 @@ class TestSidebarFooter:
         assert not any(a.endswith("datasure-horizontal.svg") for a in image_args)
         # Captions still render even when branding assets are absent.
         st_mock.caption.assert_called()
+
+
+# ---------------------------------------------------------------------------
+# Opening a project from the URL
+# ---------------------------------------------------------------------------
+
+
+class TestProjectFromUrl:
+    """``?project=<id>`` opens a registered project at the start of a session."""
+
+    def _import(self, tmp_path, project, session_state=None):
+        registry = tmp_path / "projects.json"
+        registry.write_text(
+            json.dumps({"abc12345": {"name": "P", "last_used": "2025-01-01 00:00:00"}})
+        )
+        with patch("datasure.utils.cache_utils.get_cache_path", return_value=registry):
+            _, ss, cs_cls, _ = _import_app(
+                session_state=session_state, query_params={"project": project}
+            )
+        return ss, cs_cls, json.loads(registry.read_text())
+
+    def test_registered_project_is_opened_and_stamped(self, tmp_path):
+        ss, cs_cls, registry = self._import(tmp_path, "abc12345")
+        assert ss.st_project_id == "abc12345"
+        assert registry["abc12345"]["last_used"] > "2025-01-01 00:00:00"
+        cs_cls.return_value.sync_output_view_files.assert_called_once()
+
+    def test_unknown_project_is_ignored(self, tmp_path):
+        ss, _, registry = self._import(tmp_path, "../../etc")
+        assert ss.st_project_id == ""
+        assert registry["abc12345"]["last_used"] == "2025-01-01 00:00:00"
+
+    def test_url_does_not_override_a_later_choice(self, tmp_path):
+        ss, *_ = self._import(
+            tmp_path,
+            "abc12345",
+            session_state={"st_url_project_applied": True, "st_project_id": ""},
+        )
+        assert ss.st_project_id == ""
 
 
 # ---------------------------------------------------------------------------

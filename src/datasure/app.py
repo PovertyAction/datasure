@@ -5,8 +5,9 @@ from pathlib import Path
 
 import streamlit as st
 
-from datasure.utils.cache_utils import read_only_reason
+from datasure.utils.cache_utils import get_cache_path, read_only_reason
 from datasure.utils.config_utils import ConfigurationService
+from datasure.utils.project_registry import read_registry, stamp_last_used
 from datasure.utils.reviewer import render_reviewer_setting
 from datasure.utils.session_defaults import init_app_session_state
 
@@ -46,6 +47,24 @@ st.set_page_config(
 
 # initialize session states
 init_app_session_state()
+
+# A host that embeds DataSure opens a project by URL (?project=<id>): every
+# page load starts a new session, which would otherwise land on Start Here
+# with no project. Applied once per session, so choosing another project in
+# the app is not undone by a URL that still names the first one.
+if "st_url_project_applied" not in st.session_state:
+    st.session_state.st_url_project_applied = True
+    _url_project = st.query_params.get("project", "")
+    _projects_file = get_cache_path("projects.json")
+    if _url_project and _url_project in read_registry(_projects_file):
+        st.session_state.st_project_id = _url_project
+        try:
+            stamp_last_used(_projects_file, _url_project)
+        except (OSError, ValueError):
+            logging.getLogger(__name__).warning(
+                "Could not record last_used for project %s", _url_project
+            )
+        ConfigurationService(_url_project).sync_output_view_files()
 
 # start page
 start_page = st.Page(

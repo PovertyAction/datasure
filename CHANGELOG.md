@@ -9,6 +9,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Open a project from the URL**: `app.py` reads `?project=<project_id>` at
+  the start of a session and opens that project if it is registered, so a
+  host that embeds DataSure can link to a project and page (for example
+  `/prep_view?project=abc12345`) instead of landing on the home page. An
+  unknown ID is ignored. The parameter is applied once per session
+  (`st_url_project_applied`, kept across Exit Demo), so choosing another
+  project in the app is not undone. Stamping `last_used` moved to
+  `project_registry.stamp_last_used`, shared by the home page and the URL
 - **Headless keyring guidance**: `secure_credentials.keyring_backend_problem`
   detects a keyring backend that can't hold credentials safely: keyring's
   "fail" backend (headless Linux with no Secret Service) and plaintext file

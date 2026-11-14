@@ -30,7 +30,11 @@ from datasure.utils.project_config import (
     render_config_resolution_and_apply,
     render_project_config_wizard,
 )
-from datasure.utils.project_registry import read_registry, update_registry
+from datasure.utils.project_registry import (
+    read_registry,
+    stamp_last_used,
+    update_registry,
+)
 from datasure.utils.ui_utils import confirm_dialog, queue_notice, show_queued_notices
 
 logger = logging.getLogger(__name__)
@@ -189,15 +193,8 @@ def _record_last_used(project_id: str) -> None:
     A registry that can't be written is logged, never fatal: opening the
     project matters more.
     """
-
-    def _stamp(projects: dict) -> bool:
-        if project_id not in projects:
-            return False
-        projects[project_id]["last_used"] = _now_str()
-        return True
-
     try:
-        _update_projects(_stamp)
+        stamp_last_used(get_cache_path(PROJECTS_FILE), project_id)
     except (OSError, ValueError):
         logger.warning("Could not record last_used for project %s", project_id)
 
