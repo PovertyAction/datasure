@@ -1,5 +1,7 @@
 import logging
+import random
 import re
+import time
 from pathlib import Path
 
 import duckdb  # type: ignore
@@ -115,6 +117,41 @@ def database_path(project_id: str, db_name: str) -> Path:
     return get_cache_path(project_id, "data", f"{db_name}.duckdb")
 
 
+# How long to wait for a database that is open elsewhere in a conflicting
+# mode before giving up.
+_BUSY_TIMEOUT_SECONDS = 5.0
+
+
+def _connect(db_path: Path, *, read_only: bool = False):
+    """Open a project database, waiting while it is busy.
+
+    DuckDB lets a database file be open for writing by one process, or for
+    reading by several, never both. Reads therefore open read-only, so that
+    two sessions, browser tabs or processes on one project can read at the
+    same time, and every open waits up to ``_BUSY_TIMEOUT_SECONDS`` for a
+    conflicting connection to close instead of failing at once. Within one
+    process DuckDB refuses to mix read-only and writable connections to the
+    same file (``ConnectionException``); across processes the file is locked
+    (``IOException``). Both are retried.
+
+    A database that doesn't exist yet can't be opened read-only, so it is
+    opened writable, which creates it empty as before.
+
+    An ``IOException`` with another cause (an unreadable or corrupt file) is
+    raised after the same wait.
+    """
+    kwargs = {"read_only": True} if read_only and Path(db_path).exists() else {}
+    deadline = time.monotonic() + _BUSY_TIMEOUT_SECONDS
+    while True:
+        try:
+            return duckdb.connect(db_path, **kwargs)
+        except (duckdb.IOException, duckdb.ConnectionException):
+            if time.monotonic() >= deadline:
+                raise
+            # Random, so two waiting connections don't retry in step.
+            time.sleep(random.uniform(0.005, 0.03))
+
+
 #     ------- Save data to database ---#
 
 
@@ -135,7 +172,7 @@ def duckdb_save_table(
     # convert alias to table name format and validate
     table_id = _validate_table_name(name_id(alias))
 
-    with duckdb.connect(db_path) as conn:
+    with _connect(db_path) as conn:
         table_exists = (
             conn.execute(
                 "SELECT COUNT(*) FROM information_schema.tables WHERE table_name = ?",
@@ -175,7 +212,7 @@ def duckdb_get_table(
 
     table_id = _validate_table_name(name_id(alias))
 
-    with duckdb.connect(db_path) as conn:
+    with _connect(db_path, read_only=True) as conn:
         # Check if the table exists
         table_exists = (
             conn.execute(
@@ -212,7 +249,7 @@ def duckdb_remove_table(project_id: str, alias: str, db_name: str) -> None:
     """
     db_path = database_path(project_id, db_name)
     table_id = _validate_table_name(name_id(alias))
-    with duckdb.connect(db_path) as conn:
+    with _connect(db_path) as conn:
         # Check if the table exists
         table_exists = (
             conn.execute(
@@ -271,7 +308,7 @@ def duckdb_delete_rows(
     db_path = database_path(project_id, db_name)
     table_id = _validate_table_name(name_id(alias))
     column_id = _validate_column_name(column)
-    with duckdb.connect(db_path) as conn:
+    with _connect(db_path) as conn:
         conn.execute(f"DELETE FROM {table_id} WHERE {column_id} = ?", [value])
 
 
@@ -290,34 +327,36 @@ def duckdb_get_aliases(project_id: str, to_load: bool = True) -> list[str]:
     list[str] : list of aliases (table names)
     """
     db_path = database_path(project_id, "logs")
+    query = "SELECT DISTINCT alias FROM import_log"
+    if to_load:
+        query += " WHERE load = TRUE"
 
-    with duckdb.connect(db_path) as conn:
-        # create the import_log table if it doesn't exist
-        conn.execute(
-            """
-            CREATE TABLE IF NOT EXISTS import_log (
-                refresh BOOLEAN,
-                load BOOLEAN,
-                source VARCHAR,
-                alias VARCHAR,
-                filename VARCHAR,
-                sheet_name VARCHAR,
-                server VARCHAR,
-                form_id VARCHAR,
-                private_key VARCHAR,
-                save_to VARCHAR,
-                attachments BOOLEAN
+    try:
+        with _connect(db_path, read_only=True) as conn:
+            result = conn.execute(query).fetchall()
+    except duckdb.CatalogException:
+        # No import log yet. Creating it needs a writable connection, which
+        # is why the read above doesn't do it.
+        with _connect(db_path) as conn:
+            conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS import_log (
+                    refresh BOOLEAN,
+                    load BOOLEAN,
+                    source VARCHAR,
+                    alias VARCHAR,
+                    filename VARCHAR,
+                    sheet_name VARCHAR,
+                    server VARCHAR,
+                    form_id VARCHAR,
+                    private_key VARCHAR,
+                    save_to VARCHAR,
+                    attachments BOOLEAN
+                )
+                """
             )
-            """
-        )
-
-        if to_load:
-            result = conn.execute(
-                "SELECT DISTINCT alias FROM import_log WHERE load = TRUE"
-            ).fetchall()
-        else:
-            result = conn.execute("SELECT DISTINCT alias FROM import_log").fetchall()
-        return [row[0] for row in result] if result else []
+        result = []
+    return [row[0] for row in result] if result else []
 
 
 # --- Get list of imported and loaded datasets ---#
@@ -340,7 +379,7 @@ def duckdb_get_imported_datasets(project_id: str) -> list[str]:
 
     # get list of tables in the database
     db_path = get_cache_path(project_id, "data", "raw.duckdb")
-    with duckdb.connect(db_path) as conn:
+    with _connect(db_path, read_only=True) as conn:
         table_names = conn.execute(
             "SELECT table_name FROM information_schema.tables WHERE table_schema = 'main'"
         ).fetchall()
@@ -366,7 +405,7 @@ def duckdb_table_exists(project_id: str, alias: str, db_name: str) -> bool:
 
     table_id = _validate_table_name(name_id(alias))
 
-    with duckdb.connect(db_path) as conn:
+    with _connect(db_path, read_only=True) as conn:
         # Check if the table exists
         table_exists = (
             conn.execute(
