@@ -1427,6 +1427,22 @@ class TestAddNewColumnOperation:
         uids = result["uid"].to_list()
         assert len(set(uids)) == 3  # All unique
 
+    def test_add_uuid_column_with_a_given_project_needs_no_session(self):
+        """A project ID passed in gives the session's IDs, without Streamlit."""
+        data = pl.DataFrame({"a": [1, 2, 3]})
+        prep_args = PrepActionResult(
+            action="add new column", column_names="uid", method="uuid"
+        )
+        with patch("datasure.processing.prep.st") as mock_st:
+            mock_st.session_state.st_project_id = "test123"
+            from_session, _ = AddNewColumnOperation().execute(data, prep_args)
+        # st is None here, so touching the session would raise.
+        with patch("datasure.processing.prep.st", None):
+            given, _ = PrepProcessor("test123").execute_single_action(
+                data, PrepAction(PrepActions.add_column, prep_args)
+            )
+        assert given["uid"].to_list() == from_session["uid"].to_list()
+
     def test_add_random_column(self):
         """Test Add random column."""
         op = AddNewColumnOperation()

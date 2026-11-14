@@ -114,8 +114,11 @@ also reads.
 - **`source`**: the page that made the entry: `corrections_page`, `outliers`,
   `constraints`, `duplicates` or `gps`. Entries logged before the column
   existed are backfilled as `corrections_page`.
-- **`user`**: who made the entry: the Reviewer name from
-  `utils/reviewer.py`, else the OS login. Null for older entries.
+- **`user`**: who made the entry (`utils/reviewer.py`): the name a host
+  gives in the `DATASURE_REVIEWER` environment variable, else the Reviewer
+  name set in the app, else the OS login. When the host gives the name, the
+  app shows it without an input, so it can't be changed. Null for older
+  entries.
 - **`accept`**: identified by (`check_type`, `KEY`, `column`), where
   `check_type` is one of `ACCEPT_CHECK_TYPES` (`outliers`, `constraints`,
   `gps`). A GPS acceptance has no column; its `current_value` records the

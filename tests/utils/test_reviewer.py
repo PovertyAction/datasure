@@ -14,6 +14,7 @@ def user_settings_file(tmp_path, monkeypatch):
     path = tmp_path / "user_settings.json"
     monkeypatch.setattr(reviewer, "_user_settings_path", lambda: path)
     monkeypatch.setattr(reviewer.getpass, "getuser", lambda: "os_login")
+    monkeypatch.delenv(reviewer.REVIEWER_ENV_VAR, raising=False)
     return path
 
 
@@ -67,6 +68,15 @@ class TestGetReviewerName:
         monkeypatch.setattr(reviewer.getpass, "getuser", fail)
         assert get_reviewer_name() == ""
 
+    def test_host_name_wins_over_the_override_and_the_os_login(self, monkeypatch):
+        set_reviewer_name("Ama Mensah")
+        monkeypatch.setenv(reviewer.REVIEWER_ENV_VAR, " kofi@example.org ")
+        assert get_reviewer_name() == "kofi@example.org"
+
+    def test_blank_host_name_is_ignored(self, monkeypatch):
+        monkeypatch.setenv(reviewer.REVIEWER_ENV_VAR, "  ")
+        assert get_reviewer_name() == "os_login"
+
 
 def _reviewer_setting_app():
     from datasure.utils.reviewer import render_reviewer_setting
@@ -84,3 +94,13 @@ class TestRenderReviewerSetting:
         assert not at.exception
         assert get_reviewer_name() == "Ama Mensah"
         assert at.text_input(key="reviewer_name_input").value == "Ama Mensah"
+
+    def test_host_name_is_shown_and_cannot_be_edited(self, monkeypatch):
+        from streamlit.testing.v1 import AppTest
+
+        monkeypatch.setenv(reviewer.REVIEWER_ENV_VAR, "kofi@example.org")
+        at = AppTest.from_function(_reviewer_setting_app).run()
+
+        assert not at.exception
+        assert not at.text_input
+        assert "kofi@example.org" in at.caption[0].value

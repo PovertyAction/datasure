@@ -51,6 +51,29 @@ def save_check_settings(
     if state_name not in st.session_state or not st.session_state[state_name]:
         return
 
+    write_check_settings(settings_file, check_name, check_settings)
+
+    st.session_state[state_name] = False
+
+
+def write_check_settings(
+    settings_file: str, check_name: str, check_settings: dict
+) -> None:
+    """Merge a check's settings into the settings file, without Streamlit.
+
+    ``save_check_settings`` calls this once a widget has flagged a change.
+    Code with no Streamlit session, such as an API, calls it directly.
+
+    Parameters
+    ----------
+    settings_file : str
+        The page's JSON settings file; created if it does not exist.
+    check_name : str
+        The check the settings belong to.
+    check_settings : dict
+        The settings to save. Settings of the check that are not in this
+        dict are kept.
+    """
     if not os.path.exists(settings_file):
         with open(settings_file, "w") as f:
             json.dump({}, f)
@@ -66,8 +89,6 @@ def save_check_settings(
     # save the dictionary to the file
     with open(settings_file, "w") as f:
         json.dump(settings_dict, f)
-
-    st.session_state[state_name] = False
 
 
 def load_check_settings(settings_file, check_name) -> dict:

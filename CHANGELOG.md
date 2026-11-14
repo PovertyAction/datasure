@@ -9,6 +9,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Reviewer name from the host**: the `DATASURE_REVIEWER` environment
+  variable (`reviewer.REVIEWER_ENV_VAR`) names the reviewer recorded on
+  corrections. It wins over the saved "Reviewer name" and the OS login, and
+  `render_reviewer_setting` then shows the name without an input, so a
+  deployment with its own sign-in records corrections under the signed-in
+  user
+- **Saving check settings and adding a `uuid` column without a Streamlit
+  session**: `settings_utils.write_check_settings` merges a check's
+  settings into the page settings file with no session state;
+  `save_check_settings` keeps its widget-flag gate and calls it.
+  `PrepProcessor` and `AddNewColumnOperation` take an optional `project_id`
+  for the `uuid` method, which otherwise still reads the open project from
+  the session; `prep_apply_action` passes its `project_id`
 - **Headless keyring guidance**: `secure_credentials.keyring_backend_problem`
   detects a keyring backend that can't hold credentials safely: keyring's
   "fail" backend (headless Linux with no Secret Service) and plaintext file

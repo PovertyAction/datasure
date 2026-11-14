@@ -13,6 +13,7 @@ from datasure.utils.settings_utils import (
     load_check_settings,
     save_check_settings,
     trigger_save,
+    write_check_settings,
 )
 
 
@@ -171,6 +172,24 @@ class TestSaveCheckSettings:
 
         # Verify file was NOT created
         assert not settings_file.exists()
+
+
+class TestWriteCheckSettings:
+    """write_check_settings saves without a Streamlit session."""
+
+    def test_writes_and_merges_without_touching_streamlit(self, tmp_path):
+        settings_file = tmp_path / "test_settings.json"
+        settings_file.write_text(json.dumps({"other_check": {"x": 1}}))
+
+        # st is None here, so touching the session would raise.
+        with patch("datasure.utils.settings_utils.st", None):
+            write_check_settings(str(settings_file), "test_check", {"a": 1, "b": 2})
+            write_check_settings(str(settings_file), "test_check", {"b": 3})
+
+        assert json.loads(settings_file.read_text()) == {
+            "other_check": {"x": 1},
+            "test_check": {"a": 1, "b": 3},
+        }
 
 
 class TestLoadCheckSettings:

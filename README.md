@@ -111,6 +111,11 @@ fails until you configure one:
 **Import Data → Keyring Diagnostics → Test Keyring Availability** shows which
 backend is active and whether it is usable.
 
+If your server signs users in itself, set the `DATASURE_REVIEWER` environment
+variable to the signed-in user's name when you start DataSure. Corrections are
+then recorded under that name, and the "Reviewer name" setting shows it and
+can't be edited.
+
 ## Data Quality Check Modules
 
 DataSure includes 9 specialized modules for comprehensive survey data quality monitoring:
