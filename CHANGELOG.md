@@ -38,6 +38,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Two sessions or processes on one project could fail with "file is being
+  used by another process"**: `utils/duckdb_utils.py` opened every database
+  writable, even to read, and DuckDB allows one process to write a file or
+  several to read it, never both. Reads (`duckdb_get_table`,
+  `duckdb_table_exists`, `duckdb_get_imported_datasets`,
+  `duckdb_get_aliases`) now open read-only, and every open goes through
+  `_connect`, which waits up to 5 seconds for a conflicting connection to
+  close before raising. A database that doesn't exist yet is still created
+  empty on first read. `duckdb_get_aliases` creates the import log only
+  when it is missing, on a separate writable connection
 - **A failed write could empty the project registry, and sessions sharing
   a cache could undo each other's changes**: every read and write of
   `cache/projects.json` now goes through `utils/project_registry.py`, which

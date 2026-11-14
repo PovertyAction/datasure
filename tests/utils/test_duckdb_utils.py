@@ -1,11 +1,14 @@
 """Tests for the DuckDB utilities module."""
 
+import threading
 from unittest.mock import MagicMock, patch
 
+import duckdb
 import pandas as pd
 import polars as pl
 import pytest
 
+from datasure.utils import duckdb_utils
 from datasure.utils.duckdb_utils import (
     CHECK_TABLE_PREFIXES,
     _validate_column_name,
@@ -16,6 +19,7 @@ from datasure.utils.duckdb_utils import (
     duckdb_get_imported_datasets,
     duckdb_get_table,
     duckdb_save_table,
+    duckdb_table_exists,
     missing_codes_table_name,
     name_id,
 )
@@ -583,3 +587,60 @@ class TestDuckdbDeleteRows:
 
             remaining = duckdb_get_table("test_project", "import_log", "logs")
             assert remaining.shape[0] == 2
+
+
+class TestSharedAccess:
+    """Reads open read-only and every open waits for a busy database."""
+
+    @pytest.fixture
+    def db_path(self, tmp_path):
+        path = tmp_path / "logs.duckdb"
+        with patch("datasure.utils.duckdb_utils.get_cache_path", return_value=path):
+            duckdb_save_table("p", pl.DataFrame({"a": [1, 2]}), "t", "logs")
+            yield path
+
+    def test_reads_work_beside_another_reader(self, db_path):
+        with duckdb.connect(db_path, read_only=True):
+            assert duckdb_get_table("p", "t", "logs").height == 2
+            assert duckdb_table_exists("p", "t", "logs")
+
+    def test_saving_to_an_existing_database_still_works(self, db_path):
+        duckdb_save_table("p", pl.DataFrame({"a": [1, 2, 3]}), "t", "logs")
+        assert duckdb_get_table("p", "t", "logs").height == 3
+
+    def test_read_waits_for_a_writer_to_finish(self, db_path):
+        writer = duckdb.connect(db_path)
+        threading.Timer(0.2, writer.close).start()
+        assert duckdb_get_table("p", "t", "logs").height == 2
+
+    def test_save_waits_for_a_reader_to_finish(self, db_path):
+        reader = duckdb.connect(db_path, read_only=True)
+        threading.Timer(0.2, reader.close).start()
+        duckdb_save_table("p", pl.DataFrame({"a": [9]}), "t", "logs")
+        assert duckdb_get_table("p", "t", "logs").height == 1
+
+    def test_gives_up_when_the_database_stays_busy(self, db_path, monkeypatch):
+        monkeypatch.setattr(duckdb_utils, "_BUSY_TIMEOUT_SECONDS", 0.1)
+        with (
+            duckdb.connect(db_path),
+            pytest.raises(duckdb.ConnectionException),
+        ):
+            duckdb_get_table("p", "t", "logs")
+
+    def test_aliases_create_the_import_log_when_it_is_missing(self, db_path):
+        assert duckdb_get_aliases("p") == []
+        assert duckdb_table_exists("p", "import_log", "logs")
+
+    def test_aliases_read_beside_another_reader(self, db_path):
+        duckdb_save_table(
+            "p", pl.DataFrame({"alias": ["x"], "load": [True]}), "import_log", "logs"
+        )
+        with duckdb.connect(db_path, read_only=True):
+            assert duckdb_get_aliases("p") == ["x"]
+
+    def test_reading_a_database_that_does_not_exist_yet(self, tmp_path):
+        path = tmp_path / "new.duckdb"
+        with patch("datasure.utils.duckdb_utils.get_cache_path", return_value=path):
+            assert duckdb_get_table("p", "t", "logs").is_empty()
+            assert not duckdb_table_exists("p", "t", "logs")
+            assert duckdb_get_aliases("p") == []

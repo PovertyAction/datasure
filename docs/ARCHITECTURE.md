@@ -436,7 +436,14 @@ Resolved by `utils/cache_utils.py`:
 Per project (UUID-keyed):
 
 - `cache/{project_id}/data/` — the DuckDB databases `raw.duckdb`,
-  `prep.duckdb`, `corrected.duckdb`
+  `prep.duckdb`, `corrected.duckdb`. Every helper in `utils/duckdb_utils.py`
+  opens the database for one call and closes it. DuckDB allows one process
+  to write a file or several to read it, never both, so reads open read-only
+  and every open waits up to 5 seconds for a conflicting connection to close
+  (`duckdb_utils._connect`). Two sessions, browser tabs or processes can
+  therefore read a project at the same time, and a save waits for readers
+  to finish. Code that opens a project database must go through these
+  helpers, not `duckdb.connect`
 - `cache/{project_id}/settings/` — `logs.duckdb` (import/prep logs, the
   correction logs `corr_log_{alias}`, the backcheck attribution logs
   `bc_attribution_{page_name_id}`, see [Correction log](#correction-log),
