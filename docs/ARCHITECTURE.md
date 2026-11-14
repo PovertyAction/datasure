@@ -452,7 +452,8 @@ Per project (UUID-keyed):
   file in one step so a failed write leaves the previous registry intact. A
   corrupt registry reads as empty, and the next write keeps it as
   `projects.json.corrupt`. `last_used` is stamped whenever a project is
-  opened from the home page. It changes when a project is opened, not while
+  opened from the home page or by `?project=` (see [URL state](#url-state)).
+  It changes when a project is opened, not while
   it is in use, so its age says nothing about whether the project is still
   open: DataSure has no "close project" action (the home page keeps the
   project in the session) and Streamlit has no session-end event. A host
@@ -585,6 +586,18 @@ gives way to the saved one.
 Prepare Data uses `?dataset=<alias>` (navigation key `prep_nav__{project_id}`)
 and Corrections uses `?page=<page_name_id>` (navigation key
 `corrections_nav__{project_id}`) in the same way. No other page uses query parameters.
+
+`app.py` reads one more parameter, `?project=<project_id>`, so that a host
+that embeds DataSure can link straight to a project: every page load starts
+a new session, which otherwise opens the home page with no project and
+answers a page URL with "Page not found". A registered ID is opened and
+its `last_used` stamped, as if opened from the home page, and an unknown ID
+is ignored. The parameter is applied once per session
+(`st_url_project_applied`), so choosing another project in the app is not
+undone by a URL that still names the first. It combines with a page path and
+the parameters above, for example `/prep_view?project=abc12345&dataset=main`.
+Streamlit's own `?embed=true` hides the toolbar but not the sidebar or the
+navigation menu.
 
 ## Credentials
 

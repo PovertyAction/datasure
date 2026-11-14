@@ -26,6 +26,7 @@ import os
 import sys
 import tempfile
 from collections.abc import Callable, Iterator
+from datetime import datetime
 from pathlib import Path
 
 if sys.platform == "win32":
@@ -142,3 +143,19 @@ def update_registry(projects_file: Path, mutate: Callable[[dict], bool]) -> bool
                 )
             _write_atomic(projects_file, projects)
         return changed
+
+
+def stamp_last_used(projects_file: Path, project_id: str) -> bool:
+    """Record now as ``last_used`` for a registered project.
+
+    Returns ``False``, leaving the registry untouched, if ``project_id`` is
+    not registered.
+    """
+
+    def _stamp(projects: dict) -> bool:
+        if project_id not in projects:
+            return False
+        projects[project_id]["last_used"] = datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+        return True
+
+    return update_registry(projects_file, _stamp)

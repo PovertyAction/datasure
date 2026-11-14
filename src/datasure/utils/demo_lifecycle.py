@@ -52,6 +52,7 @@ _APP_WIDE_KEYS = frozenset(
         "st_import_data_page",
         "st_prep_data_page",
         "st_config_checks_page",
+        "st_url_project_applied",
         _REVIEWER_NAME_WIDGET_KEY,
         _QUEUED_NOTICES_KEY,
     }
