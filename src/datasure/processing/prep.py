@@ -728,6 +728,14 @@ class TransformColumnsOperation(PrepOperation):
 class AddNewColumnOperation(PrepOperation):
     """Add new columns with computed values."""
 
+    def __init__(self, project_id: str | None = None):
+        """Set the project whose ID seeds the ``uuid`` method.
+
+        With no ``project_id``, the method reads the open project from the
+        Streamlit session.
+        """
+        self.project_id = project_id
+
     def execute(self, data: pl.DataFrame, prep_args: PrepActionResult) -> pl.DataFrame:
         """Add new column based on description."""
         try:
@@ -796,7 +804,7 @@ class AddNewColumnOperation(PrepOperation):
 
         elif method == "uuid":
             # Generate UUID-like hash based on project ID and row index
-            project_id = st.session_state.st_project_id
+            project_id = self.project_id or st.session_state.st_project_id
 
             return (
                 data.with_row_index("__temp_idx__")
@@ -917,13 +925,17 @@ class AddNewColumnOperation(PrepOperation):
 class PrepProcessor:
     """Main processor for data preparation operations."""
 
-    def __init__(self):
-        """Initialize processor with operation handlers."""
+    def __init__(self, project_id: str | None = None):
+        """Initialize processor with operation handlers.
+
+        ``project_id`` is passed to ``AddNewColumnOperation``, which needs
+        it for the ``uuid`` method.
+        """
         self.operation_handlers = {
             PrepActions.remove_column: RemoveColumnsOperation(),
             PrepActions.remove_row: RemoveRowsOperation(),
             PrepActions.transform_column: TransformColumnsOperation(),
-            PrepActions.add_column: AddNewColumnOperation(),
+            PrepActions.add_column: AddNewColumnOperation(project_id),
         }
 
     def execute_single_action(
@@ -1249,7 +1261,7 @@ def prep_apply_action(
         OperationError: If data operation fails (only when applying a single
             new action)
     """
-    processor = PrepProcessor()
+    processor = PrepProcessor(project_id)
     prep_log_df = duckdb_get_table(project_id, f"prep_log_{alias}", db_name="logs")
 
     if prep_args is None:

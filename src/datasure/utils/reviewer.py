@@ -2,12 +2,15 @@
 
 The reviewer defaults to the OS login. A "Reviewer name" set in the app
 overrides it and is remembered across sessions in the user settings file.
+A host can name the reviewer with the ``DATASURE_REVIEWER`` environment
+variable, which wins over both and can't be changed in the app.
 The setting holds a display name only, never credentials.
 """
 
 import getpass
 import json
 import logging
+import os
 from pathlib import Path
 
 import streamlit as st
@@ -15,6 +18,12 @@ import streamlit as st
 from datasure.utils.cache_utils import get_cache_path
 
 logger = logging.getLogger(__name__)
+
+# Set by a host that already knows who the user is, such as a deployment
+# with its own sign-in. It wins over the saved name and the OS login, and the
+# app shows it without an input, so a correction can't be recorded under
+# another name.
+REVIEWER_ENV_VAR = "DATASURE_REVIEWER"
 
 _REVIEWER_NAME_KEY = "reviewer_name"
 _REVIEWER_NAME_WIDGET_KEY = "reviewer_name_input"
@@ -53,9 +62,17 @@ def get_reviewer_override() -> str:
     return name.strip() if isinstance(name, str) else ""
 
 
+def _host_reviewer() -> str:
+    return os.environ.get(REVIEWER_ENV_VAR, "").strip()
+
+
 def get_reviewer_name() -> str:
-    """Return who is making corrections: the saved name, else the OS login."""
-    return get_reviewer_override() or _os_login()
+    """Return who is making corrections.
+
+    The host's name (``REVIEWER_ENV_VAR``) if set, else the saved name, else
+    the OS login.
+    """
+    return _host_reviewer() or get_reviewer_override() or _os_login()
 
 
 def set_reviewer_name(name: str) -> None:
@@ -80,7 +97,14 @@ def _save_reviewer_name_input() -> None:
 
 
 def render_reviewer_setting() -> None:
-    """Render the "Reviewer name" setting, saved as soon as it changes."""
+    """Render the "Reviewer name" setting, saved as soon as it changes.
+
+    When the host names the reviewer, the name is shown and can't be edited.
+    """
+    host_reviewer = _host_reviewer()
+    if host_reviewer:
+        st.caption(f":material/person: Reviewer: {host_reviewer}")
+        return
     with st.popover(
         f":material/person: Reviewer: {get_reviewer_name() or 'unknown'}",
         width="stretch",
