@@ -16,6 +16,12 @@ def generate_readme(
     corrected_rows: int,
     n_corrections_by_action: dict[str, int],
     include_scto_form: bool = False,
+    include_pii: bool = True,
+    pii_masked_columns: list[str] | None = None,
+    pii_hashed_columns: list[str] | None = None,
+    pii_coded_columns: list[str] | None = None,
+    pii_dropped_columns: list[str] | None = None,
+    pii_kept_columns: list[str] | None = None,
 ) -> str:
     """Generate a plain-text README for the Stata replication package.
 
@@ -41,6 +47,21 @@ def generate_readme(
         Count of corrections keyed by action type.
     include_scto_form : bool
         Whether the SurveyCTO XLS questionnaire was included in the package.
+    include_pii : bool
+        Whether the package was exported with PII (True) or de-identified
+        (False).
+    pii_masked_columns : list[str] | None
+        Columns masked in a de-identified export (or slated for masking by
+        the reviewer in a with-PII export).
+    pii_hashed_columns : list[str] | None
+        Columns replaced with salted hash pseudonyms (deterministic tokens
+        that preserve categorical structure).
+    pii_coded_columns : list[str] | None
+        Columns recoded with sequential category codes.
+    pii_dropped_columns : list[str] | None
+        Columns dropped in a de-identified export (or slated for dropping).
+    pii_kept_columns : list[str] | None
+        Columns flagged in the PII review but kept by reviewer decision.
 
     Returns
     -------
@@ -52,6 +73,66 @@ def generate_readme(
     safe_project = project_name.lower().replace(" ", "_")
 
     sep = "=" * 60
+
+    pii_masked_columns = pii_masked_columns or []
+    pii_hashed_columns = pii_hashed_columns or []
+    pii_coded_columns = pii_coded_columns or []
+    pii_dropped_columns = pii_dropped_columns or []
+    pii_kept_columns = pii_kept_columns or []
+
+    def _fmt_cols(columns: list[str]) -> str:
+        return ", ".join(columns) if columns else "none"
+
+    indirect_warning = [
+        "WARNING (indirect identifiers): de-identification is not",
+        "anonymization. Even with direct identifiers masked or dropped,",
+        "subjects may remain identifiable through combinations of the",
+        "remaining variables (e.g. age, location, occupation, household",
+        "composition). Review the data before sharing it further.",
+    ]
+    if include_pii:
+        pii_section = [
+            sep,
+            "PII & DE-IDENTIFICATION",
+            sep,
+            "",
+            "This package was exported WITH personally identifiable",
+            "information (PII). Store it only in encrypted,",
+            "access-controlled locations, in line with your organization's",
+            "data-security policy.",
+            "",
+            "PII decisions recorded in DataSure (not applied to this export):",
+            f"- Columns to be masked: {_fmt_cols(pii_masked_columns)}",
+            f"- Columns to be hashed (salted pseudonyms): {_fmt_cols(pii_hashed_columns)}",
+            f"- Columns to be recoded (category codes): {_fmt_cols(pii_coded_columns)}",
+            f"- Columns to be dropped: {_fmt_cols(pii_dropped_columns)}",
+            f"- Flagged but kept by reviewer decision: {_fmt_cols(pii_kept_columns)}",
+            "",
+            "The full flag audit trail is in 4_output/3_logs/pii_flags.csv.",
+            "",
+            *indirect_warning,
+            "",
+        ]
+    else:
+        pii_section = [
+            sep,
+            "PII & DE-IDENTIFICATION",
+            sep,
+            "",
+            "This package was exported de-identified. Columns flagged in",
+            "DataSure's PII review were masked or dropped in every bundled",
+            "dataset, the codebook, and the correction log before export.",
+            "",
+            f"- Masked columns: {_fmt_cols(pii_masked_columns)}",
+            "- Hashed columns (salted pseudonyms; deterministic, so",
+            f"  group-bys/joins/frequencies still work): {_fmt_cols(pii_hashed_columns)}",
+            f"- Recoded columns (category codes): {_fmt_cols(pii_coded_columns)}",
+            f"- Dropped columns: {_fmt_cols(pii_dropped_columns)}",
+            f"- Flagged but kept by reviewer decision: {_fmt_cols(pii_kept_columns)}",
+            "",
+            *indirect_warning,
+            "",
+        ]
 
     if n_corrections_by_action:
         action_rows = "\n".join(
@@ -85,6 +166,7 @@ def generate_readme(
         "master script will reproduce the prepped and corrected datasets",
         "from the raw source and generate the variable codebook.",
         "",
+        *pii_section,
         sep,
         "FOLDER STRUCTURE",
         sep,
@@ -153,6 +235,13 @@ def generate_readme(
         f"| {'2_scripts/2_import_data.do':<45} | {'Imports CSV and saves as DTA':<40} |",
         f"| {'2_scripts/3_prepare_data.do':<45} | {'Data preparation steps':<40} |",
         f"| {'2_scripts/4_corrections.do':<45} | {'All data corrections':<40} |",
+        *(
+            [
+                f"| {'4_output/3_logs/pii_flags.csv':<45} | {'PII review flag audit trail':<40} |"
+            ]
+            if include_pii
+            else []
+        ),
         f"| {'3_data/2_intermediate/' + safe_survey + '_prepped.dta':<45} | {'Dataset after prep steps (generated)':<40} |",
         f"| {'3_data/3_final/' + safe_survey + '_corrected.dta':<45} | {'Final corrected dataset (generated)':<40} |",
         f"| {'1_docs/2_codebooks/codebook.xlsx':<45} | {'Variable codebook (generated)':<40} |",

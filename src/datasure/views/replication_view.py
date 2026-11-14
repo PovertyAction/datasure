@@ -7,6 +7,7 @@ audit logs, README) as a zip file for download to the local drive.
 import polars as pl
 import streamlit as st
 
+from datasure.processing import pii
 from datasure.replication.package_builder import build_replication_package
 from datasure.utils.cache_utils import get_cache_path
 from datasure.utils.config_utils import ConfigurationService
@@ -73,17 +74,21 @@ def _resolve_page_config(
     return alias, key_col
 
 
-def _zip_filename(project_name: str, page_name: str) -> str:
+def _zip_filename(project_name: str, page_name: str, deidentified: bool = False) -> str:
     """Return the download filename for the replication package zip.
 
-    Example: ``replication_ors_zinc_community_hfc.zip``
+    Example: ``replication_ors_zinc_community_hfc.zip`` (or with a
+    ``_deidentified`` suffix for de-identified exports).
     """
     safe_p = project_name.lower().replace(" ", "_")
     safe_pg = page_name.lower().replace(" ", "_")
-    return f"replication_{safe_p}_{safe_pg}.zip"
+    suffix = "_deidentified" if deidentified else ""
+    return f"replication_{safe_p}_{safe_pg}{suffix}.zip"
 
 
-def _package_tree(safe_project: str, safe_page: str, is_scto: bool) -> str:
+def _package_tree(
+    safe_project: str, safe_page: str, is_scto: bool, include_pii: bool = False
+) -> str:
     """Return the zip contents as a plain-text directory tree."""
     surveys_line = (
         f"│   ├── 1_surveys/{safe_page}_questionnaire.xlsx\n"
@@ -115,7 +120,11 @@ def _package_tree(safe_project: str, safe_page: str, is_scto: bool) -> str:
         f"        │   ├── 0_main.log\n"
         f"        │   └── ...per-script logs\n"
         f"        ├── correction_log.csv\n"
-        f"        └── prep_log.csv"
+        + (
+            "        ├── prep_log.csv\n        └── pii_flags.csv"
+            if include_pii
+            else "        └── prep_log.csv"
+        )
     )
 
 
@@ -232,10 +241,59 @@ def _render_config_details(page_configs: pl.DataFrame) -> None:
         )
 
 
-def _render_package_preview(safe_project: str, safe_page: str, is_scto: bool) -> None:
+def _render_package_preview(
+    safe_project: str, safe_page: str, is_scto: bool, include_pii: bool = False
+) -> None:
     """Render the collapsible zip-contents preview."""
     with st.expander("What's inside the zip?", expanded=False):
-        st.code(_package_tree(safe_project, safe_page, is_scto), language="text")
+        st.code(
+            _package_tree(safe_project, safe_page, is_scto, include_pii),
+            language="text",
+        )
+
+
+def _render_pii_flags_summary(project_id: str, alias: str, include_pii: bool) -> None:
+    """Show what the export will do with each PII-flagged column."""
+    flags = pii.load_pii_flags(project_id, alias)
+    if flags.is_empty():
+        st.info(
+            "No PII scan has been run for this dataset. Nothing will be "
+            "redacted — run **Scan for PII** on the Prepare Data page to "
+            "flag columns first.",
+            icon=":material/shield:",
+        )
+        return
+
+    if include_pii:
+        action_expr = pl.lit("exported as-is (PII included)")
+    else:
+        action_expr = (
+            pl.when(pl.col("decision").is_in(["mask", "undecided"]))
+            .then(pl.lit("masked"))
+            .when(pl.col("decision") == "hash")
+            .then(pl.lit("hashed (salted pseudonyms)"))
+            .when(pl.col("decision") == "code")
+            .then(pl.lit("recoded (category codes)"))
+            .when(pl.col("decision") == "drop")
+            .then(pl.lit("dropped"))
+            .otherwise(pl.lit("kept (reviewer decision)"))
+        )
+    summary = flags.select(
+        pl.col("column"),
+        pl.col("source").alias("flagged by"),
+        pl.col("decision"),
+        action_expr.alias("export action"),
+    )
+    st.dataframe(summary, hide_index=True, width="stretch")
+
+    kept = flags.filter(pl.col("decision") == "keep")
+    if not include_pii and not kept.is_empty():
+        st.warning(
+            f"{kept.height} flagged column(s) will be exported unredacted "
+            "because the reviewer chose **keep**: "
+            + ", ".join(f"`{c}`" for c in kept["column"].to_list()),
+            icon=":material/warning:",
+        )
 
 
 # ── Page ──────────────────────────────────────────────────────────────────────
@@ -265,22 +323,13 @@ page_header(
     "your corrected dataset from the raw source data.",
 )
 
-st.error(
-    "**This package contains personally identifiable information (PII).** "
-    "The zip file includes raw survey data with respondent PII. "
-    "You must download it only to an **encrypted, access-controlled storage location** "
-    "in compliance with IPA data security and confidentiality policies. "
-    "Do not store this package on unencrypted drives, shared folders, or cloud services "
-    "that are not approved for confidential data.",
-    icon=":material/lock:",
-)
 st.divider()
 
 # ── Page selector ─────────────────────────────────────────────────────────────
 
 section_header("Configure export")
 
-page_name_col, _ = st.columns(2)
+page_name_col, export_mode_col = st.columns(2)
 with page_name_col:
     selected_page: str | None = st.selectbox(
         "Page Name",
@@ -303,16 +352,51 @@ with page_name_col:
         "name, or the computer login if no name was set. Check this to leave "
         "that column blank in the package. The project's own log is not changed."
     )
+with export_mode_col:
+    export_mode = st.radio(
+        "Export mode",
+        options=["De-identified (recommended)", "Include PII"],
+        help=(
+            "De-identified: columns flagged in the PII review are masked or "
+            "dropped in every exported file. Include PII: data is exported "
+            "as-is, with the PII review flags bundled as an audit log."
+        ),
+        key="_replication_export_mode",
+    )
+include_pii = export_mode == "Include PII"
+
+if include_pii:
+    st.error(
+        "**This package will contain personally identifiable information "
+        "(PII).** The zip file includes raw survey data with respondent PII. "
+        "You must download it only to an **encrypted, access-controlled "
+        "storage location** in compliance with IPA data security and "
+        "confidentiality policies. Do not store this package on unencrypted "
+        "drives, shared folders, or cloud services that are not approved for "
+        "confidential data.",
+        icon=":material/lock:",
+    )
+else:
+    st.warning(
+        "**De-identification is not anonymization.** Columns flagged in the "
+        "PII review will be masked or dropped, but subjects may remain "
+        "identifiable through combinations of the remaining variables "
+        "(e.g. age, location, occupation, household composition). Review "
+        "the flagged-column summary below and the exported data before "
+        "sharing.",
+        icon=":material/warning:",
+    )
 
 alias: str = ""
 key_col: str = ""
 
 # Clear any previously built zip when the page or export options change.
-build_settings = (selected_page, exclude_reviewer_names)
+build_settings = (selected_page, exclude_reviewer_names, include_pii)
 if st.session_state.get("_replication_build_settings") != build_settings:
     st.session_state.pop("_replication_zip", None)
     st.session_state.pop("_replication_filename", None)
     st.session_state.pop("_replication_warnings", None)
+    st.session_state.pop("_replication_zip_include_pii", None)
     st.session_state["_replication_build_settings"] = build_settings
 
 if selected_page:
@@ -325,6 +409,7 @@ if selected_page:
     else:
         alias, key_col = resolved
         _render_config_details(configs.filter(pl.col("page_name") == selected_page))
+        _render_pii_flags_summary(project_id, alias, include_pii)
 else:
     st.info("Select a page to see its details here.")
 
@@ -360,6 +445,7 @@ if st.button(
             scto_form_xlsx=scto_xlsx,
             form_def=scto_form_def,
             form_id=scto_form_id,
+            include_pii=include_pii,
             on_progress=_on_progress,
             exclude_reviewer_names=exclude_reviewer_names,
             on_warning=build_warnings.append,
@@ -369,21 +455,35 @@ if st.button(
     st.session_state["_replication_warnings"] = build_warnings
 
     st.session_state["_replication_zip"] = zip_bytes
+    st.session_state["_replication_zip_include_pii"] = include_pii
     st.session_state["_replication_filename"] = _zip_filename(
-        project_name, selected_page
+        project_name, selected_page, deidentified=not include_pii
     )
 
 # ── Download ──────────────────────────────────────────────────────────────────
 
 if "_replication_zip" in st.session_state:
-    st.success("Package ready — confirm the PII notice above, then download.")
+    built_with_pii = st.session_state.get("_replication_zip_include_pii", True)
+    if built_with_pii:
+        st.success("Package ready — confirm the PII notice above, then download.")
+        pii_confirmed = st.checkbox(
+            "I confirm I am downloading this package to an encrypted, "
+            "access-controlled storage location.",
+            key="_replication_pii_confirmed",
+        )
+    else:
+        st.success(
+            "De-identified package ready — acknowledge the indirect-identifier "
+            "notice, then download."
+        )
+        pii_confirmed = st.checkbox(
+            "I understand that de-identification does not guarantee anonymity: "
+            "subjects may remain indirectly identifiable through combinations "
+            "of the remaining variables.",
+            key="_replication_pii_confirmed",
+        )
     for warning in st.session_state.get("_replication_warnings", []):
         st.warning(warning, icon=":material/warning:")
-    pii_confirmed = st.checkbox(
-        "I confirm I am downloading this package to an encrypted, "
-        "access-controlled storage location.",
-        key="_replication_pii_confirmed",
-    )
     st.download_button(
         label="Download replication package (.zip)",
         data=st.session_state["_replication_zip"],
@@ -407,4 +507,5 @@ if selected_page and alias:
         safe_project,
         selected_page.lower().replace(" ", "_"),
         is_scto,
+        include_pii,
     )

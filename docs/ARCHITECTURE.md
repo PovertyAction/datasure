@@ -51,6 +51,7 @@ src/datasure/
 │   ├── prep.py             # Data preparation operations (Polars)
 │   ├── corrections.py      # Corrections and accept entries (CorrectionProcessor)
 │   ├── correction_log.py   # Correction log schema/backfill, Action enum (no Streamlit)
+│   ├── pii.py              # PII detection (heuristics + GLiNER2), flags, redaction (no Streamlit)
 │   └── row_index.py        # Row-index parsing shared by prep and replication (no Streamlit)
 ├── replication/            # Stata/Python replication package export
 ├── models/
@@ -95,6 +96,20 @@ The `archived/` directory holds legacy code and is gitignored.
    (`CorrectionProcessor.refresh_existing_corrected_data`). An alias with no
    prep table, such as unprepared backcheck data, is corrected from its raw
    table (`CorrectionProcessor.get_uncorrected_data`)
+7. **PII gate** (`processing/pii.py`): column-name heuristics and, with the
+   optional `pii` extra, GLiNER2-PII value scanning flag PII per dataset
+   (`pii_flags_{alias}` in the logs db). Values are scanned as
+   `"<column>: <value>"` so the column name gives the model context, and
+   decoy labels (`occupation`, `family_relationship`) keep job titles and
+   relatives from counting as names. The model is downloaded at runtime into
+   the Hugging Face cache, never bundled. Per-column decisions are mask /
+   hash (HMAC pseudonyms keyed by a per-project salt in `pii_salt`) / code
+   (persisted category codes in `pii_code_map_{alias}`) / drop / keep. All
+   can become prep steps (hash and code are idempotent, so the export gate
+   can safely re-apply them), and the export gate in
+   `replication/package_builder.py` enforces the flags regardless:
+   de-identified is the default export mode, the survey key column is never
+   redacted, and the salt and code maps never leave the local cache
 
 ## Correction log
 
