@@ -50,6 +50,13 @@ dependencies = [
     "polars-readstat>=0.5.1",
 ]
 
+[project.optional-dependencies]
+# PII value scanning with GLiNER2 (fastino/gliner2-privacy-filter-PII-multi).
+# Optional because it pulls in torch + transformers; without it, PII review
+# still runs the column-name heuristics. The model weights (~1.2 GB) are
+# downloaded at runtime from the app, never bundled.
+pii = ["gliner2[local]>=2.1.0"]
+
 [project.urls]
 Source = "https://github.com/PovertyAction/datasure"
 Issues = "https://github.com/PovertyAction/datasure/issues"
@@ -67,6 +74,8 @@ dev = [
     "jupyterlab>=4.5.7",
     "nbconvert>=7.17.0",
     "mistune>=3.2.1",
+    # So tests and local dev exercise the GLiNER2 value-scan code path
+    "datasure[pii]",
 ]
 
 [tool.uv]

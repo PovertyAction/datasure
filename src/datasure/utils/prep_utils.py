@@ -49,6 +49,7 @@ class PrepDescriptions:
         PrepActions.add_column.value: "Create a new column using various calculation methods or data sources",
         PrepActions.remove_column.value: "Delete selected columns from your dataset to reduce size or remove unnecessary data",
         PrepActions.remove_row.value: "Delete specific rows based on index position or conditional criteria",
+        PrepActions.redact_column.value: "Mask all values in selected columns with a redaction label (e.g. [PERSON]) to remove PII",
     }
 
     # Add Column Methods
@@ -375,6 +376,24 @@ class PrepConfirmationMessages:
         return cls._with_remaining(message, result)
 
     @classmethod
+    def redact_columns(cls, result: PrepActionResult) -> str:
+        """Generate message for redacting columns."""
+        column_count = (
+            len(result.source_columns) if isinstance(result.source_columns, list) else 1
+        )
+        column_text = cls._pluralize(column_count, "column")
+        column_display = cls._format_column_names(result.source_columns)
+        method = (result.method or "mask").lower()
+        how = {
+            "hash": "replaced with salted hash pseudonyms",
+            "code": "replaced with category codes",
+        }.get(method, "masked with a redaction label")
+        return (
+            f"✓ {column_count} {column_text} redacted. All values in "
+            f"{column_display} were {how}."
+        )
+
+    @classmethod
     def remove_rows(cls, result: PrepActionResult) -> str:
         """Generate message for removing rows."""
         row_text = cls._pluralize(result.affected_count, "row")
@@ -652,6 +671,7 @@ class PrepConfirmationMessages:
         PrepActions.add_column.value: "_resolve_add_column",
         PrepActions.remove_column.value: "remove_columns",
         PrepActions.remove_row.value: "_resolve_remove_row",
+        PrepActions.redact_column.value: "redact_columns",
     }
 
     @classmethod

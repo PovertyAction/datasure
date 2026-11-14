@@ -44,6 +44,7 @@ For feature requests and bug reports, see our [GitHub Issues](https://github.com
 | **Cross-Platform Support** | Windows, macOS, and Linux compatibility | Launched |
 | **Package Distribution** | Available via PyPI (`uv tool install datasure`) | Launched |
 | **Replication Package Export** | Bundle and export full analysis packages | Launched |
+| **PII Detection & De-identification** | GLiNER2-PII value scanning (English, Spanish, French), redaction prep action, de-identified exports | Launched |
 
 ### Check-Page Corrections ([#295](https://github.com/PovertyAction/datasure/issues/295))
 

@@ -154,6 +154,23 @@ class TestPackageTree:
         tree = _package_tree("proj", "hh_survey", is_scto=False)
         assert "hh_survey_raw.csv" in tree
 
+    def test_deidentified_tree_has_no_flags_log(self):
+        tree = _package_tree("p", "s", is_scto=False, include_pii=False)
+        assert "pii_flags.csv" not in tree
+
+    def test_with_pii_tree_lists_flags_log(self):
+        tree = _package_tree("p", "s", is_scto=False, include_pii=True)
+        assert "pii_flags.csv" in tree
+
+
+class TestZipFilenamePii:
+    def test_deidentified_suffix(self):
+        result = _zip_filename("Proj", "Page", deidentified=True)
+        assert result == "replication_proj_page_deidentified.zip"
+
+    def test_default_no_suffix(self):
+        assert _zip_filename("Proj", "Page") == "replication_proj_page.zip"
+
 
 # ---------------------------------------------------------------------------
 # _resolve_page_config
