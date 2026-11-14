@@ -47,6 +47,13 @@ uv tool install datasure
 uv tool update-shell
 ```
 
+To scan data values for PII (names, phone numbers, emails, places), install
+the optional `pii` extra instead. It adds PyTorch, so the install is larger:
+
+```bash
+uv tool install 'datasure[pii]'
+```
+
 ### Step 3: Verify installation
 
 ```bash
@@ -135,7 +142,7 @@ DataSure includes 9 specialized modules for comprehensive survey data quality mo
 - **Local File Support**: CSV, Excel, Stata (.dta), JSON, and Parquet upload with automatic type detection
 - **Multi-Project Organization**: Manage multiple surveys simultaneously
 - **Data Preparation**: Cleaning and transformation workflows
-- **PII Detection & De-identification**: Presidio-based scanning of column names and values; per-column mask, salted-hash pseudonym, category-code, drop, or keep decisions; and a de-identified (default) or with-PII replication export
+- **PII Detection & De-identification**: column-name heuristics plus multilingual (English, Spanish, French) value scanning with the GLiNER2-PII model (optional `pii` extra); per-column mask, salted-hash pseudonym, category-code, drop, or keep decisions; and a de-identified (default) or with-PII replication export
 
 ### Interactive Dashboards
 

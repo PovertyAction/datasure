@@ -6,10 +6,11 @@ Two detection passes:
    substring matching against multilingual restricted-word lists (ported in
    spirit from PovertyAction/PII_detection, MIT), plus a sparsity heuristic
    for free-text columns.
-2. **Value scan** (requires a spaCy model): Microsoft Presidio's
-   ``BatchAnalyzerEngine`` over a sample of values from string columns —
-   NER-backed entities (PERSON, LOCATION) plus pattern recognizers
-   (PHONE_NUMBER, EMAIL_ADDRESS, ...).
+2. **Value scan** (optional ``pii`` extra + a one-time model download):
+   GLiNER2-PII (``fastino/gliner2-privacy-filter-PII-multi``), a multilingual
+   span extractor, over a sample of distinct values from string columns.
+   It finds person names, phone numbers, emails, and place names (including
+   villages) in English, Spanish, and French without per-language models.
 
 Flags persist per dataset in ``pii_flags_{alias}`` (logs db), following the
 ``prep_log_{alias}`` convention. Redaction helpers apply the reviewer's
@@ -31,14 +32,15 @@ distribution, so rare categories remain identifiable by their rarity —
 part of why de-identified output always carries the indirect-identifier
 warning.
 
-Presidio and spaCy are imported lazily inside functions: they are heavy and
-only needed when a scan or model operation actually runs.
+gliner2 and huggingface_hub are imported lazily inside functions: they pull
+in torch and are only needed when a scan or model operation actually runs.
 """
 
 from __future__ import annotations
 
 import hashlib
 import hmac
+import importlib.util
 import logging
 import random
 import re
@@ -53,34 +55,31 @@ from datasure.utils import duckdb_utils
 
 logger = logging.getLogger(__name__)
 
-# --- Languages and models -------------------------------------------------
+# --- Value-scan model ------------------------------------------------------
 
-PII_LANGUAGES: dict[str, str] = {"en": "English", "es": "Spanish", "fr": "French"}
-PII_MODEL_OPTIONS: dict[str, str] = {
-    "en": "en_core_web_sm",
-    "es": "es_core_news_sm",
-    "fr": "fr_core_news_sm",
+PII_MODEL_ID = "fastino/gliner2-privacy-filter-PII-multi"
+PII_MODEL_SIZE = "about 1.2 GB"
+
+# GLiNER2 label -> DataSure entity type (drives mask labels and pseudonym
+# prefixes). The model reads the label text at inference time, so "location"
+# works zero-shot and, unlike its trained "city" label, also covers villages,
+# communities, and neighborhoods.
+VALUE_SCAN_LABELS: dict[str, str] = {
+    "person": "PERSON",
+    "phone_number": "PHONE_NUMBER",
+    "email": "EMAIL_ADDRESS",
+    "location": "LOCATION",
 }
+# Decoy labels: the model also tags roles and relatives ("farmer", "esposo",
+# "mere") as person. Asking for these labels too lets the model claim such
+# words; a PII span overlapping a decoy span is not counted.
+DECOY_LABELS: tuple[str, ...] = ("occupation", "family_relationship")
 
-# --- Detection tuning -----------------------------------------------------
-
-# Presidio entities considered PII for column flagging. DATE_TIME, URL and
-# NRP are excluded as too noisy for survey data.
-VALUE_SCAN_ENTITIES: frozenset[str] = frozenset(
-    {
-        "PERSON",
-        "PHONE_NUMBER",
-        "EMAIL_ADDRESS",
-        "LOCATION",
-        "IP_ADDRESS",
-        "CREDIT_CARD",
-        "IBAN_CODE",
-        "MEDICAL_LICENSE",
-    }
-)
-VALUE_SCORE_THRESHOLD = 0.4  # per-detection minimum confidence
-VALUE_HIT_THRESHOLD = 0.3  # share of sampled values with a hit → flag column
-VALUE_SAMPLE_SIZE = 100  # values sampled per string column
+VALUE_SCORE_THRESHOLD = 0.5  # per-span minimum confidence (model card default)
+VALUE_HIT_THRESHOLD = 0.3  # share of sampled values with a hit -> flag column
+VALUE_SAMPLE_SIZE = 30  # distinct values sampled per string column
+VALUE_MAX_CHARS = 500  # longer values are truncated before scanning
+VALUE_BATCH_SIZE = 16
 
 SPARSITY_THRESHOLD = 0.9  # unique/non-null ratio → likely free text
 SPARSITY_MIN_ROWS = 20  # skip the heuristic on tiny columns
@@ -212,10 +211,6 @@ _ENTITY_MASKS: dict[str, str] = {
     "PHONE_NUMBER": "[PHONE]",
     "EMAIL_ADDRESS": "[EMAIL]",
     "LOCATION": "[LOCATION]",
-    "IP_ADDRESS": "[IP_ADDRESS]",
-    "CREDIT_CARD": "[CREDIT_CARD]",
-    "IBAN_CODE": "[IBAN]",
-    "MEDICAL_LICENSE": "[MEDICAL_LICENSE]",
 }
 
 _FLAGS_SCHEMA: dict[str, pl.DataType] = {
@@ -314,82 +309,117 @@ def scan_column_names(df: pl.DataFrame) -> pl.DataFrame:
     return pl.DataFrame(rows, schema=_FLAGS_SCHEMA)
 
 
-# --- Pass 2: Presidio value scan ---------------------------------------------
+# --- Pass 2: GLiNER2 value scan ----------------------------------------------
 
 
-def installed_models() -> dict[str, bool]:
-    """Return {language code: whether its spaCy model is installed}."""
-    import spacy.util
-
-    return {
-        lang: spacy.util.is_package(model) for lang, model in PII_MODEL_OPTIONS.items()
-    }
+def value_scan_available() -> bool:
+    """Return whether the optional ``pii`` extra (gliner2) is installed."""
+    return importlib.util.find_spec("gliner2") is not None
 
 
-def download_model(language: str) -> tuple[bool, str]:
-    """Download the spaCy model for *language*.
+def _model_path(download: bool = False) -> str:
+    """Return the local snapshot path of the model, downloading if asked.
+
+    Raises
+    ------
+    FileNotFoundError
+        The model is not in the Hugging Face cache and *download* is False.
+    """
+    from huggingface_hub import snapshot_download
+    from huggingface_hub.errors import LocalEntryNotFoundError
+
+    try:
+        return snapshot_download(PII_MODEL_ID, local_files_only=not download)
+    except LocalEntryNotFoundError as e:
+        raise FileNotFoundError(f"{PII_MODEL_ID} has not been downloaded") from e
+
+
+def model_downloaded() -> bool:
+    """Return whether the value-scan model is in the local Hugging Face cache."""
+    if not value_scan_available():
+        return False
+    try:
+        _model_path()
+    except FileNotFoundError:
+        return False
+    return True
+
+
+def download_model() -> tuple[bool, str]:
+    """Download the value-scan model into the Hugging Face cache.
 
     Returns
     -------
     tuple[bool, str]
         (success, message). Fails gracefully on network errors.
     """
-    model = PII_MODEL_OPTIONS.get(language)
-    if model is None:
-        return False, f"Unsupported language: {language}"
     try:
-        import spacy.cli
-
-        spacy.cli.download(model)
-    except SystemExit as e:  # spacy.cli.download exits on failure
-        logger.warning("spaCy model download failed for %s: %s", model, e)
-        return False, f"Download failed for {model}. Check your network connection."
+        _model_path(download=True)
     except Exception as e:
-        logger.warning("spaCy model download failed for %s: %s", model, e)
-        return False, f"Download failed for {model}: {e}"
-    return True, f"Model {model} installed."
+        logger.warning("PII model download failed: %s", e)
+        return False, f"Download of {PII_MODEL_ID} failed: {e}"
+    return True, f"Model {PII_MODEL_ID} downloaded."
 
 
-# Analyzer engines are expensive to build (spaCy model load); memoize per
-# language for the process lifetime. A plain dict is used instead of
-# st.cache_resource so this module stays streamlit-free.
-_ANALYZER_CACHE: dict[str, object] = {}
+# Loading the model takes seconds; memoize it for the process lifetime. A
+# plain dict instead of st.cache_resource keeps this module streamlit-free.
+_MODEL_CACHE: dict[str, object] = {}
 
 
-def _get_batch_analyzer(language: str):
-    """Build (and cache) a Presidio BatchAnalyzerEngine for *language*."""
-    if language in _ANALYZER_CACHE:
-        return _ANALYZER_CACHE[language]
+def _get_model():
+    """Load (and cache) the GLiNER2 model from the local cache only."""
+    if PII_MODEL_ID not in _MODEL_CACHE:
+        from gliner2 import GLiNER2
 
-    from presidio_analyzer import AnalyzerEngine, BatchAnalyzerEngine
-    from presidio_analyzer.nlp_engine import NlpEngineProvider
+        _MODEL_CACHE[PII_MODEL_ID] = GLiNER2.from_pretrained(_model_path())
+    return _MODEL_CACHE[PII_MODEL_ID]
 
-    configuration = {
-        "nlp_engine_name": "spacy",
-        "models": [{"lang_code": language, "model_name": PII_MODEL_OPTIONS[language]}],
-    }
-    nlp_engine = NlpEngineProvider(nlp_configuration=configuration).create_engine()
-    analyzer = AnalyzerEngine(nlp_engine=nlp_engine, supported_languages=[language])
-    batch = BatchAnalyzerEngine(analyzer_engine=analyzer)
-    _ANALYZER_CACHE[language] = batch
-    return batch
+
+def _value_entities(result: dict, offset: int) -> list[str]:
+    """Return the entity types of PII spans found in one scanned value.
+
+    Spans before *offset* (the column-name prefix) are ignored, as are PII
+    spans that overlap a decoy span.
+    """
+    entities = result.get("entities", {})
+    decoys = [
+        (span["start"], span["end"])
+        for label in DECOY_LABELS
+        for span in entities.get(label, [])
+    ]
+    found: list[str] = []
+    for label, entity_type in VALUE_SCAN_LABELS.items():
+        for span in entities.get(label, []):
+            if span["start"] < offset:
+                continue
+            if any(
+                span["start"] < end and start < span["end"] for start, end in decoys
+            ):
+                continue
+            found.append(entity_type)
+    return found
 
 
 def scan_values(
     df: pl.DataFrame,
-    language: str = "en",
     sample_size: int = VALUE_SAMPLE_SIZE,
+    model=None,
 ) -> pl.DataFrame:
-    """Scan sampled values of string columns with Presidio (needs a model).
+    """Scan sampled distinct values of string columns with GLiNER2.
+
+    Each value is scanned as ``"<column>: <value>"``: the column name gives
+    the model context (``village: Kpandai`` is a place, a bare ``Kpandai``
+    reads as a person).
 
     Parameters
     ----------
     df : pl.DataFrame
         The dataset to scan.
-    language : str
-        Language code; its spaCy model must already be installed.
     sample_size : int
-        Maximum number of non-null values sampled per column.
+        Maximum number of distinct non-null values sampled per column.
+    model : optional
+        A loaded GLiNER2 model (anything with ``batch_extract_entities``);
+        defaults to the cached model, which must already be downloaded.
 
     Returns
     -------
@@ -399,55 +429,57 @@ def scan_values(
     """
     now = datetime.now().isoformat(timespec="seconds")
 
-    samples: dict[str, list[str]] = {}
+    texts: list[str] = []
+    owners: list[tuple[str, str, int]] = []  # (column, value, prefix length)
     for column in df.columns:
         if df[column].dtype != pl.String:
             continue
-        non_null = df[column].drop_nulls()
-        if non_null.is_empty():
-            continue
-        samples[column] = non_null.head(sample_size).to_list()
+        values = df[column].drop_nulls().str.strip_chars().unique(maintain_order=True)
+        values = values.filter(values != "").head(sample_size).to_list()
+        prefix = f"{column}: "
+        for value in values:
+            texts.append(prefix + value[:VALUE_MAX_CHARS])
+            owners.append((column, value, len(prefix)))
 
-    if not samples:
+    if not texts:
         return empty_flags()
 
-    batch_analyzer = _get_batch_analyzer(language)
-    results = batch_analyzer.analyze_dict(samples, language=language)
+    results = (model or _get_model()).batch_extract_entities(
+        texts,
+        [*VALUE_SCAN_LABELS, *DECOY_LABELS],
+        batch_size=VALUE_BATCH_SIZE,
+        threshold=VALUE_SCORE_THRESHOLD,
+        include_confidence=True,
+        include_spans=True,
+    )
+
+    scanned: dict[str, int] = {}
+    hits: dict[str, list[str]] = {}
+    entity_counts: dict[str, dict[str, int]] = {}
+    for (column, value, offset), result in zip(owners, results, strict=True):
+        scanned[column] = scanned.get(column, 0) + 1
+        found = _value_entities(result, offset)
+        if not found:
+            continue
+        hits.setdefault(column, []).append(value)
+        counts = entity_counts.setdefault(column, {})
+        for entity_type in found:
+            counts[entity_type] = counts.get(entity_type, 0) + 1
 
     rows: list[dict] = []
-    for result in results:
-        values = list(result.value)
-        hit_values: list[str] = []
-        entity_counts: dict[str, int] = {}
-        for value, detections in zip(values, result.recognizer_results, strict=False):
-            hits = [
-                d
-                for d in detections
-                if d.entity_type in VALUE_SCAN_ENTITIES
-                and d.score >= VALUE_SCORE_THRESHOLD
-            ]
-            if hits:
-                hit_values.append(str(value))
-                for d in hits:
-                    entity_counts[d.entity_type] = (
-                        entity_counts.get(d.entity_type, 0) + 1
-                    )
-
-        if not values:
-            continue
-        hit_rate = len(hit_values) / len(values)
+    for column, hit_values in hits.items():
+        hit_rate = len(hit_values) / scanned[column]
         if hit_rate < VALUE_HIT_THRESHOLD:
             continue
-
-        dominant = max(entity_counts, key=entity_counts.get)
-        sample_matches = " | ".join(v[:60] for v in hit_values[:3])
+        counts = entity_counts[column]
+        dominant = max(counts, key=counts.get)
         rows.append(
             {
-                "column": result.key,
+                "column": column,
                 "source": "value_scan",
                 "entity_type": dominant,
                 "hit_rate": round(hit_rate, 3),
-                "sample_matches": sample_matches,
+                "sample_matches": " | ".join(v[:60] for v in hit_values[:3]),
                 "decision": "undecided",
                 "mask_label": mask_label_for(dominant),
                 "scanned_at": now,
@@ -462,20 +494,14 @@ def scan_values(
 # --- Scan orchestration -------------------------------------------------------
 
 
-def run_pii_scan(
-    df: pl.DataFrame,
-    language: str = "en",
-    use_value_scan: bool = True,
-) -> pl.DataFrame:
+def run_pii_scan(df: pl.DataFrame, use_value_scan: bool = True) -> pl.DataFrame:
     """Run both detection passes and combine to one flag row per column.
 
     When a column is flagged by both passes, the value-scan row wins for
     entity/hit-rate/mask fields and the sources are joined with "+".
     """
     name_flags = scan_column_names(df)
-    value_flags = (
-        scan_values(df, language=language) if use_value_scan else empty_flags()
-    )
+    value_flags = scan_values(df) if use_value_scan else empty_flags()
 
     by_column: dict[str, dict] = {
         row["column"]: row for row in name_flags.iter_rows(named=True)

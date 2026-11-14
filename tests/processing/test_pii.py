@@ -9,17 +9,17 @@ import pytest
 
 from datasure.processing.pii import (
     DEFAULT_MASK,
-    PII_MODEL_OPTIONS,
     apply_pii_decisions,
     build_code_maps,
+    download_model,
     empty_flags,
     get_or_create_pii_salt,
     hash_token,
-    installed_models,
     load_code_maps,
     load_pii_flags,
     mask_label_for,
     merge_with_existing,
+    model_downloaded,
     redact_correction_log,
     run_pii_scan,
     save_code_maps,
@@ -28,17 +28,36 @@ from datasure.processing.pii import (
     scan_values,
 )
 
-
-def _en_model_installed() -> bool:
-    import spacy.util
-
-    return spacy.util.is_package(PII_MODEL_OPTIONS["en"])
-
-
-requires_en_model = pytest.mark.skipif(
-    not _en_model_installed(),
-    reason="spaCy model en_core_web_sm not installed (see CONTRIBUTING.md)",
+requires_model = pytest.mark.skipif(
+    not model_downloaded(),
+    reason="GLiNER2 PII model not downloaded (see CONTRIBUTING.md)",
 )
+
+
+class FakeModel:
+    """Stands in for GLiNER2: tags each known substring with its label.
+
+    ``spans`` maps a substring to a label; every occurrence in a scanned text
+    becomes a span, like ``batch_extract_entities`` with spans enabled.
+    """
+
+    def __init__(self, spans: dict[str, str]):
+        self.spans = spans
+        self.texts: list[str] = []
+
+    def batch_extract_entities(self, texts, labels, **_options):
+        self.texts.extend(texts)
+        results = []
+        for text in texts:
+            entities: dict[str, list[dict]] = {label: [] for label in labels}
+            for needle, label in self.spans.items():
+                start = text.find(needle)
+                if start != -1 and label in entities:
+                    entities[label].append(
+                        {"text": needle, "start": start, "end": start + len(needle)}
+                    )
+            results.append({"entities": entities})
+        return results
 
 
 @pytest.fixture(autouse=True)
@@ -112,44 +131,102 @@ class TestScanColumnNames:
 
 
 # ---------------------------------------------------------------------------
-# Pass 2: Presidio value scan (needs spaCy model)
+# Pass 2: GLiNER2 value scan (fake model; real-model tests need a download)
 # ---------------------------------------------------------------------------
 
 
-@requires_en_model
 class TestScanValues:
     def test_person_names_flagged(self):
-        df = pl.DataFrame({"contact": ["John Smith", "Mary Johnson", "Robert Brown"]})
-        flags = scan_values(df, language="en")
-        assert "contact" in flags["column"].to_list()
+        df = pl.DataFrame({"contact": ["Juan Pérez", "Aminata Ouédraogo", "N/A"]})
+        model = FakeModel({"Juan Pérez": "person", "Aminata Ouédraogo": "person"})
+        flags = scan_values(df, model=model)
         row = flags.filter(pl.col("column") == "contact").row(0, named=True)
         assert row["entity_type"] == "PERSON"
         assert row["mask_label"] == "[PERSON]"
-        assert row["sample_matches"] != ""
+        assert row["hit_rate"] == pytest.approx(2 / 3, abs=1e-3)
+        assert "Juan Pérez" in row["sample_matches"]
 
-    def test_emails_flagged(self):
-        df = pl.DataFrame(
-            {"reach": ["a@example.org", "b@example.org", "c@example.org"]}
+    def test_column_name_given_as_context(self):
+        df = pl.DataFrame({"village": ["Kpandai"]})
+        model = FakeModel({})
+        scan_values(df, model=model)
+        assert model.texts == ["village: Kpandai"]
+
+    def test_spans_inside_column_name_ignored(self):
+        # "Juan" in the column name must not count as a hit on the value
+        df = pl.DataFrame({"Juan_answer": ["yes", "no"]})
+        model = FakeModel({"Juan": "person"})
+        assert scan_values(df, model=model).is_empty()
+
+    def test_decoy_overlap_not_counted(self):
+        df = pl.DataFrame({"relationship": ["esposo", "Hija"]})
+        model = FakeModel(
+            {"esposo": "person", "Hija": "person", "spo": "family_relationship"}
         )
-        flags = scan_values(df, language="en")
-        row = flags.filter(pl.col("column") == "reach").row(0, named=True)
-        assert row["entity_type"] == "EMAIL_ADDRESS"
+        flags = scan_values(df, model=model)
+        # "esposo" is claimed by the decoy; "Hija" alone is half the values
+        row = flags.row(0, named=True)
+        assert row["hit_rate"] == pytest.approx(0.5)
 
-    def test_clean_values_not_flagged(self):
-        df = pl.DataFrame({"answer": ["yes", "no", "maybe", "yes", "no"]})
-        flags = scan_values(df, language="en")
-        assert "answer" not in flags["column"].to_list()
+    def test_low_hit_rate_not_flagged(self):
+        df = pl.DataFrame({"notes": ["Rosa", "a", "b", "c", "d"]})
+        model = FakeModel({"Rosa": "person"})
+        assert scan_values(df, model=model).is_empty()
+
+    def test_dominant_entity_and_labels(self):
+        df = pl.DataFrame({"reach": ["a@x.org", "b@x.org", "0244123456"]})
+        model = FakeModel(
+            {"a@x.org": "email", "b@x.org": "email", "0244123456": "phone_number"}
+        )
+        row = scan_values(df, model=model).row(0, named=True)
+        assert row["entity_type"] == "EMAIL_ADDRESS"
+        assert row["mask_label"] == "[EMAIL]"
+
+    def test_distinct_values_sampled(self):
+        df = pl.DataFrame({"village": ["Kpandai"] * 50 + [" ", None]})
+        model = FakeModel({"Kpandai": "location"})
+        flags = scan_values(df, model=model)
+        assert model.texts == ["village: Kpandai"]
+        assert flags.row(0, named=True)["entity_type"] == "LOCATION"
 
     def test_numeric_columns_skipped(self):
-        df = pl.DataFrame({"amount": [1.5, 2.5, 3.5]})
-        assert scan_values(df, language="en").is_empty()
+        model = FakeModel({})
+        assert scan_values(pl.DataFrame({"amount": [1.5]}), model=model).is_empty()
+        assert model.texts == []
 
 
-@requires_en_model
+@requires_model
+@pytest.mark.slow
+class TestScanValuesRealModel:
+    """Runs the downloaded model on English, Spanish, and French values."""
+
+    def test_multilingual_pii_flagged(self):
+        df = pl.DataFrame(
+            {
+                "q1": ["María José Rodríguez", "Jean-Baptiste Kaboré", "Sarah Johnson"],
+                "q2": ["0244123456", "+33 6 12 34 56 78", "(503) 7123-4567"],
+                "q3": ["ana.perez@gmail.com", "k.mensah@yahoo.fr", "jo@ipa.org"],
+                "village": ["Kpandai", "Ndiaganiao", "San Juan de la Frontera"],
+                "occupation": ["farmer", "commerçant", "agricultor"],
+                "crop": ["maize", "cacao", "maíz"],
+            }
+        )
+        flags = scan_values(df)
+        types = dict(zip(flags["column"], flags["entity_type"], strict=True))
+        assert types == {
+            "q1": "PERSON",
+            "q2": "PHONE_NUMBER",
+            "q3": "EMAIL_ADDRESS",
+            "village": "LOCATION",
+        }
+
+
 class TestRunPiiScan:
     def test_combines_passes_and_joins_sources(self):
-        df = pl.DataFrame({"enum_name": ["John Smith", "Mary Johnson", "Robert Brown"]})
-        flags = run_pii_scan(df, language="en", use_value_scan=True)
+        df = pl.DataFrame({"enum_name": ["John Smith", "Mary Johnson"]})
+        model = FakeModel({"John Smith": "person", "Mary Johnson": "person"})
+        with patch("datasure.processing.pii._get_model", return_value=model):
+            flags = run_pii_scan(df, use_value_scan=True)
         row = flags.filter(pl.col("column") == "enum_name").row(0, named=True)
         assert row["source"] == "fuzzy+value_scan"
         assert row["entity_type"] == "PERSON"
@@ -505,7 +582,21 @@ class TestHelpers:
     def test_mask_label_none(self):
         assert mask_label_for(None) == DEFAULT_MASK
 
-    def test_installed_models_shape(self):
-        models = installed_models()
-        assert set(models) == {"en", "es", "fr"}
-        assert all(isinstance(v, bool) for v in models.values())
+    def test_model_not_downloaded_without_extra(self):
+        with patch("datasure.processing.pii.value_scan_available", return_value=False):
+            assert model_downloaded() is False
+
+    def test_download_failure_reported_not_raised(self):
+        with patch(
+            "datasure.processing.pii._model_path", side_effect=OSError("offline")
+        ):
+            success, message = download_model()
+        assert success is False
+        assert "offline" in message
+
+    def test_model_missing_from_cache(self):
+        with (
+            patch("datasure.processing.pii.value_scan_available", return_value=True),
+            patch("datasure.processing.pii._model_path", side_effect=FileNotFoundError),
+        ):
+            assert model_downloaded() is False

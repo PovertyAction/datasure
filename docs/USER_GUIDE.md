@@ -393,15 +393,23 @@ values suspected to contain personally identifiable information (PII):
   restricted-word matching (English, Spanish, French, Swahili terms for
   names, addresses, phones, GPS, ages, SurveyCTO device metadata) plus a
   sparsity check that flags high-cardinality free-text columns.
-- **Value scanning** uses Microsoft Presidio with a spaCy language model
-  to detect PII *inside* values (person names, phone numbers, emails,
-  locations) on a sample of each text column. Models are small
-  (~15–40 MB) and downloaded from within the app — English is the
-  default; Spanish and French are available from the language selector.
+- **Value scanning** uses the multilingual GLiNER2-PII model
+  (`fastino/gliner2-privacy-filter-PII-multi`) to detect PII *inside*
+  values (person names, phone numbers, email addresses, and place names,
+  including villages and other small communities) on a sample of distinct
+  values from each text column. One model covers English, Spanish, and
+  French, so there is no language to choose. It needs the optional `pii`
+  extra (`uv tool install 'datasure[pii]'`) and a one-time download of
+  about 1.2 GB from within the app; after that it runs offline.
+
+Value scanning flags whole columns, not individual cells, and it is a
+screening aid: it can tag job titles or relatives ("esposo", "hija") as
+names, or miss an isolated first name. Review every flag and set a
+decision.
 
 **Workflow**:
 
-1. (Optional) Download the language model to enable value scanning
+1. (Optional) Download the PII model to enable value scanning
 2. Click **Scan for PII**
 3. Review flagged columns: what flagged them, the detected entity type,
    and sample matched values

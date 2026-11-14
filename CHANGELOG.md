@@ -9,6 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **PII detection and de-identification** (#233): a PII Review section on
+  Prepare Data flags columns by multilingual column-name heuristics and, with
+  the new optional `pii` extra (`gliner2[local]`), by scanning sampled
+  distinct values with GLiNER2-PII (`fastino/gliner2-privacy-filter-PII-multi`,
+  downloaded once from the app). One model detects person names, phone
+  numbers, emails and place names, including villages, in English, Spanish
+  and French. Values are scanned as `"<column>: <value>"` for context, and
+  decoy `occupation`/`family_relationship` labels stop job titles and
+  relatives counting as names. Per-column decisions (mask, salted-hash
+  pseudonym, category code, drop, keep) apply as a new `redact column(s)`
+  prep action, and replication exports are de-identified by default
+- **Python replication scripts**: replication packages include Polars
+  scripts and `data-dict.yaml` alongside the Stata do-files; a step the
+  Python generator cannot translate gets a `NOTE` instead of stopping the
+  build
+
 - **Headless keyring guidance**: `secure_credentials.keyring_backend_problem`
   detects a keyring backend that can't hold credentials safely: keyring's
   "fail" backend (headless Linux with no Secret Service) and plaintext file

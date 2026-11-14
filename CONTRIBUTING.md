@@ -237,6 +237,17 @@ test must patch that symbol at its source in `_module_patches()` before
 importing the view (see `tests/views/test_import_view.py`), or collection
 fails in bare mode.
 
+### PII value-scan tests and the GLiNER2 model
+
+PII value scanning (`src/datasure/processing/pii.py`) uses the optional `pii`
+extra (`gliner2[local]`, which pulls in PyTorch). The `dev` dependency group
+includes it, so `uv sync` installs it. The unit tests in
+`tests/processing/test_pii.py` pass a fake model and need no download.
+`TestScanValuesRealModel` (marked `slow`) runs the real model and skips unless
+it is already in the Hugging Face cache; to run it, download the model once
+from the PII Review section of the Prepare Data page, or with
+`uv run python -c "from datasure.processing import pii; print(pii.download_model())"`.
+
 On Windows the suite must run cleanly under plain `uv run python -m pytest`.
 If pytest dies with INTERNALERROR, a test is patching `os.name` or `pathlib`
 without context-managed cleanup.

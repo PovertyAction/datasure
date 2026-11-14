@@ -2667,3 +2667,33 @@ class TestDatasetNavigation:
         assert ViewState(settings, "alpha").values() == {
             "prep_preview_columns_0": ["dataset"]
         }
+
+
+class TestPiiModelControls:
+    """Value-scan status: extra missing, model missing, model ready."""
+
+    def test_extra_not_installed(self):
+        with patch.object(pv.pii, "value_scan_available", return_value=False):
+            assert pv._pii_model_controls(0) is False
+
+    def test_model_ready(self):
+        with (
+            patch.object(pv.pii, "value_scan_available", return_value=True),
+            patch.object(pv.pii, "model_downloaded", return_value=True),
+        ):
+            assert pv._pii_model_controls(0) is True
+
+    def test_model_missing_offers_download(self):
+        _st.button = MagicMock(return_value=True)
+        _st.error = MagicMock()
+        with (
+            patch.object(pv.pii, "value_scan_available", return_value=True),
+            patch.object(pv.pii, "model_downloaded", return_value=False),
+            patch.object(
+                pv.pii, "download_model", return_value=(False, "offline")
+            ) as download,
+        ):
+            assert pv._pii_model_controls(0) is False
+        download.assert_called_once_with()
+        _st.error.assert_called_once_with("offline")
+        _st.button = MagicMock(return_value=False)

@@ -1273,50 +1273,41 @@ def prep_remove_step(alias: str, step_index: int) -> None:
 # --- PII Review ---#
 
 
-def _pii_model_controls(section_index: int) -> tuple[str, bool]:
-    """Render language/model controls; return (language, model_installed)."""
-    models = pii.installed_models()
-    lang_col, status_col = st.columns((0.3, 0.7))
-
-    with lang_col:
-        language = (
-            st.selectbox(
-                label="Detection language",
-                options=list(pii.PII_LANGUAGES),
-                format_func=lambda code: pii.PII_LANGUAGES[code],
-                key=f"st_pii_lang_{section_index}",
-                help="Language of the survey responses, used for value scanning",
-            )
-            or "en"
+def _pii_model_controls(section_index: int) -> bool:
+    """Render value-scan model status/download; return whether it is ready."""
+    if not pii.value_scan_available():
+        st.caption(
+            "Value scanning is not installed, so only column-name heuristics "
+            "will run. To scan values for names, phone numbers, emails, and "
+            "places, reinstall DataSure with the `pii` extra: "
+            "`uv tool install 'datasure[pii]'`."
         )
+        return False
 
-    model_name = pii.PII_MODEL_OPTIONS[language]
-    model_ready = models.get(language, False)
+    if pii.model_downloaded():
+        st.caption(
+            ":material/check_circle: PII model installed: column names and "
+            "values (English, Spanish, French, and more) will both be scanned."
+        )
+        return True
 
-    with status_col:
-        if model_ready:
-            st.caption(
-                f":material/check_circle: NER model **{model_name}** installed — "
-                "column names and values will both be scanned."
-            )
+    st.caption(
+        f"The PII model ({pii.PII_MODEL_SIZE}, downloaded once from Hugging "
+        "Face) is not installed, so only column-name heuristics will run. "
+        "Download it to scan values for names, phone numbers, emails, and places."
+    )
+    if st.button(
+        ":material/download: Download PII model",
+        key=f"st_pii_download_{section_index}",
+    ):
+        with st.spinner(f"Downloading {pii.PII_MODEL_ID}..."):
+            success, message = pii.download_model()
+        if success:
+            st.success(message)
+            st.rerun()
         else:
-            st.caption(
-                f"NER model **{model_name}** is not installed — only column-name "
-                "heuristics will run. Download the model to enable value scanning."
-            )
-            if st.button(
-                ":material/download: Download model",
-                key=f"st_pii_download_{section_index}",
-            ):
-                with st.spinner(f"Downloading {model_name}..."):
-                    success, message = pii.download_model(language)
-                if success:
-                    st.success(message)
-                    st.rerun()
-                else:
-                    st.error(message)
-
-    return language, model_ready
+            st.error(message)
+    return False
 
 
 def _apply_pii_decisions_as_prep_steps(
@@ -1409,7 +1400,7 @@ def pii_review_section(prep_data: pl.DataFrame, alias: str, section_index: int) 
             "applied as prep steps and are also enforced at export time."
         )
 
-        language, model_ready = _pii_model_controls(section_index)
+        model_ready = _pii_model_controls(section_index)
 
         if st.button(
             ":material/search: Scan for PII",
@@ -1418,9 +1409,7 @@ def pii_review_section(prep_data: pl.DataFrame, alias: str, section_index: int) 
         ):
             with st.spinner("Scanning for PII..."):
                 try:
-                    new_flags = pii.run_pii_scan(
-                        prep_data, language=language, use_value_scan=model_ready
-                    )
+                    new_flags = pii.run_pii_scan(prep_data, use_value_scan=model_ready)
                     merged = pii.merge_with_existing(
                         new_flags, pii.load_pii_flags(project_id, alias)
                     )

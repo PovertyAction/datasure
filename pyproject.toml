@@ -49,11 +49,14 @@ dependencies = [
     "keyring>=25.6.0",
     "polars-readstat>=0.5.1",
     "pyyaml>=6.0.1",
-    # PII detection/redaction (spaCy comes transitively; language models are
-    # downloaded at runtime from the app, never bundled)
-    "presidio-analyzer>=2.2.360",
-    "presidio-anonymizer>=2.2.360",
 ]
+
+[project.optional-dependencies]
+# PII value scanning with GLiNER2 (fastino/gliner2-privacy-filter-PII-multi).
+# Optional because it pulls in torch + transformers; without it, PII review
+# still runs the column-name heuristics. The model weights (~1.2 GB) are
+# downloaded at runtime from the app, never bundled.
+pii = ["gliner2[local]>=2.1.0"]
 
 [project.urls]
 Source = "https://github.com/PovertyAction/datasure"
@@ -72,10 +75,8 @@ dev = [
     "jupyterlab>=4.5.7",
     "nbconvert>=7.17.0",
     "mistune>=3.2.1",
-    # English spaCy model so tests can exercise the Presidio NER path.
-    # Direct URLs are allowed here because dependency groups are not
-    # published to PyPI; at runtime users download models from the app UI.
-    "en-core-web-sm @ https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl",
+    # So tests and local dev exercise the GLiNER2 value-scan code path
+    "datasure[pii]",
 ]
 
 [tool.uv]
