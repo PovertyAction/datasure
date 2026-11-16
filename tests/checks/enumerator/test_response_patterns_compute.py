@@ -41,41 +41,36 @@ def _digit(results, name: str):
     return next(e for e in results.digit_preference.enumerators if e.enumerator == name)
 
 
-class TestDigitPreferenceScore:
-    def test_twice_the_team_share_scores_100_and_half_scores_0(self):
+class TestDigitPreferenceRatio:
+    def test_ratio_is_the_enumerator_share_over_the_team_share(self):
         data = _frame({"A": _values(40, 16), "B": _values(40, 8)})
 
         results = compute_response_patterns(data, _settings(), ENUM, None)
 
-        assert _digit(results, "A").score == pytest.approx(100)
+        assert _digit(results, "A").ratio == pytest.approx(2)
         assert _digit(results, "A").enum_pct == pytest.approx(40)
         assert _digit(results, "A").team_pct == pytest.approx(20)
-        assert _digit(results, "B").score == pytest.approx(0)
+        assert _digit(results, "B").ratio == pytest.approx(0.5)
 
-    def test_one_and_a_half_times_the_team_share_scores_50(self):
-        data = _frame({"A": _values(40, 12), "B": _values(40, 8)})
+    def test_ratio_is_rounded_to_two_decimals_as_shown(self):
+        # 13 of 40 against 9 of 40 is 1.444...
+        data = _frame({"A": _values(40, 13), "B": _values(40, 9)})
 
         results = compute_response_patterns(data, _settings(), ENUM, None)
 
-        assert _digit(results, "A").score == pytest.approx(50)
+        assert _digit(results, "A").ratio == 1.44
 
-    def test_zero_team_share_scores_100_if_enumerator_rounds_at_all(self):
+    def test_zero_team_share_has_no_ratio(self):
         data = _frame({"A": _values(40, 1), "B": _values(40, 0), "C": _values(40, 0)})
 
         results = compute_response_patterns(data, _settings(), ENUM, None)
 
-        assert _digit(results, "A").score == pytest.approx(100)
+        assert _digit(results, "A").ratio is None
+        assert _digit(results, "A").badge == "N/A"
         # B's rest of team (A and C) has some rounding; B has none
-        assert _digit(results, "B").score == pytest.approx(0)
+        assert _digit(results, "B").ratio == pytest.approx(0)
 
-    def test_zero_team_share_scores_0_if_enumerator_never_rounds(self):
-        data = _frame({"A": _values(40, 0), "B": _values(40, 0)})
-
-        results = compute_response_patterns(data, _settings(), ENUM, None)
-
-        assert _digit(results, "A").score == pytest.approx(0)
-
-    def test_baseline_leaves_out_the_enumerator_being_scored(self):
+    def test_baseline_leaves_out_the_enumerator_being_checked(self):
         # A rounds 80%, B and C 20%. A's rest of team is B and C (20%); B's
         # is A and C (50%). A project-wide baseline would be 40% for both.
         data = _frame({"A": _values(40, 32), "B": _values(40, 8), "C": _values(40, 8)})
@@ -152,13 +147,13 @@ class TestSampleBands:
 
         assert _digit(results, "A").sample_band == band
 
-    def test_insufficient_enumerator_has_no_score_and_na_badge(self):
+    def test_insufficient_enumerator_has_no_ratio_and_na_badge(self):
         data = _frame({"A": _values(10, 10), "B": _values(40, 8)})
 
         results = compute_response_patterns(data, _settings(), ENUM, None)
 
         a = _digit(results, "A")
-        assert a.score is None
+        assert a.ratio is None
         assert a.badge == "N/A"
 
     def test_thresholds_are_configurable(self):
@@ -169,21 +164,65 @@ class TestSampleBands:
 
         assert _digit(results, "A").sample_band == "ok"
 
+    def test_high_sensitivity_needs_100_responses(self):
+        data = _frame({"A": _values(99, 30), "B": _values(100, 20)})
+        settings = _settings(digit_preference_sensitivity="high")
+
+        results = compute_response_patterns(data, settings, ENUM, None)
+
+        dp = results.digit_preference
+        assert dp.min_responses == 100
+        assert _digit(results, "A").sample_band == "insufficient"
+        assert _digit(results, "A").ratio is None
+        assert _digit(results, "B").sample_band == "ok"
+
+    def test_project_minimum_above_the_level_minimum_wins(self):
+        data = _frame({"A": _values(40, 8), "B": _values(40, 8)})
+        settings = _settings(digit_preference_sensitivity="high", min_sample=150)
+
+        results = compute_response_patterns(data, settings, ENUM, None)
+
+        assert results.digit_preference.min_responses == 150
+
+    def test_medium_and_low_use_the_project_minimum(self):
+        data = _frame({"A": _values(40, 8), "B": _values(40, 8)})
+
+        results = compute_response_patterns(data, _settings(), ENUM, None)
+
+        assert results.digit_preference.min_responses == 15
+
 
 class TestBadgesAndOrder:
     @pytest.mark.parametrize(
-        ("threshold", "badge"),
-        [(35, "High"), (50, "High"), (65, "Moderate"), (80, "Low")],
+        ("round_count", "sensitivity", "badge"),
+        [
+            (12, "medium", "High"),  # 1.5x reaches Medium
+            (12, "low", "Moderate"),  # 1.5x reaches Medium, not Low
+            (9, "medium", "Low"),  # 1.13x is under High and Medium
+            (10, "medium", "Moderate"),  # 1.25x reaches High, not Medium
+            (16, "low", "High"),  # 2x reaches Low
+        ],
     )
-    def test_badge_boundaries(self, threshold, badge):
-        data = _frame({"A": _values(40, 12), "B": _values(40, 8)})  # score 50
-        settings = _settings(digit_preference_threshold=threshold)
+    def test_badge_boundaries(self, round_count, sensitivity, badge):
+        # The team ends 8 of 40 answers in 0 or 5
+        data = _frame({"A": _values(40, round_count), "B": _values(40, 8)})
+        settings = _settings(digit_preference_sensitivity=sensitivity)
 
         results = compute_response_patterns(data, settings, ENUM, None)
 
         assert _digit(results, "A").badge == badge
 
-    def test_sorted_highest_score_first_with_na_last(self):
+    def test_most_sensitive_level_has_no_moderate_band(self):
+        # 1.2x the team, just under High's 1.25x
+        data = _frame({"A": _values(100, 24), "B": _values(100, 20)})
+        settings = _settings(digit_preference_sensitivity="high")
+
+        results = compute_response_patterns(data, settings, ENUM, None)
+
+        assert _digit(results, "A").ratio == pytest.approx(1.2)
+        assert _digit(results, "A").badge == "Low"
+
+    def test_sorted_highest_ratio_first_with_na_last(self):
         data = _frame(
             {
                 "few": _values(5, 5),
@@ -198,8 +237,8 @@ class TestBadgesAndOrder:
         names = [e.enumerator for e in results.digit_preference.enumerators]
         assert names[0] == "top"
         assert names[-1] == "few"
-        scores = [e.score for e in results.digit_preference.enumerators[:-1]]
-        assert scores == sorted(scores, reverse=True)
+        ratios = [e.ratio for e in results.digit_preference.enumerators[:-1]]
+        assert ratios == sorted(ratios, reverse=True)
 
 
 class TestVariableSkips:
@@ -295,12 +334,14 @@ class TestConditions:
         assert results.digit_preference.condition == "all_below_minimum"
 
 
-class TestThresholdLevels:
-    @pytest.mark.parametrize(("saved", "level"), [(70, 65), (10, 20), (90, 80)])
-    def test_saved_threshold_snaps_to_the_nearest_level(self, saved, level):
-        settings = ResponsePatternSettings(digit_preference_threshold=saved)
+class TestSensitivity:
+    def test_defaults_to_medium(self):
+        assert ResponsePatternSettings().digit_preference_sensitivity == "medium"
 
-        assert settings.digit_preference_threshold == level
+    def test_old_score_threshold_setting_is_ignored(self):
+        settings = ResponsePatternSettings(digit_preference_threshold=80)
+
+        assert settings.digit_preference_sensitivity == "medium"
 
 
 class TestInferVariableTypes:
