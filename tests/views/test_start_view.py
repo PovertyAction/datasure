@@ -138,11 +138,15 @@ class TestNowStr:
 # === PROJECT REGISTRY PERSISTENCE TESTS === #
 
 
-class TestSaveProjects:
-    """Test _save_projects."""
+class TestUpdateProjects:
+    """Test _update_projects (registry I/O itself is covered in
+    tests/utils/test_project_registry.py).
+    """
 
     def test_writes_json(self, tmp_path):
-        start_view._save_projects({"abcd1234": {"name": "X"}})
+        start_view._update_projects(
+            lambda p: p.update({"abcd1234": {"name": "X"}}) or True
+        )
         written = json.loads((tmp_path / "projects.json").read_text())
         assert written == {"abcd1234": {"name": "X"}}
 
@@ -158,6 +162,10 @@ class TestLoadProjects:
             json.dumps({"abcd1234": {"name": "Test"}})
         )
         assert start_view.load_projects() == {"abcd1234": {"name": "Test"}}
+
+    def test_corrupt_file_returns_empty_dict(self, tmp_path):
+        (tmp_path / "projects.json").write_text('{"abcd1234": {"na')
+        assert start_view.load_projects() == {}
 
 
 class TestSaveProject:
@@ -313,6 +321,52 @@ class TestActivateProject:
         mock_cs.assert_called_once_with("abcd1234")
         mock_cs.return_value.sync_output_view_files.assert_called_once()
         mock_switch_page.assert_called_once_with("import_page")
+
+
+class TestRecordLastUsed:
+    """Test that opening a project stamps last_used in the registry."""
+
+    def _open(self, monkeypatch, project_id):
+        monkeypatch.setitem(_st.session_state, "st_import_data_page", "import_page")
+        monkeypatch.setattr(_st, "switch_page", MagicMock())
+        with patch("datasure.views.start_view.ConfigurationService"):
+            start_view._activate_project(project_id)
+
+    def test_activation_updates_last_used(self, tmp_path, monkeypatch):
+        (tmp_path / "projects.json").write_text(
+            json.dumps(
+                {
+                    "abcd1234": {
+                        "name": "P",
+                        "created_at": "2025-01-01 00:00:00",
+                        "last_used": "2025-01-01 00:00:00",
+                    }
+                }
+            )
+        )
+        self._open(monkeypatch, "abcd1234")
+        entry = json.loads((tmp_path / "projects.json").read_text())["abcd1234"]
+        assert entry["last_used"] > "2025-01-01 00:00:00"
+        assert entry["created_at"] == "2025-01-01 00:00:00"
+        datetime.strptime(entry["last_used"], "%Y-%m-%d %H:%M:%S")
+
+    def test_unknown_project_leaves_registry_untouched(self, tmp_path, monkeypatch):
+        registry = {"abcd1234": {"name": "P", "last_used": "2025-01-01 00:00:00"}}
+        (tmp_path / "projects.json").write_text(json.dumps(registry))
+        self._open(monkeypatch, "zzzz9999")
+        assert json.loads((tmp_path / "projects.json").read_text()) == registry
+
+    def test_unwritable_registry_still_opens_project(self, tmp_path, monkeypatch):
+        registry = {"abcd1234": {"name": "P", "last_used": "2025-01-01 00:00:00"}}
+        (tmp_path / "projects.json").write_text(json.dumps(registry))
+        monkeypatch.setattr(
+            "datasure.utils.project_registry.os.replace",
+            MagicMock(side_effect=OSError("read-only")),
+        )
+        self._open(monkeypatch, "abcd1234")
+        assert _st.session_state["st_project_id"] == "abcd1234"
+        # The failed write left the previous registry intact.
+        assert json.loads((tmp_path / "projects.json").read_text()) == registry
 
 
 class TestCreateAndLoadProject:

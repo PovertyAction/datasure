@@ -23,6 +23,16 @@ from datasure.models.enums import (
     PrepOperations,
     PrepRowConditions,
 )
+from datasure.processing.column_names import existing_name_error
+from datasure.processing.rename_plan import (
+    ByName,
+    RenamePlan,
+    RenameSpec,
+    describe_pattern,
+    plan_rename,
+    spec_from_args,
+)
+from datasure.processing.row_index import parse_row_indices, resolve_row_positions
 from datasure.utils.duckdb_utils import duckdb_get_table, duckdb_save_table
 from datasure.utils.prep_utils import (
     PrepActionResult,
@@ -261,16 +271,11 @@ class RemoveRowsOperation(PrepOperation):
 
     def _remove_by_index(self, data: pl.DataFrame, index_values: list) -> pl.DataFrame:
         """Remove rows by index positions."""
-        rows_to_drop = []
-        for item in index_values:
-            if item in [",", None]:
-                continue
-            if isinstance(item, str) and ":" in item:
-                # Handle range like "1:3"
-                start, end = item.split(":")
-                rows_to_drop.extend(range(int(start), int(end) + 1))
-            else:
-                rows_to_drop.append(int(item))
+        try:
+            spans = parse_row_indices(index_values)
+        except ValueError as e:
+            raise ValidationError(str(e)) from e
+        rows_to_drop = list(resolve_row_positions(spans, data.height))
 
         # Create row number column for filtering
         data_with_idx = data.with_row_index("__row_idx__")
@@ -739,7 +744,11 @@ class AddNewColumnOperation(PrepOperation):
             method = prep_args.method
             source_columns = prep_args.source_columns or [""]
 
-            if method == PrepFunctions.constant.value:
+            self._validate_new_name(new_col_name)
+
+            if method == PrepFunctions.copy.value:
+                results = self._add_copy_column(data, new_col_name, source_columns)
+            elif method == PrepFunctions.constant.value:
                 results = self._add_constant_column(data, new_col_name, value_spec)
             elif method in [
                 PrepFunctions.index.value,
@@ -776,6 +785,35 @@ class AddNewColumnOperation(PrepOperation):
             raise
         except Exception as e:
             raise OperationError(f"Failed to add new column: {e}") from e
+
+    def _validate_new_name(self, name: str | None) -> None:
+        """Raise if ``name`` is empty.
+
+        A name that is already a column is refused for new steps only, in
+        ``_apply_single_action``: steps saved when adding could overwrite
+        must keep replaying.
+        """
+        if not name:
+            raise ValidationError("Enter a name for the new column.")
+
+    def _add_copy_column(
+        self, data: pl.DataFrame, col_name: str, source_columns: list[str]
+    ) -> pl.DataFrame:
+        """Copy one column to a new name, placed right after its source.
+
+        The copy keeps the source's data type and missing values. Unlike the
+        older methods, a copy step never existed with an overwriting name, so
+        a replay that finds the name taken fails rather than replace data.
+        """
+        source = source_columns[0]
+        if source not in data.columns:
+            raise ValidationError(f"Column to copy '{source}' not found.")
+        if col_name in data.columns:
+            raise ValidationError(f"Column '{col_name}' already exists.")
+
+        order = list(data.columns)
+        order.insert(order.index(source) + 1, col_name)
+        return data.with_columns(pl.col(source).alias(col_name)).select(order)
 
     def _add_constant_column(
         self, data: pl.DataFrame, col_name: str, value_spec: str
@@ -915,6 +953,79 @@ class AddNewColumnOperation(PrepOperation):
         raise ValidationError(f"Unknown aggregation function: {func_name}")
 
 
+class RenameColumnsOperation(PrepOperation):
+    """Rename columns by name or by pattern, all at once."""
+
+    def execute(
+        self, data: pl.DataFrame, prep_args: PrepActionResult
+    ) -> tuple[pl.DataFrame, PrepActionResult]:
+        """Rename the columns ``prep_args`` asks for.
+
+        The requested rename (in ``value``) is resolved against the current
+        columns each time, so a pattern also renames columns a re-import
+        added. By name, old columns that are gone are skipped; the step fails
+        when none are left. A pattern that matches nothing fails. A collision
+        or an unusable name fails the step, so replay never overwrites a
+        column. The pairs actually applied are recorded in ``source_columns``
+        and ``column_names``.
+        """
+        try:
+            spec = spec_from_args(prep_args.method, prep_args.value)
+        except ValueError as e:
+            raise ValidationError(str(e)) from e
+
+        plan = plan_rename(data.columns, spec)
+        if plan.error:
+            raise ValidationError(plan.error)
+        if not plan.pairs:
+            raise OperationError(self._nothing_to_rename(spec, plan))
+        if plan.collisions or plan.invalid:
+            renamed = dict(plan.pairs)
+            raise OperationError(
+                "Renaming would give columns names that can't be used. "
+                + " ".join(
+                    f"'{old}' → '{renamed[old]}': {reason}"
+                    for old, reason in plan.problems.items()
+                )
+            )
+
+        old_names = plan.old_names
+        new_names = plan.new_names
+        missing = list(plan.missing)
+        result = data.rename(dict(plan.pairs))
+        updated = PrepActionResult(
+            action=PrepActions.rename_column.value,
+            column_names=new_names,
+            affected_count=len(plan.pairs),
+            remaining_rows=result.height,
+            remaining_columns=result.width,
+            value=prep_args.value,
+            method=prep_args.method,
+            source_columns=old_names,
+            failed_count=len(missing),
+            additional_info=(
+                "Columns not found and skipped: "
+                + ", ".join(f"'{name}'" for name in missing)
+                + "."
+                if missing
+                else None
+            ),
+        )
+        return result, updated
+
+    @staticmethod
+    def _nothing_to_rename(spec: RenameSpec, plan: RenamePlan) -> str:
+        """Explain why a rename resolved to no pairs."""
+        if isinstance(spec, ByName):
+            missing = ", ".join(f"'{name}'" for name in plan.missing)
+            if missing:
+                return f"None of the columns to rename exist: {missing}."
+            return "No column names would change."
+        if not plan.matched:
+            return f"No columns match: {describe_pattern(spec)}."
+        return f"No column names would change: {describe_pattern(spec)}."
+
+
 # === PROCESSOR === #
 
 
@@ -928,6 +1039,7 @@ class PrepProcessor:
             PrepActions.remove_row: RemoveRowsOperation(),
             PrepActions.transform_column: TransformColumnsOperation(),
             PrepActions.add_column: AddNewColumnOperation(),
+            PrepActions.rename_column: RenameColumnsOperation(),
         }
 
     def execute_single_action(
@@ -1025,6 +1137,7 @@ def _generate_action_description(prep_args: PrepActionResult) -> str:
         PrepActions.remove_row.value: PrepConfirmationMessages.remove_rows,
         PrepActions.transform_column.value: PrepConfirmationMessages.transform_columns,
         PrepActions.add_column.value: PrepConfirmationMessages.add_new_column,
+        PrepActions.rename_column.value: PrepConfirmationMessages.rename_columns,
     }
     description_func = action_description_map.get(prep_args.action)
     if description_func:
@@ -1118,13 +1231,31 @@ def _build_log_from_outcomes(
             _create_log_entry(
                 action.prep_args.action,
                 description,
-                action.prep_args,
+                _args_to_keep(action.prep_args, outcome),
                 index,
                 outcome.status,
             )
         )
 
     return pl.concat([_convert_prep_args_to_string(e) for e in entries])
+
+
+def _args_to_keep(
+    requested: PrepActionResult, outcome: PrepReapplyOutcome
+) -> PrepActionResult:
+    """Return the args a step is saved with after a reapply.
+
+    Most steps keep their original request. A successful rename keeps the
+    args of this run: its request stays in ``value``, and its
+    ``source_columns`` and ``column_names`` record the pairs it renamed, which
+    the replication package turns into ``rename``.
+    """
+    if (
+        outcome.status == "Successful"
+        and requested.action == PrepActions.rename_column.value
+    ):
+        return outcome.prep_args
+    return requested
 
 
 def _append_to_prep_log(
@@ -1204,6 +1335,14 @@ def _apply_single_action(
         processor: PrepProcessor instance for executing actions
     """
     prep_data = duckdb_get_table(project_id, alias, db_name="prep")
+
+    # A new column never overwrites one. Checked here, for new steps only:
+    # steps saved before this rule (which could overwrite) must keep
+    # replaying as they did, or a refresh would drop them and their dependents.
+    if prep_args.action == PrepActions.add_column.value and prep_args.column_names:
+        clash = existing_name_error(prep_args.column_names, prep_data.columns)
+        if clash:
+            raise ValidationError(clash)
 
     new_action = PrepAction.from_args(prep_args)
     result_data, updated_prep_args = processor.execute_single_action(

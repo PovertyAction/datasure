@@ -183,3 +183,6 @@ cache/*
 # Page Output files. Only track the template files.
 src/datasure/views/output_view_?.py
 .playwright-mcp/
+
+# local impeccable design-skill settings
+.impeccable/

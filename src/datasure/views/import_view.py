@@ -322,6 +322,8 @@ with st.container(border=True):
                     f":material/check: Keyring working: {keyring_status['backend']}"
                 )
                 st.info(keyring_status["message"])
+                if keyring_status.get("warning"):
+                    st.warning(keyring_status["warning"])
             else:
                 st.error(f":material/close: Keyring issue: {keyring_status['error']}")
                 st.info("**Troubleshooting Tips:**")
@@ -329,6 +331,8 @@ with st.container(border=True):
                 - **Windows**: Ensure Windows Credential Manager is accessible
                 - **macOS**: Check Keychain Access permissions
                 - **Linux**: Install and configure a keyring backend (gnome-keyring, kwallet)
+                - **Headless server or container**: select an encrypted backend with
+                  `PYTHON_KEYRING_BACKEND` (see "Running on a server" in the README)
                 """)
 
 with st.container(border=True):

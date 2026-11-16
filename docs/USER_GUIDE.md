@@ -326,14 +326,43 @@ Create new calculated or derived columns:
 - Generate summary statistics
 - Create categorical groupings
 - Build a composite ID or full name by joining text columns (**concat**)
+- Keep a column's original values next to a transformed version
+  (**copy of column**)
 
 **Steps**:
 
 1. Click "Add data prep step"
 2. Choose "Add Column"
-3. Enter new column name
-4. Define calculation or value
-5. Click "Add"
+3. Choose a method
+4. Enter new column name
+5. Define calculation or value
+6. Click "Add"
+
+**Column names**: a new column can have any name except one that is already
+a column in the dataset. Upper and lower case don't count as different, so
+`Age` is taken if the dataset has `age`. Adding a column never overwrites one:
+the name box explains the clash and **Add** stays disabled until you change
+the name. Steps you saved in earlier versions keep working when your steps are
+re-applied, even if they replaced a column. A **copy of column** step whose
+name is now taken, for example after a re-import adds a column with that name,
+fails and appears in the re-apply failure notice.
+
+Stata has stricter rules for names. If a name breaks them, the replication
+package gives the column a Stata name instead; see
+[Stata variable names](#stata-variable-names).
+
+**Copying a column (copy of column)**:
+
+1. Choose the **copy of column** method.
+2. Select the column to copy.
+3. Keep the suggested name, `<column>_copy`, or type another one.
+
+The copy is placed right after the column it copies. It has the same values,
+data type and missing values. To keep the original values next to a
+transformed version, copy the column, then transform the copy. In the
+replication package the step becomes `clonevar` followed by
+`order ..., after(...)`. If a re-import removes the copied column, the step
+fails with a message naming it, and the rest of your steps still run.
 
 **Joining text columns (concat)**:
 
@@ -372,6 +401,76 @@ Delete unnecessary or problematic data:
 2. Choose "Remove Column" or "Remove Row"
 3. Select column(s) or define row filter
 4. Click "Add"
+
+##### Rename Columns
+
+Rename columns either **by name** (the default) or **by pattern**. Every
+rename form shows a live preview of each old → new name before you add the
+step. A renamed column keeps its place in the dataset.
+
+**By name**: pick one column to rename. The **New name** box starts with the
+column's current name, so you can edit it rather than retype it. To rename
+several columns, add one step for each, or use a pattern.
+
+**By pattern** has three types:
+
+- **Wildcard**, as in Stata's `rename`: `*` matches any run of characters
+  (including none) and `?` matches exactly one character. The old pattern
+  must match the whole name. Each `*` or `?` in the new pattern is filled, in
+  order, with what the old pattern's wildcards matched, so both patterns need
+  the same number of wildcards. When a name could match in more than one way,
+  earlier `*`s take as much as they can. Stata's `#` and `=` aren't supported.
+  Examples:
+
+  | Old pattern | New pattern | Renames |
+  | --- | --- | --- |
+  | `x*` | `y*` | `x1` → `y1`, `x_b` → `y_b` |
+  | `*_old` | `*_new` | `age_old` → `age_new` |
+  | `grp_*` | `*` | `grp_age` → `age` |
+  | `*` | `*_r` | every column, `age` → `age_r` |
+  | `q?` | `Q?` | `q1` → `Q1`, but not `q10` |
+  | `q*_*` | `*_q*` | `q1_a` → `a_q1` |
+
+- **Change case**: make names lowercase or uppercase. To change only some
+  columns, give a wildcard filter such as `Q*`; the default `*` means every
+  column. Names that are already in that case aren't counted as renamed.
+- **Regex**: a Python regular expression matched against the whole name, so
+  `q1` renames `q1` but not `q10` or `aq1`. The replacement can use `\1`,
+  `\2` and so on for the regex's groups. For example, `q(\d+)_(\w+)` with
+  replacement `\2_q\1` renames `q1_age` to `age_q1`. A regex that can't be
+  used is explained under the form.
+
+**Add** stays disabled until the preview has at least one rename and no
+problems. A problem is shown on its row: a new name that is already a column
+that isn't renamed, two columns given the same new name, or an empty name.
+Upper and lower case don't count as different, so `age` clashes with `Age`.
+
+**When your steps are re-applied** (for example after a new import):
+
+- A **by name** step renames the columns that still exist. If some are gone,
+  they are skipped and the step's log entry lists them; when none are left,
+  the step fails.
+- A **by pattern** step is matched again, so a column added by a later form
+  version, such as a new `x_5` for the pattern `x_*`, is renamed too. A
+  pattern that matches nothing fails.
+- A step whose new names would clash with a column, or be empty, fails and
+  names the columns involved. Re-applying never overwrites a column.
+
+The log entry shows the renames each run actually made.
+
+**Columns used by checks or corrections**: if a column you rename is used by
+a check page's settings (such as the survey ID, enumerator, duplicate or GPS
+columns) or by entries in the correction log, clicking **Add** lists those
+uses in a warning in the same dialog before the step is added. Choose **Rename anyway** to go ahead or **Cancel**
+to stop. DataSure doesn't update those settings or corrections for you, so
+update them afterwards. Renames that touch no such columns add the step
+straight away.
+
+**In the replication package**, each rename step becomes one
+`rename (old …) (new …)` line in `prepare_data.do`, using the renames the
+step last made. Pattern steps also get a comment showing the pattern. A new
+name Stata can't use is written as its Stata name; see
+[Stata variable names](#stata-variable-names).
 
 #### Change Log
 
@@ -859,6 +958,41 @@ click **Build Replication Package**. Confirm the PII notice and click
 [Correction Audit Trail](#correction-audit-trail) for the **Exclude reviewer
 names** option.
 
+#### Stata variable names
+
+DataSure accepts any column name, but Stata accepts a name only if it:
+
+- has at most 32 characters
+- starts with a letter or `_`
+- uses only plain letters, digits and `_`
+- isn't a name Stata reserves, such as `in`, `byte` or `str80`
+
+When the package uses a name that breaks these rules, whether it came from
+your imported data or from a Prepare Data step, the page lists it under
+**Stata variable names** with the name the package will use instead. The
+proposed name:
+
+- replaces spaces and punctuation with `_`, and accented letters with plain
+  ones (`visit date` becomes `visit_date`, `âge` becomes `age`)
+- puts `_` before a leading digit (`2nd_visit` becomes `_2nd_visit`)
+- puts `_` after a reserved name (`in` becomes `in_`)
+- is cut to 32 characters
+- gets `_2`, `_3` and so on if another column, or a variable the package's
+  scripts create such as `_ds_row`, already has the name
+
+Names Stata accepts never change. To choose your own name, edit it in the
+table. DataSure checks it against the same rules and against the other
+columns, and saves it with the project for later builds. If an edited name
+can't be used, **Build Replication Package** stays disabled until you fix it.
+If a saved name stops working, for example because a re-import added a column
+with that name, the page tells you and uses the proposed name instead. Saved
+names aren't included when you export the project configuration.
+
+In the package, `import_data.do` renames these columns right after import, and
+`prepare_data.do`, `corrections.do` and the codebook use the Stata names. A
+column a Prepare Data step creates gets its Stata name in that step. Each
+renamed variable is labelled with its DataSure name.
+
 ---
 
 ## Quality Check Reports
@@ -1268,12 +1402,17 @@ Progress setting. Each is saved for the page as you change it:
   mean consent, and an outcome column and the values that mean a completed
   interview (for example `consent` = "yes" and `completion_status` =
   "complete"). A submission meets the condition when it has one of the
-  values in each column set. Only text and category columns are offered,
-  not date columns. When you change a column, values the new column doesn't
-  have are dropped, so Summary's Progress row counts the same condition as
-  the page. Values you chose stay chosen when refreshed data no longer has
-  them. If a prep step removes or renames a column the condition uses, the
-  page warns you and counts without it until you pick another column
+  values in each column set. Text, category, whole-number and true/false
+  columns are offered, including decimal columns whose values are all whole
+  numbers (as Stata's `gen` stores 0/1 codes). Date columns and columns with
+  fractions are not. If refreshed data changes a column's type, saved values
+  are converted to it (1 becomes "1" for a text column); values that can't
+  be converted are dropped and the page warns you. When you change a column,
+  values the new column doesn't have are dropped, so Summary's Progress row
+  counts the same condition as the page. Values you chose stay chosen when
+  refreshed data no longer has them. If a prep step removes or renames a
+  column the condition uses, or it starts holding fractions, the page warns
+  you and counts without it until you pick another column
 
 ---
 
