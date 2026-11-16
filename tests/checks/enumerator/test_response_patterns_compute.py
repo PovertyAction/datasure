@@ -199,7 +199,6 @@ class TestBadgesAndOrder:
             (12, "medium", "High"),  # 1.5x reaches Medium
             (12, "low", "Moderate"),  # 1.5x reaches Medium, not Low
             (9, "medium", "Low"),  # 1.13x is under High and Medium
-            (10, "medium", "Moderate"),  # 1.25x reaches High, not Medium
             (16, "low", "High"),  # 2x reaches Low
         ],
     )
@@ -211,6 +210,24 @@ class TestBadgesAndOrder:
         results = compute_response_patterns(data, settings, ENUM, None)
 
         assert _digit(results, "A").badge == badge
+
+    def test_moderate_at_medium_needs_the_responses_high_needs(self):
+        # 1.25x reaches High's ratio; High also needs 100 responses
+        data = _frame({"A": _values(100, 25), "B": _values(100, 20)})
+
+        results = compute_response_patterns(data, _settings(), ENUM, None)
+
+        assert _digit(results, "A").ratio == pytest.approx(1.25)
+        assert _digit(results, "A").badge == "Moderate"
+
+    def test_too_few_responses_for_high_is_not_moderate(self):
+        # 1.25x on 40 responses: High would show N/A, so Medium shows Low
+        data = _frame({"A": _values(40, 10), "B": _values(40, 8)})
+
+        results = compute_response_patterns(data, _settings(), ENUM, None)
+
+        assert _digit(results, "A").ratio == pytest.approx(1.25)
+        assert _digit(results, "A").badge == "Low"
 
     def test_most_sensitive_level_has_no_moderate_band(self):
         # 1.2x the team, just under High's 1.25x
@@ -308,7 +325,7 @@ class TestConditions:
         assert results.condition is None
         assert results.digit_preference.condition == "no_applicable_variables"
 
-    def test_numeric_override_on_a_text_column_is_skipped(self):
+    def test_numeric_override_on_text_without_numbers_is_skipped(self):
         data = pl.DataFrame({ENUM: ["A"] * 20 + ["B"] * 20, "x": ["yes", "no"] * 20})
         settings = _settings(type_overrides={"x": "integer"})
 
@@ -316,7 +333,20 @@ class TestConditions:
 
         dp = results.digit_preference
         assert dp.condition == "no_eligible_variables"
-        assert dp.skipped_variables == {"x": "not a numeric column"}
+        assert dp.skipped_variables == {"x": "no answers are numbers"}
+
+    def test_numeric_override_on_text_numbers_is_checked(self):
+        # Numbers stored as text; answers that aren't numbers count as missing
+        values = [str(v) for v in _values(40, 16)] + [" 15 ", "n/a"]
+        data = _frame({"A": values, "B": [str(v) for v in _values(40, 8)]})
+        settings = _settings(type_overrides={"x": "integer"})
+
+        results = compute_response_patterns(data, settings, ENUM, None)
+
+        a = _digit(results, "A")
+        assert results.digit_preference.skipped_variables == {}
+        assert a.n_responses == 41
+        assert a.ratio == pytest.approx(17 / 41 / 0.2, abs=0.01)
 
     def test_categorical_override_removes_a_numeric_variable(self):
         data = _frame({"A": _values(40, 8), "B": _values(40, 8)})

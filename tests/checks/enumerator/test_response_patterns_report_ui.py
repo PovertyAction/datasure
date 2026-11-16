@@ -185,6 +185,21 @@ class TestEnumeratorTable:
         assert not at.exception
         assert "steady's digit distribution is consistent" in _texts(at.success)
 
+    def test_moderate_enumerator_gets_a_caution_not_an_all_clear(self, settings_file):
+        # 1.5x the team: High at Medium, Moderate at Low
+        _save(
+            settings_file,
+            selected_variables=["age"],
+            digit_preference_sensitivity="low",
+        )
+        data = _frame({"mid": _values(40, 12), "base": _values(40, 8)})
+
+        at = _run(data, settings_file)
+
+        assert "Moderate" in _texts(at.markdown)
+        assert "mid's responses end in 0 or 5 somewhat more often" in _texts(at.info)
+        assert not at.success
+
 
 class TestVariableEditor:
     def test_lists_inferred_types_without_id_columns_or_a_selection(

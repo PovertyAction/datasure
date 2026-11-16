@@ -38,7 +38,9 @@ src/datasure/
 │                           #   turns outlier corrections and acceptances
 │                           #   into log entries (no Streamlit)
 │   ├── outliers/           #   Statistical outlier detection
-│   ├── enumerator/         #   Enumerator performance
+│   ├── enumerator/         #   Enumerator performance; response_patterns/
+│                           #   compares each enumerator's answers with the
+│                           #   rest of the team (compute.py has no Streamlit)
 │   ├── progress.py         #   Survey progress tracking
 │   ├── descriptive.py      #   Descriptive statistics
 │   └── backchecks/         #   Back-check comparison workflows; scope.py

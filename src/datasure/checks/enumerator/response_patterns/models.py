@@ -97,7 +97,7 @@ class Badge(StrEnum):
 class SkipReason(StrEnum):
     """Why a variable was left out of a check."""
 
-    NOT_NUMERIC = "not a numeric column"
+    NOT_NUMERIC = "no answers are numbers"
     NO_RESPONSES = "no responses"
     NO_VARIATION = "no variation across the project"
     RANGE_UNDER_10 = "observed range under 10"
