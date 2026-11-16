@@ -1025,6 +1025,16 @@ class TestSavedTargetsLoadBack:
         assert loaded.survey_target == 250
         assert loaded.target_submissions_per_period == 12
 
+    def test_old_target_loads_when_page_config_target_was_left_blank(self, tmp_path):
+        # The page config form saves a blank optional target as 0, not None
+        settings_file = tmp_path / "page_settings.json"
+        settings_file.write_text(json.dumps({"progress": {"target": 250}}))
+        config = self.CONFIG.model_copy(update={"survey_target": 0})
+
+        loaded = load_default_settings(str(settings_file), config)
+
+        assert loaded.survey_target == 250
+
     def test_page_config_target_beats_a_target_saved_under_the_old_key(self, tmp_path):
         # The old key never took effect, so the page config's target may be
         # the newer one: users were told to set it there instead

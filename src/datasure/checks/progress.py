@@ -187,10 +187,11 @@ def load_default_settings(
 
     # Targets used to be saved under other keys, where they never took
     # effect. Load them only when the page config has no target of its own,
-    # which may have been set after them.
+    # which may have been set after them. The config form saves a blank
+    # target as 0, so 0 counts as no target.
     for old_key, key in LEGACY_TARGET_KEYS.items():
         old_value = saved_settings.pop(old_key, None)
-        if old_value is not None and getattr(config, key) is None:
+        if old_value is not None and not getattr(config, key):
             saved_settings.setdefault(key, old_value)
 
     default_settings: dict = dict(config)
