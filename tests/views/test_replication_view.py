@@ -722,3 +722,30 @@ class TestRenderStataNames:
             assert _render_stata_names("p", "survey") is True
         _st.error.assert_called_once()
         _st.data_editor.assert_not_called()
+
+    def test_typing_a_name_another_edit_took_blocks_the_build(self):
+        # The saved edit took 2nd_visit's proposal, which moved to _2nd_visit_2;
+        # typing the old proposal back is a clash, not a silent no-op.
+        blocked, save = self._render(
+            ["visit date", "2nd_visit"],
+            saved={"visit date": "_2nd_visit"},
+            typed={"2nd_visit": "_2nd_visit"},
+        )
+        assert blocked is True
+        assert _st.error.call_count == 2
+        save.assert_not_called()
+
+    def test_column_names_are_read_fresh_on_every_render(self):
+        # The build reads the names fresh, so the table must not lag behind
+        # a Prep step or re-import.
+        empty_log = pl.DataFrame()
+        with (
+            patch.object(
+                _rv_mod, "duckdb_get_columns", side_effect=[["a"], ["a", "b c"]]
+            ),
+            patch.object(_rv_mod, "duckdb_get_table", return_value=empty_log),
+        ):
+            first = _rv_mod._get_package_column_names("p", "fresh")
+            second = _rv_mod._get_package_column_names("p", "fresh")
+        assert first == ["a"]
+        assert second == ["a", "b c"]

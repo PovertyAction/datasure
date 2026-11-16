@@ -569,13 +569,14 @@ def _emit_prep_step(
     args = _parse_prep_args(row.get("prep_args") or "{}")
 
     comment = [f"{_C} Step {i}: {description or action}"]
-    # A rename that failed in DataSure left the names alone, but its log
-    # still holds the pairs of an earlier run; renaming here would differ.
-    if action == _ACT_RENAME and row.get("status") == "Failed":
+    # A step that failed in DataSure left the data unchanged, but its log
+    # still holds the arguments of an earlier run; running it here would
+    # differ, and can stop the do-file (a copy whose name a re-import took).
+    if row.get("status") == "Failed":
         return [
             *comment,
             f"{_C} Skipped: this step failed the last time DataSure applied it, "
-            "so it renamed nothing.",
+            "so it changed nothing.",
             "",
         ]
     try:

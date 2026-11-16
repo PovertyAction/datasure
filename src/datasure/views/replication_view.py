@@ -20,7 +20,7 @@ from datasure.replication.stata_names import (
 )
 from datasure.utils.cache_utils import get_cache_path
 from datasure.utils.config_utils import ConfigurationService
-from datasure.utils.duckdb_utils import duckdb_get_table
+from datasure.utils.duckdb_utils import duckdb_get_columns, duckdb_get_table
 from datasure.utils.navigations_utils import (
     add_demo_navigation,
     demo_sidebar_help,
@@ -62,10 +62,13 @@ def _get_import_log_row(project_id: str, alias: str) -> dict | None:
         return None
 
 
-@st.cache_data(ttl=60)
 def _get_package_column_names(project_id: str, alias: str) -> list[str]:
-    """Return every column name the package for *alias* uses."""
-    raw_columns = duckdb_get_table(project_id, alias, "raw").columns
+    """Return every column name the package for *alias* uses.
+
+    Not cached: the build reads the names fresh, so the names table and its
+    checks must too, or a recent Prep step or re-import would be missing.
+    """
+    raw_columns = duckdb_get_columns(project_id, alias, "raw")
     prep_log = duckdb_get_table(project_id, f"prep_log_{alias}", "logs")
     return package_column_names(raw_columns, prep_log)
 
@@ -311,7 +314,7 @@ def _render_stata_names(project_id: str, alias: str) -> bool:
         )
 
     typed = dict(zip(edited["datasure_name"], edited["stata_name"], strict=True))
-    edits = updated_stata_name_edits(typed, shown, proposals, saved)
+    edits = updated_stata_name_edits(typed, shown, names, saved, PACKAGE_VARIABLES)
     errors = stata_name_edit_errors(names, edits, PACKAGE_VARIABLES)
     for name, error in errors.items():
         st.error(f"**{name}**: {error}", icon=":material/error:")

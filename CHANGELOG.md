@@ -26,7 +26,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     (`prep_script_generator.prep_log_column_names`). Edits are stored per
     dataset in `stata_names_{alias}` in `logs.duckdb`
     (`load_stata_name_edits`, `save_stata_name_edits`).
-    `updated_stata_name_edits` decides which table values count as edits
+    `updated_stata_name_edits` decides which table values count as edits:
+    a value is an edit when it differs from the name the column gets without
+    its own edit, so typing a proposal another edit took is reported as a
+    clash
   - `build_replication_package(stata_name_edits=…)` builds the map and passes
     it to the generators. `generate_import_script` and
     `generate_scto_import_script` take `columns` and `name_map` and rename
@@ -43,7 +46,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     (`_render_stata_names`). It saves edits only when all of them can be
     used, otherwise shows the errors and disables the build; it warns when a
     saved edit no longer applies, and blocks the build when the column names
-    can't be read. Edits aren't part of the exported project configuration
+    can't be read. The names are read fresh on every render, as the build
+    reads them (the raw columns through the new
+    `duckdb_utils.duckdb_get_columns`, which reads no rows). Edits aren't part of the exported project configuration
 - **Rename columns** (#446): new Prep action **rename column(s)**
   (`PrepActions.rename_column`), with methods **by name** and **by pattern**
   (`PrepMethods.by_name`, `PrepMethods.by_pattern`)
@@ -71,8 +76,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - `prep_script_generator._stata_rename_columns` writes one
     `rename (old …) (new …)` from the recorded pairs, with a `* Pattern:`
     comment for pattern steps. With no recorded pairs, or a new name Stata
-    can't use, the step is a NOTE with a warning. A rename whose log status is
-    `Failed` is written as a skipped-step comment, since it renamed nothing
+    can't use, the step is a NOTE with a warning. A step of any kind whose
+    log status is `Failed` is written as a skipped-step comment, since it
+    changed nothing (#449: a failed copy-of-column step used to be written
+    as a live `clonevar` and stopped the do-file with r(110))
   - `utils/column_references.py` (Streamlit-free, read-only):
     `find_column_references(project_id, alias, columns)` reports where a
     dataset's check pages use the columns, as survey or backcheck data. It

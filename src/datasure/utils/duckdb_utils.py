@@ -197,6 +197,22 @@ def duckdb_get_table(
                 return pl.DataFrame()
 
 
+def duckdb_get_columns(project_id: str, alias: str, db_name: str) -> list[str]:
+    """Return a table's column names without reading its rows.
+
+    Returns an empty list when the table does not exist, as
+    ``duckdb_get_table`` returns an empty frame.
+    """
+    table_id = _validate_table_name(name_id(alias))
+    with duckdb.connect(database_path(project_id, db_name)) as conn:
+        rows = conn.execute(
+            "SELECT column_name FROM information_schema.columns "
+            "WHERE table_name = ? ORDER BY ordinal_position",
+            [table_id],
+        ).fetchall()
+    return [row[0] for row in rows]
+
+
 def duckdb_remove_table(project_id: str, alias: str, db_name: str) -> None:
     """Delete a table from a DuckDB database.
 

@@ -8,6 +8,7 @@ from unittest.mock import patch
 import polars as pl
 import pytest
 
+from datasure.processing.column_names import stata_name_edit_errors, stata_name_map
 from datasure.replication.stata_names import (
     load_stata_name_edits,
     package_name_map,
@@ -93,28 +94,48 @@ class TestStoredEdits:
         assert load_stata_name_edits("p", "backcheck") == {}
 
 
+_NAMES = ["visit date", "visit-date"]
 _PROPOSALS = {"visit date": "visit_date", "visit-date": "visit_date_2"}
+
+
+def _updated(typed, shown, saved, names=_NAMES):
+    return updated_stata_name_edits(typed, shown, names, saved)
 
 
 class TestUpdatedEdits:
     """Which names typed into the Replication page's table are kept as edits."""
 
     def test_untouched_table_has_no_edits(self):
-        assert updated_stata_name_edits(_PROPOSALS, _PROPOSALS, _PROPOSALS, {}) == {}
+        assert _updated(_PROPOSALS, _PROPOSALS, {}) == {}
 
     def test_a_changed_name_is_an_edit_and_is_trimmed(self):
         typed = {**_PROPOSALS, "visit date": " vdate "}
-        edits = updated_stata_name_edits(typed, _PROPOSALS, _PROPOSALS, {})
-        assert edits == {"visit date": "vdate"}
+        assert _updated(typed, _PROPOSALS, {}) == {"visit date": "vdate"}
 
     def test_a_proposal_moved_by_an_edit_is_not_an_edit(self):
         saved = {"visit-date": "visit_date"}
         shown = {"visit date": "visit_date_2", "visit-date": "visit_date"}
-        edits = updated_stata_name_edits(shown, shown, _PROPOSALS, saved)
-        assert edits == saved
+        assert _updated(shown, shown, saved) == saved
 
     def test_typing_the_proposal_back_undoes_an_edit(self):
         saved = {"visit date": "vdate"}
         shown = {"visit date": "vdate", "visit-date": "visit_date_2"}
         typed = {**shown, "visit date": "visit_date"}
-        assert updated_stata_name_edits(typed, shown, _PROPOSALS, saved) == {}
+        assert _updated(typed, shown, saved) == {}
+
+    def test_an_unedited_saved_name_is_kept(self):
+        saved = {"visit date": "vdate"}
+        shown = {"visit date": "vdate", "visit-date": "visit_date_2"}
+        assert _updated(shown, shown, saved) == saved
+
+    def test_typing_a_proposal_another_edit_took_is_an_edit_that_clashes(self):
+        names = ["visit date", "2nd_visit"]
+        saved = {"visit date": "_2nd_visit"}
+        shown = stata_name_map(names, saved)
+        assert shown == {"visit date": "_2nd_visit", "2nd_visit": "_2nd_visit_2"}
+        typed = {**shown, "2nd_visit": "_2nd_visit"}
+
+        edits = _updated(typed, shown, saved, names)
+
+        assert edits == {**saved, "2nd_visit": "_2nd_visit"}
+        assert set(stata_name_edit_errors(names, edits)) == set(names)

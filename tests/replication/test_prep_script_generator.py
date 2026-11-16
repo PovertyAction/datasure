@@ -1063,3 +1063,14 @@ class TestRenameScript:
         assert "rename (" not in script
         assert "failed the last time" in script
         assert warnings == []
+
+    def test_any_step_that_failed_in_datasure_is_skipped(self):
+        # A copy whose name a re-import took fails in DataSure; writing it
+        # would stop the do-file with r(110) after import took the name.
+        script, warnings = _script(
+            ("add new column", _copy_args("age", "age copy")), status="Failed"
+        )
+
+        assert "clonevar" not in script
+        assert "failed the last time" in script
+        assert warnings == []

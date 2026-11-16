@@ -56,22 +56,29 @@ def package_name_map(
 def updated_stata_name_edits(
     typed: Mapping[str, str],
     shown: Mapping[str, str],
-    proposals: Mapping[str, str],
+    names: Iterable[str],
     saved: Mapping[str, str],
+    reserved: Iterable[str] = (),
 ) -> dict[str, str]:
     """The edits to keep after people change the Stata names shown.
 
-    ``typed`` is what the table holds now, ``shown`` the map it was filled
-    from (with ``saved`` edits applied), and ``proposals`` the map without
-    edits. A name counts as edited when it differs from what was shown or
-    was already saved, and isn't simply the proposal, so typing the proposal
-    back undoes an edit. A proposal that moved because an edit took its
-    name isn't an edit.
+    ``typed`` is what the table holds now and ``shown`` the map it was
+    filled from: ``stata_name_map(names, saved, reserved)``. A name counts
+    as edited when it differs from the name the column gets without its own
+    edit, with the other saved edits applied. So typing that name back
+    undoes an edit, and a proposal that moved because an edit took its name
+    isn't an edit. Typing a column's original proposal after an edit took it
+    is an edit, so ``stata_name_edit_errors`` reports the clash.
     """
+    names = list(names)
+    reserved = tuple(reserved)
     edits: dict[str, str] = {}
     for name, stata_name in shown.items():
         value = str(typed.get(name) or "").strip()
-        if (value != stata_name or name in saved) and value != proposals.get(name):
+        if name in saved:
+            others = {k: v for k, v in saved.items() if k != name}
+            stata_name = stata_name_map(names, others, reserved).get(name)
+        if value != stata_name:
             edits[name] = value
     return edits
 
