@@ -330,6 +330,9 @@ def _settings_hash(path: Path) -> Hashable | None:
 def _page_fingerprint(ctx: CheckContext) -> Hashable:
     """What headlines depend on: data, page settings and settings tables.
 
+    The data is the survey, backcheck and tracking frames: Progress takes
+    its target from the tracking dataset.
+
     The settings files are hashed. The logs database (outlier and backcheck
     columns, missing codes, accepted flags, backcheck attributions) and the
     intermediate database (consent and outcome data, corrections) are stamped
@@ -345,6 +348,7 @@ def _page_fingerprint(ctx: CheckContext) -> Hashable:
         astuple(config),
         _frame_fingerprint(ctx.data.page_data),
         _frame_fingerprint(ctx.data.backcheck_data),
+        _frame_fingerprint(ctx.data.tracking_data),
         _settings_hash(Path(config.setting_file)),
         _content_hash(Path(config.missing_setting_file)),
         tuple(

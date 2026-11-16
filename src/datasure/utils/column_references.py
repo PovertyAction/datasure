@@ -104,6 +104,16 @@ _SURVEY_SETTING_KEYS = (
     "condition_col",
     "date",
     "eligibility_column",
+    "survey_unit",
+)
+
+# Progress settings keys naming a column of the page's tracking dataset.
+_TRACKING_SETTING_KEYS = (
+    "tracking_target",
+    "tracking_unit",
+    "tracking_id",
+    "tracking_parents",
+    "tracking_display",
 )
 
 # Settings keys naming a backcheck column, by section.
@@ -121,7 +131,8 @@ def find_column_references(
     """Return where the check pages and correction log of ``alias`` use ``columns``.
 
     Covers each check page's configuration, check tables and settings for
-    pages on the dataset (as survey or backcheck data), then the dataset's
+    pages on the dataset (as survey or backcheck data), the Progress
+    settings of pages using it as their tracking dataset, then the dataset's
     correction log, with entries counted per column.
     """
     wanted = set(columns)
@@ -156,6 +167,18 @@ def _page_references(
     project_id: str, alias: str, page: dict
 ) -> Iterator[ColumnReference]:
     """Yield every column reference a check page makes to ``alias``."""
+    if page.get("tracking_data_name") == alias:
+        page_name = str(page.get("page_name") or "")
+        yield from _tracking_references(
+            project_id, page_name, f"Check page '{page_name}'"
+        )
+    yield from _dataset_references(project_id, alias, page)
+
+
+def _dataset_references(
+    project_id: str, alias: str, page: dict
+) -> Iterator[ColumnReference]:
+    """Yield the references a page makes to ``alias`` as survey or backcheck data."""
     page_name = str(page.get("page_name") or "")
     source = f"Check page '{page_name}'"
     is_survey = page.get("survey_data_name") == alias
@@ -216,18 +239,38 @@ def _descriptive_references(
         yield ColumnReference(str(column), source, "Descriptive stats")
 
 
-def _settings_references(
-    project_id: str, page_name: str, source: str, is_survey: bool
-) -> Iterator[ColumnReference]:
-    """Yield columns a page's check settings name, leaving out view state."""
+def _page_settings(project_id: str, page_name: str) -> dict | None:
+    """Read a page's check settings without view state; None when unreadable."""
     path = get_cache_path(
         project_id, "settings", f"page_{name_id(page_name)}_settings.json"
     )
     try:
-        settings = without_view_state(read_settings(path))
+        return without_view_state(read_settings(path))
     except (OSError, ValueError):
         # The warning then leaves this page's settings out, so log it.
         logger.warning("Could not read check settings %s", path, exc_info=True)
+        return None
+
+
+def _tracking_references(
+    project_id: str, page_name: str, source: str
+) -> Iterator[ColumnReference]:
+    """Yield the tracking-dataset columns a page's Progress settings name."""
+    values = (_page_settings(project_id, page_name) or {}).get("progress")
+    if not isinstance(values, dict):
+        return
+    for key in _TRACKING_SETTING_KEYS:
+        label = key.replace("_", " ")
+        for column in _names(values.get(key)):
+            yield ColumnReference(column, source, f"Progress settings: {label}")
+
+
+def _settings_references(
+    project_id: str, page_name: str, source: str, is_survey: bool
+) -> Iterator[ColumnReference]:
+    """Yield columns a page's check settings name, leaving out view state."""
+    settings = _page_settings(project_id, page_name)
+    if settings is None:
         return
     for section, section_label in _SETTINGS_SECTIONS.items():
         values = settings.get(section)

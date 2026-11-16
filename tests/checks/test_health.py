@@ -385,6 +385,25 @@ class TestHeadlineCache:
 
         assert headline.call_count == 2
 
+    def test_recomputed_when_the_tracking_data_changes(self, tmp_path):
+        # Progress takes its target from the tracking dataset
+        config = _config(tmp_path)
+        headline = MagicMock(return_value=PROGRESS)
+
+        def rows(tracking):
+            ctx = CheckContext(
+                PROJECT_ID,
+                config,
+                CheckData(DATA, tracking_data=tracking),
+                get_df_columns(DATA),
+            )
+            _rows(ctx, [DUPLICATES], {"duplicates": headline})
+
+        rows(pl.DataFrame({"unit": ["v1"], "target": [4]}))
+        rows(pl.DataFrame({"unit": ["v1", "v2"], "target": [4, 6]}))
+
+        assert headline.call_count == 2
+
     def test_recomputed_when_the_page_settings_change(self, tmp_path):
         config = _config(tmp_path)
         headline = MagicMock(return_value=TWO_DUPLICATES)

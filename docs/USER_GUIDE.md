@@ -460,7 +460,7 @@ The log entry shows the renames each run actually made.
 
 **Columns used by checks or corrections**: if a column you rename is used by
 a check page's settings (such as the survey ID, enumerator, duplicate or GPS
-columns) or by entries in the correction log, clicking **Add** lists those
+columns, or Progress's Target source columns in a tracking dataset) or by entries in the correction log, clicking **Add** lists those
 uses in a warning in the same dialog before the step is added. Choose **Rename anyway** to go ahead or **Cancel**
 to stop. DataSure doesn't update those settings or corrections for you, so
 update them afterwards. Renames that touch no such columns add the step
@@ -1317,6 +1317,12 @@ The target is a fixed number unless the page configuration sets a
   add levels to By unit. A parent's target is the sum of its units'.
 - The total target is the sum of the units' targets. **Total Expected
   Interviews** then shows that total and can't be edited.
+- **Completed**, **Remaining** and **% complete** count only completions in
+  units with a target, as do the chart and the pace. Completions in
+  untracked units, or by survey IDs not on the master list, have no share
+  of the target, so they are left out and the header says how many there
+  are. They are still in **Submissions** and **Unique**, and in the
+  Untracked group on By unit.
 
 IDs and units are matched as text with spaces trimmed, so `R-0012 ` matches
 `R-0012`. Case matters. **Ignore leading zeros in IDs and units** also matches
@@ -1335,7 +1341,10 @@ The page tells you about any problem with the tracking dataset:
   the first value, and the page lists those units.
 
 A tracking dataset that is set but not imported, or has no rows, leaves the
-fixed target in use until it is imported.
+fixed target in use until it is imported. If a re-imported tracking
+dataset, or a prep step on the survey, removes or renames a column chosen in
+Target source, the page warns you and counts without it until you pick the
+column again; Summary's Progress row won't match until you do.
 
 #### By unit
 

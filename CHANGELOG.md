@@ -37,7 +37,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   usable master list normalizes survey IDs the same way. New to-do cards:
   Unexpected IDs, Units below 50% of target and Untracked units.
   `compute_counts` and `progress_headline` take the tracking dataset, so
-  Summary's Progress row and its delta agree with the page — #410
+  Summary's Progress row and its delta agree with the page. With a
+  tracking dataset's target, Completed, Remaining, % complete, the series
+  and the pace count only rows in tracked units; other completed IDs go in
+  the new `ProgressCounts.untracked_completed`, which the header names, so
+  unexpected IDs and untracked units can't reach the target. Summary's
+  headline cache key (`_page_fingerprint`) includes the tracking data. The
+  page warns when a saved Target source column is no longer offered
+  (`stale_tracking_columns`), and Prep's rename warning
+  (`find_column_references`) covers a tracking dataset's Progress settings
+  and `survey_unit` — #410
 - **`resolve_progress(ctx)`**: returns a `ProgressResolution` (mode,
   target, achieved, basis "completed interviews" or "unique IDs", and the
   unit and parent `unit_levels`) for Project Overview (#431, #435) — #410

@@ -24,6 +24,8 @@ from datasure.checks.progress import (
     progress_headline,
     progress_report,
     resolve_progress,
+    stale_tracking_columns,
+    untracked_completed_text,
 )
 from datasure.checks.progress_tracking import UnitRow, normalize_keys
 from datasure.utils.dataframe_utils import ColumnByType
@@ -158,9 +160,34 @@ class TestTrackingFile:
         counts = self.result().counts
 
         assert counts.target == 12
-        assert counts.completed == 3
-        assert counts.remaining == 9
-        assert counts.percentage == 25.0
+        # h1 and h3; h4 is in v9, which has no target
+        assert counts.completed == 2
+        assert counts.remaining == 10
+        assert counts.percentage == pytest.approx(100 * 2 / 12)
+
+    def test_completions_in_untracked_units_are_counted_apart(self):
+        counts = self.result().counts
+
+        assert (counts.submissions, counts.unique) == (5, 4)
+        assert counts.untracked_completed == 1
+
+    def test_untracked_completions_cannot_reach_the_target(self):
+        # One unit's target is met only with completions from v9
+        tracking = pl.DataFrame(
+            {"village_code": ["v2"], "district": ["d1"], "target": [2]}
+        )
+        survey = _survey(
+            [
+                ("h3", "2026-10-12", "v2", "complete"),
+                ("h4", "2026-10-13", "v9", "complete"),
+            ]
+        )
+
+        result = self.result(tracking, survey)
+
+        assert (result.counts.completed, result.counts.remaining) == (1, 1)
+        assert result.series[-1].cumulative == 1
+        assert result.status.title != "Target reached"
 
     def test_the_fixed_target_is_ignored(self):
         assert self.result(survey_target=999).counts.target == 12
@@ -241,6 +268,13 @@ class TestMasterList:
 
     def test_the_target_is_the_number_of_respondents(self):
         assert self.result().counts.target == 4
+
+    def test_unexpected_ids_are_not_counted_toward_the_target(self):
+        counts = self.result().counts
+
+        # h1 and h3; h4 is not on the master list
+        assert (counts.completed, counts.untracked_completed) == (2, 1)
+        assert counts.remaining == 2
 
     def test_units_come_from_the_master_list_through_the_id(self):
         survey = SURVEY.drop("village")
@@ -465,7 +499,7 @@ class TestResolveProgress:
 
         resolved = resolve_progress(_context(tmp_path, saved, TRACKING))
 
-        assert (resolved.target, resolved.achieved) == (12, 3)
+        assert (resolved.target, resolved.achieved) == (12, 2)
         assert resolved.basis == "completed interviews"
         targets = {
             level.column: {r.unit: r.target for r in level.rows}
@@ -489,8 +523,8 @@ class TestResolveProgress:
             MASTER,
         )
 
-        assert headline.count == resolve_progress(context).achieved == 3
-        assert headline.value == "3 / 4"
+        assert headline.count == resolve_progress(context).achieved == 2
+        assert headline.value == "2 / 4"
 
 
 # ==============================================================================
@@ -509,12 +543,17 @@ def _mock_st():
     return mock_st
 
 
-def _page_sections(tmp_path, settings, tracking) -> list[str]:
+def _render_page(tmp_path, settings, tracking, saved: dict | None = None):
+    """Render the page with its sections mocked; return st and the mocks."""
+    setting_file = tmp_path / "s.json"
+    if saved is not None:
+        setting_file.write_text(json.dumps({"progress": saved}))
     survey_cols = ColumnByType(
         categorical_columns=["hhid", "village"], datetime_columns=["when"]
     )
+    mock_st = _mock_st()
     with (
-        patch.object(progress_module, "st", _mock_st()),
+        patch.object(progress_module, "st", mock_st),
         patch("datasure.utils.onboarding_utils.is_demo_project", return_value=False),
         patch.object(
             progress_module, "progress_report_settings", return_value=settings
@@ -533,11 +572,21 @@ def _page_sections(tmp_path, settings, tracking) -> list[str]:
     ):
         progress_report(
             SURVEY,
-            str(tmp_path / "s.json"),
+            str(setting_file),
             {"survey_id": "hhid"},
             survey_cols,
             tracking,
         )
+    return mock_st, headers, by_unit, respondents
+
+
+def _page_warnings(tmp_path, saved: dict, tracking) -> list[str]:
+    mock_st, *_ = _render_page(tmp_path, _settings(**saved), tracking, saved)
+    return [c.args[0] for c in mock_st.warning.call_args_list]
+
+
+def _page_sections(tmp_path, settings, tracking) -> list[str]:
+    _, headers, by_unit, respondents = _render_page(tmp_path, settings, tracking)
     # Without the Follow-up queue badge
     titles = [c.args[0].split(" :")[0] for c in headers.call_args_list]
     assert by_unit.called == ("By unit" in titles)
@@ -601,6 +650,47 @@ class TestHeader:
             "[:orange-badge[:material/warning: 2 things need attention]](#overview)"
         )
         assert attention_text(quiet) is None
+
+    def test_untracked_completions_are_named_with_where_to_find_them(self):
+        tracking = compute_progress(
+            SURVEY, _settings(**TRACKING_SETTINGS), AS_OF, tracking=TRACKING
+        )
+        master = compute_progress(
+            SURVEY, _settings(**MASTER_SETTINGS), AS_OF, tracking=MASTER
+        )
+
+        assert untracked_completed_text(tracking) == (
+            "1 completed ID in units the tracking file has no target for "
+            "(see Untracked in **By unit**) is not counted toward the target."
+        )
+        assert "not on the master list" in untracked_completed_text(master)
+
+
+class TestStaleTrackingColumns:
+    def test_lists_a_tracking_files_saved_columns_no_longer_offered(self):
+        saved = _settings(**TRACKING_SETTINGS, tracking_parents=["district", "gone"])
+
+        stale = stale_tracking_columns(saved, ["village_code", "district"], ["hhid"])
+
+        assert stale == ["target", "gone", "village"]
+
+    def test_lists_a_master_lists_display_columns(self):
+        saved = _settings(**MASTER_SETTINGS, tracking_display=["landmark"])
+
+        assert stale_tracking_columns(saved, ["resp_id", "vill"], []) == ["landmark"]
+
+    def test_nothing_when_every_column_is_offered(self):
+        saved = _settings(**TRACKING_SETTINGS)
+
+        assert stale_tracking_columns(saved, TRACKING.columns, ["village"]) == []
+
+    def test_the_page_warns_about_a_stale_column(self, tmp_path):
+        saved = {**MASTER_SETTINGS, **CONDITION, "tracking_display": ["landmark"]}
+        warnings = _page_warnings(
+            tmp_path, saved, TrackingSource("roster", MASTER.drop("landmark"))
+        )
+
+        assert any("**landmark**" in w for w in warnings)
 
 
 def _unit(name, target, completed, status) -> UnitRow:

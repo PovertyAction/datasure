@@ -185,7 +185,15 @@ class ProgressCounts(BaseModel):
     submissions: int = Field(ge=0, description="Every row")
     unique: int = Field(ge=0, description="Distinct IDs")
     completed: int = Field(
-        ge=0, description="Distinct IDs with a row meeting the completion condition"
+        ge=0,
+        description="Distinct IDs with a row meeting the completion condition; "
+        "with a tracking dataset's target, only rows in its tracked units",
+    )
+    untracked_completed: int = Field(
+        0,
+        ge=0,
+        description="Completed IDs outside the tracking dataset's units or "
+        "master list, left out of Completed so they can't count toward its target",
     )
     target: int | None = Field(None, ge=0, description="Target number of IDs")
     remaining: int | None = Field(
@@ -855,10 +863,13 @@ def compute_progress(
     TimePeriodConfig(time_period=period)
     mode = detect_mode(tracking is not None, settings)
     rows, reference = _rows_and_reference(data, settings, tracking)
-    counts = _counts(rows, _target(settings, reference))
+    tagged = _tagged_rows(rows, data, settings, reference)
+    counts = _counts(rows, _target(settings, reference), tagged)
     # A completion dated after today, such as one from a device with a wrong
     # clock, counts in Completed but not in the chart, period or pace
-    firsts = _first_completions(rows).filter(pl.col("date") <= as_of)
+    firsts = _first_completions(_counted_rows(rows, counts.target, tagged)).filter(
+        pl.col("date") <= as_of
+    )
 
     series = _series(rows, firsts, as_of, period)
     pace = _pace(rows, firsts, settings, counts.remaining, as_of)
@@ -873,9 +884,7 @@ def compute_progress(
         target_path=_target_path(series, counts.target, settings.field_end_date),
         issues=reference.issues if reference else [],
     )
-    tagged = None
-    if reference is not None and reference.usable:
-        tagged = assign_units(rows, data, reference, settings)
+    if tagged is not None:
         result = result.model_copy(
             update={
                 "unit_levels": unit_levels(tagged, reference),
@@ -931,13 +940,52 @@ def _target(
     return reference.target or None
 
 
-def _counts(rows: pl.DataFrame, target: int | None) -> ProgressCounts:
-    """Count submissions, unique and completed IDs against the target."""
-    completed = rows.filter(pl.col("qualifies"))["id"].drop_nulls().n_unique()
+def _tagged_rows(
+    rows: pl.DataFrame,
+    data: pl.DataFrame,
+    settings: ProgressSettings,
+    reference: TrackingReference | None,
+) -> pl.DataFrame | None:
+    """The rows with their unit and tracked flag; None without a usable dataset."""
+    if reference is None or not reference.usable:
+        return None
+    return assign_units(rows, data, reference, settings)
+
+
+def _counted_rows(
+    rows: pl.DataFrame, target: int | None, tagged: pl.DataFrame | None
+) -> pl.DataFrame:
+    """The rows whose completions count toward the target.
+
+    With a tracking dataset's target, only rows in its tracked units: a
+    master list's unexpected IDs and a tracking file's untracked units have
+    no share of that target, so counting them would let Completed reach it
+    while listed respondents are still pending.
+    """
+    if tagged is None or target is None:
+        return rows
+    return tagged.filter(pl.col("tracked"))
+
+
+def _completed_ids(rows: pl.DataFrame) -> int:
+    return rows.filter(pl.col("qualifies"))["id"].drop_nulls().n_unique()
+
+
+def _counts(
+    rows: pl.DataFrame, target: int | None, tagged: pl.DataFrame | None = None
+) -> ProgressCounts:
+    """Count submissions, unique and completed IDs against the target.
+
+    Submissions and Unique cover every row; Completed covers the rows
+    `_counted_rows` gives, and the other completed IDs are counted apart.
+    """
+    counted = _counted_rows(rows, target, tagged)
+    completed = _completed_ids(counted)
     return ProgressCounts(
         submissions=rows.height,
         unique=rows["id"].drop_nulls().n_unique(),
         completed=completed,
+        untracked_completed=_completed_ids(rows) - completed,
         target=target,
         remaining=max(target - completed, 0) if target else None,
         percentage=completed / target * 100 if target else None,
@@ -955,7 +1003,8 @@ def compute_counts(
     Summary quick when a mis-keyed date stretches it over decades.
     """
     rows, reference = _rows_and_reference(data, settings, tracking)
-    return _counts(rows, _target(settings, reference))
+    tagged = _tagged_rows(rows, data, settings, reference)
+    return _counts(rows, _target(settings, reference), tagged)
 
 
 class TimePeriodConfig(BaseModel):
@@ -1707,6 +1756,8 @@ def display_progress_header(
         metrics.append(("Completed", f"{counts.completed:,}", completed_help))
     else:
         _display_headline(result)
+    if counts.untracked_completed and counts.target is not None:
+        st.caption(untracked_completed_text(result))
 
     current = result.current_period
     if current is not None:
@@ -1753,6 +1804,17 @@ def progress_fraction(percentage: float) -> float:
     above 1, so the bar stops full at 100%; the text keeps the real figure.
     """
     return min(max(percentage / 100, 0.0), 1.0)
+
+
+def untracked_completed_text(result: ProgressResult) -> str:
+    """Say how many completions the target leaves out, and where to find them."""
+    n = result.counts.untracked_completed
+    ids = f"{n:,} completed {'ID' if n == 1 else 'IDs'}"
+    if result.mode == "master list":
+        where = "not on the master list (see Unexpected in **Respondents**)"
+    else:
+        where = "in units the tracking file has no target for (see Untracked in **By unit**)"
+    return f"{ids} {where} {'is' if n == 1 else 'are'} not counted toward the target."
 
 
 def _display_headline(result: ProgressResult) -> None:
@@ -2232,6 +2294,33 @@ def stale_condition_columns(saved: ProgressSettings, columns: list[str]) -> list
     ]
 
 
+def stale_tracking_columns(
+    saved: ProgressSettings, tracking_columns: list[str], survey_unit_columns: list[str]
+) -> list[str]:
+    """Return the saved Target source columns the pickers no longer offer.
+
+    As with `stale_condition_columns`: a re-imported tracking dataset can drop
+    or rename a column, and its picker then starts empty without saving, so
+    the page and Summary would read different settings. Only the columns the
+    saved mode uses are checked: a tracking file's target, unit, parents and
+    survey unit, or a master list's ID, unit, parents and display columns.
+    """
+    if saved.tracking_target:
+        named = [saved.tracking_target, saved.tracking_unit, *saved.tracking_parents]
+        survey = [saved.survey_unit]
+    else:
+        named = [
+            saved.tracking_id,
+            saved.tracking_unit,
+            *saved.tracking_parents,
+            *saved.tracking_display,
+        ]
+        survey = []
+    return [c for c in named if c and c not in tracking_columns] + [
+        c for c in survey if c and c not in survey_unit_columns
+    ]
+
+
 @demo_output_onboarding(TAB_NAME)
 def progress_report(
     data: pl.DataFrame,
@@ -2284,6 +2373,21 @@ def progress_report(
             ":material/settings: settings section above.",
             icon=WARNING_ICON,
         )
+    if tracking.data is not None:
+        stale = stale_tracking_columns(
+            saved, tracking.data.columns, survey_columns.categorical_columns
+        )
+        if stale:
+            st.warning(
+                "The saved target source uses "
+                f"{', '.join(f'**{c}**' for c in stale)}, which "
+                f"{'is' if len(stale) == 1 else 'are'} no longer in the "
+                "tracking dataset or the survey data. This page counts "
+                "without it, so Summary's Progress row won't match. Pick "
+                "the columns again in the :material/settings: settings "
+                "section above.",
+                icon=WARNING_ICON,
+            )
 
     # The header sits above the chart controls but needs the period they hold
     header = st.container()
@@ -2375,10 +2479,9 @@ def resolve_progress(ctx: CheckContext) -> ProgressResolution:
         ctx.config.setting_file, ProgressSettings(**progress_config(ctx))
     )
     rows, reference = _rows_and_reference(data, settings, tracking)
-    counts = _counts(rows, _target(settings, reference))
-    levels = []
-    if reference is not None and reference.usable:
-        levels = unit_levels(assign_units(rows, data, reference, settings), reference)
+    tagged = _tagged_rows(rows, data, settings, reference)
+    counts = _counts(rows, _target(settings, reference), tagged)
+    levels = [] if tagged is None else unit_levels(tagged, reference)
     return ProgressResolution(
         mode=detect_mode(tracking is not None, settings),
         target=counts.target,
