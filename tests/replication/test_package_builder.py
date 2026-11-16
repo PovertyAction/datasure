@@ -552,3 +552,82 @@ class TestExcludeReviewerNames:
         save.assert_not_called()
         remove.assert_not_called()
         delete.assert_not_called()
+
+
+class TestPackageUsesStataNames:
+    """Names Stata can't use are mapped once and used across the package (#449)."""
+
+    _RAW = pl.DataFrame(
+        {
+            "key": ["k1"],
+            "visit date": ["2026-01-01"],
+            "2nd_visit": ["no"],
+            "âge": ["30"],
+            "in": ["1"],
+        }
+    )
+    _PREP = pl.DataFrame(
+        {
+            "action": ["add new column"],
+            "description": ["copy"],
+            "prep_args": [
+                '{"column_names": "age copy", "method": "copy of column",'
+                ' "source_columns": ["\u00e2ge"]}'
+            ],
+            "action_index": [1],
+        }
+    )
+    _CORR = pl.DataFrame(
+        {
+            "action": ["modify value"],
+            "KEY": ["k1"],
+            "column": ["visit date"],
+            "new_value": ["2026-01-02"],
+            "reason": [""],
+        }
+    )
+
+    def _build(self, edits=None) -> dict[str, str]:
+        def _get(project_id, table, db_name):
+            if "prep_log" in table:
+                return self._PREP
+            if "corr_log" in table:
+                return self._CORR
+            return self._RAW if db_name in ("raw", "prep") else pl.DataFrame()
+
+        warnings: list[str] = []
+        with patch(
+            "datasure.replication.package_builder.duckdb_get_table", side_effect=_get
+        ):
+            zip_bytes = build_replication_package(
+                project_id="p",
+                project_name="P",
+                survey_name="S",
+                alias="s",
+                key_col="key",
+                on_warning=warnings.append,
+                stata_name_edits=edits,
+            )
+        assert warnings == []
+        with zipfile.ZipFile(BytesIO(zip_bytes)) as zf:
+            return {
+                n.rsplit("/", 1)[-1]: zf.read(n).decode("utf-8")
+                for n in zf.namelist()
+                if n.endswith((".do", ".csv"))
+            }
+
+    def test_every_script_and_the_codebook_use_the_stata_names(self):
+        files = self._build()
+        assert "(visit_date _2nd_visit age in_)" in files["2_import_data.do"]
+        assert 'label variable age "âge"' in files["2_import_data.do"]
+        assert "clonevar age_copy = age" in files["3_prepare_data.do"]
+        assert 'label variable age_copy "age copy"' in files["3_prepare_data.do"]
+        assert 'replace visit_date = "2026-01-02"' in files["4_corrections.do"]
+        codebook = files["codebook.csv"].splitlines()
+        variables = [line.split(",")[0] for line in codebook[1:]]
+        assert variables == ["key", "visit_date", "_2nd_visit", "age", "in_"]
+
+    def test_saved_edits_are_used(self):
+        files = self._build(edits={"visit date": "vdate"})
+        assert "(vdate _2nd_visit age in_)" in files["2_import_data.do"]
+        assert "replace vdate =" in files["4_corrections.do"]

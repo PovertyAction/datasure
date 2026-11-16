@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 import polars as pl
 import pytest
 
@@ -849,3 +851,226 @@ class TestGeneratePrepareDataScript:
             }
         )
         assert isinstance(generate_prepare_data_script(log, "P", "S", "1.0"), str)
+
+
+def _log(*steps: tuple[str, dict]) -> pl.DataFrame:
+    """A prep log of (action, prep_args) steps, as the Prep page saves it."""
+    return pl.DataFrame(
+        {
+            "action": [action for action, _ in steps],
+            "description": [f"step {i}" for i, _ in enumerate(steps, 1)],
+            "prep_args": [json.dumps(args) for _, args in steps],
+            "action_index": list(range(1, len(steps) + 1)),
+        }
+    )
+
+
+def _copy_args(source: str, new_name: str) -> dict:
+    return {
+        "action": "add new column",
+        "column_names": new_name,
+        "method": "copy of column",
+        "source_columns": [source],
+    }
+
+
+class TestDuplicateColumnScript:
+    """A duplicate step becomes clonevar + order in prepare_data.do."""
+
+    def test_duplicate_uses_clonevar_then_order_after_source(self):
+        warnings: list[str] = []
+        script = generate_prepare_data_script(
+            _log(("add new column", _copy_args("age", "age_copy"))),
+            "P",
+            "S",
+            "0.1",
+            on_warning=warnings.append,
+        )
+        lines = [line.strip() for line in script.splitlines()]
+        clone = lines.index("clonevar age_copy = age")
+        assert lines[clone + 1] == "order age_copy, after(age)"
+        assert warnings == []
+        assert "NOTE" not in script
+
+    def test_each_duplicate_step_is_translated(self):
+        script = generate_prepare_data_script(
+            _log(
+                ("add new column", _copy_args("age", "age_copy")),
+                ("add new column", _copy_args("hhid", "hhid_raw")),
+            ),
+            "P",
+            "S",
+            "0.1",
+        )
+        assert "clonevar hhid_raw = hhid" in script
+        assert "order hhid_raw, after(hhid)" in script
+
+    def test_duplicate_without_a_source_is_a_warning(self):
+        warnings: list[str] = []
+        args = _copy_args("age", "age_copy") | {"source_columns": []}
+        script = generate_prepare_data_script(
+            _log(("add new column", args)), "P", "S", "0.1", on_warning=warnings.append
+        )
+        assert "clonevar" not in script
+        assert len(warnings) == 1
+
+    @pytest.mark.parametrize(
+        ("name", "stata"),
+        [
+            ("age copy", "age_copy"),
+            ("1age", "_1age"),
+            ("in", "in_"),
+            ("x" * 33, "x" * 32),
+        ],
+    )
+    def test_name_stata_cannot_use_gets_its_mapped_name_and_a_label(self, name, stata):
+        warnings: list[str] = []
+        script = generate_prepare_data_script(
+            _log(("add new column", _copy_args("age", name))),
+            "P",
+            "S",
+            "0.1",
+            on_warning=warnings.append,
+        )
+        lines = [line.strip() for line in script.splitlines()]
+        clone = lines.index(f"clonevar {stata} = age")
+        assert lines[clone + 1] == f"order {stata}, after(age)"
+        assert lines[clone + 2] == f'label variable {stata} "{name}"'
+        assert warnings == []
+        assert "NOTE" not in script
+
+    def test_other_add_column_methods_use_the_mapped_name(self):
+        warnings: list[str] = []
+        args = {"column_names": "visit date", "method": "constant", "value": "1"}
+        script = generate_prepare_data_script(
+            _log(("add new column", args)), "P", "S", "0.1", on_warning=warnings.append
+        )
+        assert "gen visit_date = 1" in script
+        assert warnings == []
+
+    def test_a_given_map_is_used_for_sources_and_new_names(self):
+        script = generate_prepare_data_script(
+            _log(("add new column", _copy_args("visit date", "copy 1"))),
+            "P",
+            "S",
+            "0.1",
+            name_map={"visit date": "vdate", "copy 1": "vcopy"},
+        )
+        assert "clonevar vcopy = vdate" in script
+        assert "order vcopy, after(vdate)" in script
+
+    def test_label_text_cannot_break_out_of_its_quotes_or_expand_macros(self):
+        script = generate_prepare_data_script(
+            _log(("add new column", _copy_args("age", 'a "b" $c `d\''))),
+            "P",
+            "S",
+            "0.1",
+        )
+        assert "label variable a__b___c__d_ \"a 'b' \\$c \\`d'\"" in script
+
+    def test_names_stata_accepts_get_no_label(self):
+        script = generate_prepare_data_script(
+            _log(("add new column", _copy_args("age", "age_copy"))), "P", "S", "0.1"
+        )
+        assert "label variable" not in script
+
+
+def _rename_args(method: str, value: list, pairs: list[tuple[str, str]]) -> dict:
+    return {
+        "action": "rename column(s)",
+        "method": method,
+        "value": value,
+        "source_columns": [old for old, _ in pairs],
+        "column_names": [new for _, new in pairs],
+    }
+
+
+def _script(*steps: tuple[str, dict], status: str | None = None) -> tuple[str, list]:
+    warnings: list[str] = []
+    log = _log(*steps)
+    if status:
+        log = log.with_columns(pl.lit(status).alias("status"))
+    script = generate_prepare_data_script(
+        log, "P", "S", "0.1", on_warning=warnings.append
+    )
+    return script, warnings
+
+
+class TestRenameScript:
+    """A rename step becomes one rename (old …) (new …) from its recorded pairs."""
+
+    def test_by_name_uses_the_recorded_pairs(self):
+        args = _rename_args(
+            "by name", [["a", "b"], ["b", "a"], ["gone", "x"]], [("a", "b"), ("b", "a")]
+        )
+        script, warnings = _script(("rename column(s)", args))
+
+        lines = [line.strip() for line in script.splitlines()]
+        assert "rename (a b) (b a)" in lines
+        assert "gone" not in script
+        assert warnings == []
+
+    def test_pattern_step_has_a_comment_with_the_pattern(self):
+        args = _rename_args(
+            "by pattern", ["wildcard", "x_*", "y_*"], [("x_1", "y_1"), ("x_5", "y_5")]
+        )
+        script, warnings = _script(("rename column(s)", args))
+
+        lines = [line.strip() for line in script.splitlines()]
+        rename = lines.index("rename (x_1 x_5) (y_1 y_5)")
+        assert lines[rename - 1] == '* Pattern: matching "x_*" to "y_*"'
+        assert warnings == []
+
+    @pytest.mark.parametrize(
+        "value", [["change case", "lower", "Q*"], ["regex", r"q(\d+)", "item\1"]]
+    )
+    def test_case_and_regex_steps_are_translated_with_a_comment(self, value):
+        args = _rename_args("by pattern", value, [("Q1", "q1")])
+        script, warnings = _script(("rename column(s)", args))
+
+        assert "rename (Q1) (q1)" in script
+        assert "* Pattern: matching" in script
+        assert warnings == []
+
+    def test_step_without_recorded_pairs_is_a_note_and_warning(self):
+        args = _rename_args("by pattern", ["wildcard", "x*", "y*"], [])
+        script, warnings = _script(("rename column(s)", args))
+
+        assert "rename (" not in script
+        assert "NOTE" in script
+        assert len(warnings) == 1
+
+    def test_names_stata_cannot_use_get_their_mapped_names_and_labels(self):
+        args = _rename_args(
+            "by name",
+            [["visit date", "in"], ["a", "visit date"]],
+            [("visit date", "in"), ("a", "visit date")],
+        )
+        script, warnings = _script(("rename column(s)", args))
+
+        lines = [line.strip() for line in script.splitlines()]
+        rename = lines.index("rename (visit_date a) (in_ visit_date)")
+        assert lines[rename + 1 : rename + 3] == [
+            'label variable in_ "in"',
+            'label variable visit_date "visit date"',
+        ]
+        assert warnings == []
+
+    def test_step_that_failed_in_datasure_is_skipped(self):
+        args = _rename_args("by name", [["a", "b"]], [("a", "b")])
+        script, warnings = _script(("rename column(s)", args), status="Failed")
+
+        assert "rename (" not in script
+        assert "failed the last time" in script
+        assert warnings == []
+
+    def test_any_step_that_failed_in_datasure_is_skipped(self):
+        # A copy whose name a re-import took fails in DataSure; writing it
+        # would stop the do-file with r(110) after import took the name.
+        script, warnings = _script(
+            ("add new column", _copy_args("age", "age copy")), status="Failed"
+        )
+
+        assert "clonevar" not in script
+        assert "failed the last time" in script
+        assert warnings == []

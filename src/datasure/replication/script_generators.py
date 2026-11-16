@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+from collections.abc import Iterable, Mapping
 from datetime import date
 
 import polars as pl
@@ -35,6 +37,63 @@ def _header(
             "",
         ]
     )
+
+
+# Stata's limit on a variable label.
+_LABEL_MAX = 80
+
+
+def _stata_label(text: str) -> str:
+    """Quoted Stata label for ``text``, cut to 80 characters.
+
+    Runs of whitespace, including line breaks, become one space, double
+    quotes become single quotes, a trailing backslash is dropped, and ``$``
+    and backticks are escaped so a do-file doesn't expand them as macros.
+    """
+    text = re.sub(r"\s+", " ", text).strip()
+    text = text[:_LABEL_MAX].replace('"', "'").rstrip("\\ ")
+    text = text.replace("$", "\\$").replace("`", "\\`")
+    return f'"{text}"'
+
+
+def _mapped_name_labels(names: Iterable[str], name_map: Mapping[str, str]) -> list[str]:
+    """``label variable`` lines giving each mapped name its DataSure name."""
+    return [
+        f"label variable {name_map[name]} {_stata_label(name)}"
+        for name in dict.fromkeys(names)
+        if name in name_map
+    ]
+
+
+def _stata_names(names: Iterable[str], name_map: Mapping[str, str]) -> list[str]:
+    """``names`` with each mapped name replaced by its Stata name."""
+    return [name_map.get(name, name) for name in names]
+
+
+def _rename_imported_columns(
+    columns: Iterable[str], name_map: Mapping[str, str]
+) -> list[str]:
+    """Rename the imported columns that have a Stata name, by position.
+
+    Stata changes a name it can't use while importing (to ``v#``, or with
+    characters removed), and how depends on the name and Stata version, so
+    the columns are found by their position in the CSV instead. One group
+    ``rename`` applies every change at once, so a name Stata made up can't
+    clash with a new one. Empty when no imported column is mapped.
+    """
+    mapped = [(i, col) for i, col in enumerate(columns, 1) if col in name_map]
+    if not mapped:
+        return []
+    old = " ".join(f"`:word {i} of `ds_vars''" for i, _ in mapped)
+    new = " ".join(name_map[col] for _, col in mapped)
+    return [
+        f"{_C} Rename columns whose names Stata can't use, by their position in",
+        f"{_C} the CSV. Each keeps its DataSure name as its label.",
+        "unab ds_vars : _all",
+        f"rename ({old}) ({new})",
+        *_mapped_name_labels([col for _, col in mapped], name_map),
+        "",
+    ]
 
 
 # ── Corrections helpers ───────────────────────────────────────────────────────
@@ -250,6 +309,8 @@ def generate_import_script(
     project_name: str,
     survey_name: str,
     datasure_version: str,
+    columns: Iterable[str] = (),
+    name_map: Mapping[str, str] | None = None,
 ) -> str:
     """Generate a Stata import script that loads the raw CSV and saves as DTA.
 
@@ -261,6 +322,11 @@ def generate_import_script(
         Human-readable survey name.
     datasure_version : str
         Version of DataSure.
+    columns : Iterable[str]
+        The raw CSV's columns, in order.
+    name_map : Mapping[str, str] | None
+        Stata names for column names Stata can't use. Mapped columns are
+        renamed right after import.
 
     Returns
     -------
@@ -277,6 +343,7 @@ def generate_import_script(
         "* Import raw CSV dataset (all columns as strings to preserve data as-is)",
         f'import delimited "$raw/{safe_survey}_raw.csv", stringcols(_all) case(preserve) clear',
         "",
+        *_rename_imported_columns(columns, name_map or {}),
         "* Save as Stata dataset",
         f'save "$raw/{safe_survey}_raw.dta", replace',
         "",
@@ -293,6 +360,7 @@ def generate_corrections_script(
     project_name: str,
     survey_name: str,
     datasure_version: str,
+    name_map: Mapping[str, str] | None = None,
 ) -> str:
     """Generate a Stata corrections script from the correction log.
 
@@ -309,6 +377,9 @@ def generate_corrections_script(
         Human-readable survey name.
     datasure_version : str
         Version of DataSure that generated this package.
+    name_map : Mapping[str, str] | None
+        Stata names for column names Stata can't use; the script uses them
+        for corrected columns and the key column.
 
     Returns
     -------
@@ -346,10 +417,13 @@ def generate_corrections_script(
         "",
     ]
 
+    name_map = name_map or {}
+    key_col = name_map.get(key_col, key_col)
     for row in correction_log.iter_rows(named=True):
         action = str(row.get("action") or "")
         key_val = str(row.get("KEY") or "")
         col = row.get("column")
+        col = name_map.get(col, col) if col else col
         new_val = row.get("new_value")
         reason = str(row.get("reason") or "")
         lines += _emit_stata(action, key_col, key_val, col, new_val, reason)
