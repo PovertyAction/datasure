@@ -31,6 +31,7 @@ from datasure.utils.ui_utils import ensure_styler_limit, metric_row, section_hea
 from datasure.utils.view_state import reset_filters_beside, view_factory
 
 TAB_NAME = "progress"
+WARNING_ICON = ":material/warning:"
 Period = Literal["Day", "Week", "Month"]
 # Only a fixed target for now; the tracking file and master list come later
 ProgressMode = Literal["fixed"]
@@ -359,7 +360,11 @@ def _pace(
     projected_finish = None
     if remaining and per_day:
         days_needed = math.ceil(remaining / per_day)
-        projected_finish = as_of + timedelta(days=days_needed - 1)
+        try:
+            projected_finish = as_of + timedelta(days=days_needed - 1)
+        except OverflowError:
+            # A huge target at a slow pace passes year 9999: no projection
+            projected_finish = None
     return Pace(
         per_day=per_day,
         projected_finish=projected_finish,
@@ -649,6 +654,80 @@ def _setting_selectbox(
     return selected
 
 
+def condition_columns(data: pl.DataFrame) -> list[str]:
+    """Return the columns a completion condition can use.
+
+    Codes: integer, text, category and true/false columns, and decimal
+    columns whose values are all whole numbers, as Stata's ``gen`` stores
+    0/1 codes. A column with fractions holds measures, not codes. Dates are
+    left out because their values can't be saved as JSON.
+    """
+    columns = []
+    for column, dtype in data.schema.items():
+        if dtype.is_float():
+            values = data[column].drop_nulls()
+            if not (values.is_finite() & (values == values.round(0))).all():
+                continue
+        elif not (
+            dtype.is_integer()
+            or dtype in (pl.String, pl.Boolean)
+            or isinstance(dtype, pl.Categorical | pl.Enum)
+        ):
+            continue
+        columns.append(column)
+    return columns
+
+
+def _fit_value(value: Any, dtype: pl.DataType) -> tuple[bool, Any]:
+    """Convert a saved condition value to a column's type, if it fits.
+
+    A refresh can change a column's type, say from integer to text, and
+    comparing values of another type fails. A value fits when it converts
+    and converts back unchanged: ``1`` becomes ``"1"`` for a text column,
+    but ``1.5`` never becomes an integer. Null always fits.
+
+    Returns
+    -------
+    tuple[bool, Any]
+        Whether the value fits, and the value in the column's type.
+    """
+    if value is None:
+        return True, None
+    if isinstance(dtype, pl.Categorical | pl.Enum):
+        dtype = pl.String
+    original = pl.Series([value])
+    try:
+        converted = original.cast(dtype, strict=True)
+        back = converted.cast(original.dtype, strict=True)
+    except (pl.exceptions.PolarsError, TypeError, ValueError):
+        return False, None
+    if converted[0] is None or back[0] != value:
+        return False, None
+    return True, converted[0]
+
+
+def fit_condition_values(
+    data: pl.DataFrame, column: str, values: list[Any]
+) -> tuple[list[Any], list[Any]]:
+    """Split saved condition values into those that fit the column and not.
+
+    Returns
+    -------
+    tuple[list[Any], list[Any]]
+        The fitting values in the column's type, and the values that don't fit.
+    """
+    dtype = data.schema[column]
+    kept, misfits = [], []
+    for value in values:
+        fits, converted = _fit_value(value, dtype)
+        if fits:
+            if converted not in kept:
+                kept.append(converted)
+        else:
+            misfits.append(value)
+    return kept, misfits
+
+
 @st.cache_data
 def _get_unique_values(data: pl.DataFrame, column: str) -> list[Any]:
     """Get unique values from a Polars DataFrame column (cached for performance).
@@ -697,8 +776,7 @@ def _render_condition_part(
     label : str
         The column picker's label.
     columns : list[str]
-        The columns offered: categorical only, since the chosen values are
-        saved as JSON and dates can't be.
+        The columns offered; see `condition_columns`.
     default_column : str | None
         The saved column.
     default_values : list[Any] | None
@@ -723,10 +801,26 @@ def _render_condition_part(
         return None, None
 
     value_options = _get_unique_values(data, column)
-    saved = list(default_values or [])
+    # A refresh can change the column's type, and values of another type
+    # break the comparison: convert them, and drop those that don't fit
+    original = list(default_values or [])
+    saved, misfits = fit_condition_values(data, column, original)
     values_key = f"{setting}_vals_progress"
     save_flag = f"{TAB_NAME}_{setting}_vals"
     if column == default_column:
+        if misfits:
+            st.warning(
+                f"The saved {setting} values "
+                + ", ".join(f"**{value}**" for value in misfits)
+                + f" don't fit the **{column}** column, which now holds "
+                f"{data.schema[column]} values, so they were dropped. Check "
+                f"the {setting} values below.",
+                icon=WARNING_ICON,
+            )
+        if [(type(v), v) for v in saved] != [(type(v), v) for v in original]:
+            # The picker may still hold the values before the conversion
+            st.session_state.pop(values_key, None)
+            st.session_state[save_flag] = True
         # Keep saved values the current data lacks: a refresh with no
         # "complete" rows must not drop "complete" from the condition
         value_options = value_options + [
@@ -894,13 +988,14 @@ def _settings_sections(
             "condition, every ID counts as completed."
         )
         cc1, cc2 = st.columns(2)
+        code_columns = condition_columns(data)
         with cc1:
             consent, consent_vals = _render_condition_part(
                 data,
                 settings_file,
                 "consent",
                 "Consent column",
-                categorical_columns,
+                code_columns,
                 default_settings.consent,
                 default_settings.consent_vals,
                 "Values that mean the respondent consented",
@@ -911,7 +1006,7 @@ def _settings_sections(
                 settings_file,
                 "outcome",
                 "Outcome column",
-                categorical_columns,
+                code_columns,
                 default_settings.outcome,
                 default_settings.outcome_vals,
                 "Values that mean the interview was completed",
@@ -1017,7 +1112,7 @@ def display_progress_header(result: ProgressResult, settings: ProgressSettings) 
 
 STATUS_ICONS = {
     "success": ":material/check_circle:",
-    "warning": ":material/warning:",
+    "warning": WARNING_ICON,
     "info": ":material/info:",
 }
 
@@ -1198,14 +1293,11 @@ def progress_figure(
             )
         )
         if target_per_period:
-            fig.add_trace(
-                go.Scatter(
-                    x=[starts[0], starts[-1]],
-                    y=[target_per_period, target_per_period],
-                    mode="lines",
-                    name=f"Target: {target_per_period:,}",
-                    line={"color": TARGET_COLOR, "width": 2, "dash": "dash"},
-                )
+            # Spans the chart, so it shows with a single period too
+            fig.add_hline(
+                y=target_per_period,
+                line={"color": TARGET_COLOR, "width": 2, "dash": "dash"},
+                annotation_text=f"Target: {target_per_period:,}",
             )
         y_title = "Completed"
 
@@ -1703,13 +1795,14 @@ def progress_report(
         )
 
     saved = load_default_settings(setting_file, ProgressSettings(**config))
-    for column in stale_condition_columns(saved, survey_columns.categorical_columns):
+    for column in stale_condition_columns(saved, condition_columns(data)):
         st.warning(
             f"The saved completion condition uses **{column}**, which is no "
-            "longer in the data. This page counts without it, so Summary's "
-            "Progress row won't match. Pick another column in the "
+            "longer in the data or now holds values a condition can't use, "
+            "such as dates or fractions. This page counts without it, so "
+            "Summary's Progress row won't match. Pick another column in the "
             ":material/settings: settings section above.",
-            icon=":material/warning:",
+            icon=WARNING_ICON,
         )
 
     header = st.container()
@@ -1723,7 +1816,24 @@ def progress_report(
     with overview:
         chart_view, period = render_chart_controls(setting_file)
 
-    result = compute_progress(data, settings, date.today(), period)
+    try:
+        result = compute_progress(data, settings, date.today(), period)
+    except (pl.exceptions.PolarsError, TypeError) as exc:
+        # The settings no longer fit the data, for example a condition's
+        # values against a column whose type changed
+        with header:
+            st.warning(
+                "The progress settings no longer fit the data, so progress "
+                "can't be counted. Check the columns and the completion "
+                f"condition in the :material/settings: settings section above. "
+                f"Details: {exc}",
+                icon=WARNING_ICON,
+            )
+        with follow_up:
+            display_attempted_interviews(
+                data, settings.survey_id, settings.survey_date, setting_file
+            )
+        return
 
     with header:
         display_progress_header(result, settings)
@@ -1756,7 +1866,7 @@ def progress_headline(
     try:
         settings = load_default_settings(setting_file, ProgressSettings(**config))
         counts = compute_counts(data, settings)
-    except (pl.exceptions.PolarsError, ValidationError) as exc:
+    except (pl.exceptions.PolarsError, ValidationError, TypeError) as exc:
         raise settings_no_longer_fit("Progress", exc) from exc
     if counts.target is None:
         return CheckHeadline(

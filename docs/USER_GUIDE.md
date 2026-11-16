@@ -1259,12 +1259,17 @@ Progress setting. Each is saved for the page as you change it:
   mean consent, and an outcome column and the values that mean a completed
   interview (for example `consent` = "yes" and `completion_status` =
   "complete"). A submission meets the condition when it has one of the
-  values in each column set. Only text and category columns are offered,
-  not date columns. When you change a column, values the new column doesn't
-  have are dropped, so Summary's Progress row counts the same condition as
-  the page. Values you chose stay chosen when refreshed data no longer has
-  them. If a prep step removes or renames a column the condition uses, the
-  page warns you and counts without it until you pick another column
+  values in each column set. Text, category, whole-number and true/false
+  columns are offered, including decimal columns whose values are all whole
+  numbers (as Stata's `gen` stores 0/1 codes). Date columns and columns with
+  fractions are not. If refreshed data changes a column's type, saved values
+  are converted to it (1 becomes "1" for a text column); values that can't
+  be converted are dropped and the page warns you. When you change a column,
+  values the new column doesn't have are dropped, so Summary's Progress row
+  counts the same condition as the page. Values you chose stay chosen when
+  refreshed data no longer has them. If a prep step removes or renames a
+  column the condition uses, or it starts holding fractions, the page warns
+  you and counts without it until you pick another column
 
 ---
 

@@ -398,12 +398,15 @@ def test_progress_report_settings_renders(patched_progress):
     patched_progress.date_input.assert_called()
 
 
-def test_condition_pickers_offer_only_categorical_columns(patched_progress):
-    """A date column's values can't be saved as JSON, so none is offered."""
+def test_condition_pickers_offer_only_code_columns(patched_progress):
+    """Date columns and decimal measures are never offered as conditions."""
     data = pl.DataFrame(
         {
             "hhid": ["h1"],
             "consent": ["yes"],
+            "agreed": [True],
+            "stata_code": [1.0],
+            "weight": [1.5],
             "when": [datetime.date(2026, 10, 12)],
         }
     )
@@ -427,8 +430,147 @@ def test_condition_pickers_offer_only_categorical_columns(patched_progress):
         c.kwargs["key"]: c.kwargs["options"]
         for c in patched_progress.selectbox.call_args_list
     }
-    assert pickers["consent_progress"] == categorical
-    assert pickers["outcome_progress"] == categorical
+    codes = ["hhid", "consent", "agreed", "stata_code"]
+    assert pickers["consent_progress"] == codes
+    assert pickers["outcome_progress"] == codes
+
+
+class TestConditionColumns:
+    def test_whole_number_decimals_and_booleans_are_codes(self):
+        data = pl.DataFrame(
+            {
+                "int": [1, 0],
+                "text": ["yes", "no"],
+                "flag": [True, None],
+                "whole": pl.Series([1.0, None], dtype=pl.Float32),
+                "fraction": [1.0, 0.5],
+                "nan": [1.0, float("nan")],
+                "when": [datetime.date(2026, 10, 12)] * 2,
+            }
+        )
+
+        assert progress_module.condition_columns(data) == [
+            "int",
+            "text",
+            "flag",
+            "whole",
+        ]
+
+    def test_categorical_columns_are_codes(self):
+        data = pl.DataFrame({"c": pl.Series(["yes"], dtype=pl.Categorical)})
+
+        assert progress_module.condition_columns(data) == ["c"]
+
+
+class TestFitConditionValues:
+    @pytest.mark.parametrize(
+        ("dtype", "values", "kept", "misfits"),
+        [
+            (pl.String, [1, None], ["1", None], []),
+            (pl.Int64, ["1", "yes"], [1], ["yes"]),
+            (pl.Int64, [1.0, 1.5], [1], [1.5]),
+            (pl.Float64, [1], [1.0], []),
+            (pl.Boolean, [1, 2], [True], [2]),
+            (pl.Categorical, ["yes", 1], ["yes", "1"], []),
+        ],
+    )
+    def test_values_convert_to_the_column_type(self, dtype, values, kept, misfits):
+        data = pl.DataFrame({"c": pl.Series([], dtype=dtype)})
+
+        got_kept, got_misfits = progress_module.fit_condition_values(data, "c", values)
+
+        assert got_kept == kept
+        assert [type(v) for v in got_kept] == [type(v) for v in kept]
+        assert got_misfits == misfits
+
+
+class TestConditionAfterTypeChange:
+    """A refresh turned the saved consent column from integers into text."""
+
+    DATA = pl.DataFrame(
+        {
+            "hhid": ["h1", "h2"],
+            "when": ["2026-10-12", "2026-10-12"],
+            "consent": ["1", "0"],
+        }
+    )
+
+    def _render(self, mock_st, saved_vals):
+        mock_st.selectbox.return_value = "consent"
+        mock_st.multiselect.side_effect = lambda **kw: kw["default"] or []
+        return progress_module._render_condition_part(
+            self.DATA,
+            "settings.json",
+            "consent",
+            "Consent column",
+            ["hhid", "consent"],
+            "consent",
+            saved_vals,
+            "help",
+        )
+
+    def test_saved_values_convert_and_save(self, patched_progress):
+        patched_progress.session_state["consent_vals_progress"] = [1]
+
+        _, values = self._render(patched_progress, [1])
+
+        assert values == ["1"]
+        assert patched_progress.multiselect.call_args.kwargs["options"] == ["1", "0"]
+        assert "consent_vals_progress" not in patched_progress.session_state
+        assert patched_progress.session_state["progress_consent_vals"] is True
+        patched_progress.warning.assert_not_called()
+        # The converted condition counts instead of failing
+        settings = _settings(consent="consent", consent_vals=values)
+        assert compute_counts(self.DATA, settings).completed == 1
+
+    def test_values_that_dont_fit_are_dropped_with_a_warning(self, patched_progress):
+        data = self.DATA.with_columns(pl.col("consent").cast(pl.Int64))
+        patched_progress.selectbox.return_value = "consent"
+        patched_progress.multiselect.side_effect = lambda **kw: kw["default"] or []
+
+        _, values = progress_module._render_condition_part(
+            data,
+            "settings.json",
+            "consent",
+            "Consent column",
+            ["hhid", "consent"],
+            "consent",
+            [1, "yes"],
+            "help",
+        )
+
+        assert values == [1]
+        patched_progress.warning.assert_called_once()
+        assert "**yes**" in patched_progress.warning.call_args.args[0]
+
+
+def test_progress_report_warns_when_the_settings_no_longer_fit(
+    patched_progress, tmp_path
+):
+    """A count that fails shows a warning, not an error over the page."""
+    survey_cols = ColumnByType(categorical_columns=["hhid"], datetime_columns=["when"])
+    with (
+        patch(
+            "datasure.checks.progress.progress_report_settings",
+            return_value=_settings(survey_target=10),
+        ),
+        patch(
+            "datasure.checks.progress.compute_progress",
+            side_effect=TypeError("mixed values"),
+        ),
+        patch("datasure.checks.progress.display_progress_header") as header,
+        patch("datasure.checks.progress.display_overview") as overview,
+        patch("datasure.checks.progress.display_attempted_interviews") as follow_up,
+    ):
+        progress_report(
+            SURVEY, str(tmp_path / "settings.json"), {"survey_id": "hhid"}, survey_cols
+        )
+
+    patched_progress.warning.assert_called_once()
+    assert "mixed values" in patched_progress.warning.call_args.args[0]
+    header.assert_not_called()
+    overview.assert_not_called()
+    follow_up.assert_called_once()
 
 
 class TestConditionValuesSaved:
@@ -1118,6 +1260,13 @@ class TestPace:
         assert pace.per_day == 2.0
         assert pace.projected_finish == datetime.date(2026, 10, 16)
 
+    def test_no_projection_past_the_last_representable_date(self):
+        # A billion to go at 2 a day passes year 9999
+        pace = compute_progress(self.DATA, _settings(survey_target=10**9), AS_OF).pace
+
+        assert pace.per_day == 2.0
+        assert pace.projected_finish is None
+
     def test_no_projection_with_fewer_than_3_days_of_data(self):
         data = _daily({"2026-10-13": 5, "2026-10-14": 5})
 
@@ -1401,6 +1550,18 @@ class TestTargetPath:
 
 
 class TestTargetLine:
+    @pytest.mark.parametrize(
+        "days", [{"2026-10-14": 2}, {"2026-10-12": 1, "2026-10-14": 1}]
+    )
+    def test_per_period_target_spans_the_chart(self, days):
+        # With one period, a line from the first bar to the last draws nothing
+        result = compute_progress(_daily(days), _settings(), AS_OF)
+
+        fig = progress_module.progress_figure(result, "Per period", 3)
+
+        assert [shape.y0 for shape in fig.layout.shapes] == [3]
+        assert not any((trace.name or "").startswith("Target") for trace in fig.data)
+
     def test_one_period_without_an_end_date_spans_the_chart(self):
         # Both target points share the first day: a line between them would
         # draw nothing.
