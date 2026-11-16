@@ -332,6 +332,13 @@ def _render_digit_detail(e: DigitPreferenceEnumerator, min_responses: int) -> No
             "the rest of the team's. Consider reviewing their interviews.",
             icon=":material/flag:",
         )
+    elif e.badge == Badge.MODERATE:
+        st.info(
+            f"{e.enumerator}'s responses end in 0 or 5 somewhat more often than "
+            "the rest of the team's: one level higher sensitivity would flag "
+            "them. Keep an eye on their next interviews.",
+            icon=":material/visibility:",
+        )
     else:
         st.success(
             f"{e.enumerator}'s digit distribution is consistent with the rest "

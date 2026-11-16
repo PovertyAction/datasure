@@ -121,11 +121,15 @@ def sample_band(n: int, min_sample: int, warn_sample: int) -> SampleBand:
     return SampleBand.OK
 
 
-def badge_band(ratio: float | None, sensitivity: Sensitivity) -> Badge:
+def badge_band(
+    ratio: float | None, sensitivity: Sensitivity, n_responses: int
+) -> Badge:
     """Return the badge for ``ratio`` at ``sensitivity``.
 
-    High when the ratio reaches the level's, Moderate when it reaches the next
-    more sensitive level's (the most sensitive level has no Moderate band).
+    High when the ratio reaches the level's. Moderate when the next more
+    sensitive level would flag the enumerator: the ratio reaches that level's
+    and ``n_responses`` meets its minimum. The most sensitive level has no
+    Moderate band.
     """
     if ratio is None:
         return Badge.NA
@@ -133,8 +137,10 @@ def badge_band(ratio: float | None, sensitivity: Sensitivity) -> Badge:
     if ratio >= DIGIT_PREFERENCE_LEVELS[sensitivity].ratio:
         return Badge.HIGH
     position = levels.index(sensitivity)
-    if position > 0 and ratio >= DIGIT_PREFERENCE_LEVELS[levels[position - 1]].ratio:
-        return Badge.MODERATE
+    if position > 0:
+        stricter = DIGIT_PREFERENCE_LEVELS[levels[position - 1]]
+        if ratio >= stricter.ratio and n_responses >= stricter.min_responses:
+            return Badge.MODERATE
     return Badge.LOW
 
 
@@ -181,6 +187,36 @@ def _numeric_skip(values: pl.Series) -> SkipReason | None:
     return None
 
 
+def _digit_skip(values: pl.Series) -> SkipReason | None:
+    """Return why a numeric variable cannot be checked for digit preference."""
+    values = values.cast(pl.Float64).drop_nans()
+    reason = _numeric_skip(values)
+    if reason is None and values.max() - values.min() < MIN_DIGIT_RANGE:
+        return SkipReason.RANGE_UNDER_10
+    return reason
+
+
+def _as_numbers(
+    data: pl.DataFrame, variables: list[str]
+) -> tuple[pl.DataFrame, dict[str, SkipReason]]:
+    """Convert text columns the user typed as numeric to numbers.
+
+    Values that are not numbers become missing. A column with answers but no
+    number among them is returned as skipped.
+    """
+    text = [v for v in variables if not data.schema[v].is_numeric()]
+    converted = data.with_columns(
+        pl.col(v).cast(pl.String).str.strip_chars().cast(pl.Float64, strict=False)
+        for v in text
+    )
+    skipped = {
+        v: SkipReason.NOT_NUMERIC
+        for v in text
+        if data[v].drop_nulls().len() and converted[v].drop_nulls().is_empty()
+    }
+    return converted, skipped
+
+
 def _digit_counts(data: pl.DataFrame, variables: list[str]) -> dict[str, list[int]]:
     """Return each enumerator's count of responses ending in each digit 0-9.
 
@@ -214,23 +250,16 @@ def _compute_digit_preference(
         settings.min_sample, DIGIT_PREFERENCE_LEVELS[sensitivity].min_responses
     )
     base = {"sensitivity": sensitivity, "min_responses": min_responses}
-    numeric = [v for v in variables if data.schema[v].is_numeric()]
-    skipped = {v: SkipReason.NOT_NUMERIC for v in variables if v not in numeric}
+    data, skipped = _as_numbers(data, variables)
+    numeric = [v for v in variables if v not in skipped]
     if not variables:
         return DigitPreferenceResult(
             **base, condition=CheckCondition.NO_APPLICABLE_VARIABLES
         )
 
-    eligible = []
-    for var in numeric:
-        values = data[var].cast(pl.Float64).drop_nans()
-        reason = _numeric_skip(values)
-        if reason is None and values.max() - values.min() < MIN_DIGIT_RANGE:
-            reason = SkipReason.RANGE_UNDER_10
-        if reason is None:
-            eligible.append(var)
-        else:
-            skipped[var] = reason
+    reasons = {var: _digit_skip(data[var]) for var in numeric}
+    eligible = [var for var, reason in reasons.items() if reason is None]
+    skipped |= {var: reason for var, reason in reasons.items() if reason is not None}
     if not eligible:
         return DigitPreferenceResult(
             **base,
@@ -260,7 +289,7 @@ def _compute_digit_preference(
                 n_responses=n,
                 sample_band=band,
                 ratio=ratio,
-                badge=badge_band(ratio, sensitivity),
+                badge=badge_band(ratio, sensitivity, n),
                 enum_pct=enum_pct if n else None,
                 team_pct=team_pct if sum(team_counts) else None,
                 enum_digit_pct=_pct(enum_counts),

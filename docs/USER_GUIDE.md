@@ -1602,6 +1602,53 @@ Temporal performance trends:
 - Line chart per enumerator
 - Track performance changes
 
+##### Response Patterns
+
+Compare each enumerator's answers with the rest of the team (every other
+enumerator) to spot patterns such as rounding.
+
+**Response pattern settings** (expander):
+
+- **Variables**: tick the survey questions to check. None are ticked at
+  first. The ID, enumerator and team columns aren't listed.
+- **Type**: each variable's inferred type (integer, continuous or
+  categorical). Change it if it's wrong. A text column of numbers can be set
+  to integer or continuous; answers in it that aren't numbers are left out.
+- **Minimum responses**: enumerators with fewer non-missing answers than
+  **Hide results below** (15 by default) get no result (N/A). Results below
+  **Warn below** (30 by default) carry a low-sample warning.
+- **Flag sensitivity**: how readily Digit Preference flags an enumerator.
+
+Your choices are saved with the project. Missing codes are left out before
+anything is checked.
+
+**Digit Preference** checks whether an enumerator's numeric answers end in 0
+or 5 more often than the rest of the team's. The last digit of the whole-number
+part of each answer is counted across the selected integer and continuous
+variables. Variables whose answers span less than 10, or don't vary, are
+skipped with a note.
+
+The **ratio** is the enumerator's share of answers ending in 0 or 5 divided by
+the rest of the team's: 1.5× means half as often again.
+
+| Sensitivity | Flagged (High) at | Responses needed |
+| --- | --- | --- |
+| High | 1.25× or more | 100 |
+| Medium (default) | 1.5× or more | the minimum (15) |
+| Low | 2× or more | the minimum (15) |
+
+- **High**: flagged at the chosen sensitivity. Consider reviewing their
+  interviews.
+- **Moderate**: one level higher sensitivity would flag them, including its
+  response minimum. Keep an eye on them.
+- **Low**: consistent with the rest of the team.
+- **N/A**: too few responses, or none of the rest of the team's answers end
+  in 0 or 5.
+
+The table lists enumerators highest ratio first. Select a row to see that
+enumerator's shares, verdict and a chart of how often their answers end in
+each digit 0–9 against the rest of the team.
+
 ---
 
 ### Descriptive Stats Report

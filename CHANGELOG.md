@@ -9,6 +9,34 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Response Patterns: Digit Preference** (#418, part of #158): a new
+  section at the bottom of the Enumerator Report, in
+  `checks/enumerator/response_patterns/` (`models.py`, `compute.py`,
+  `settings_ui.py`, `report_ui.py`). `report_ui.enumerator_report` calls
+  `render_response_patterns`, a fragment
+  - `compute.compute_response_patterns(data, settings, enumerator_col,
+    missing_codes)` (Streamlit-free) returns a `ResponsePatternResults`
+    model; the UI only renders it. Missing codes are masked before types are
+    inferred or answers scored
+  - Digit Preference pools the terminal digit of the integer part
+    (`floor(abs(x)) % 10`) across the selected integer and continuous
+    variables, skipping those with a range under 10, no variation or no
+    answers. A text column the user types as integer or continuous is
+    converted to numbers, and answers that aren't numbers count as missing
+  - Each enumerator's share of answers ending in 0 or 5 is divided by the
+    rest of the team's (everyone but that enumerator), rounded to two
+    decimals. `DIGIT_PREFERENCE_LEVELS` sets three sensitivity levels: High
+    flags at 1.25× with at least 100 responses, Medium (default) at 1.5×,
+    Low at 2×. Moderate means the next more sensitive level would flag the
+    enumerator, its response minimum included. N/A means fewer responses
+    than the minimum, or a team with no 0 or 5 endings
+  - `ResponsePatternSettings` (selected variables, type overrides, minimum
+    and warning sample sizes, sensitivity) is saved under
+    `enumerators.response_patterns` in the page settings file; settings that
+    no longer validate fall back to the defaults
+  - `utils/column_references` lists the selected variables
+    (`_NESTED_SURVEY_SETTING_KEYS`), so renaming one in Prep warns that the
+    Enumerator stats settings use it
 - **Stata names in the replication package** (#449): every column name the
   package uses that Stata can't use gets a Stata name when the package is
   built
