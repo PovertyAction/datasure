@@ -13,11 +13,14 @@ import pytest
 from keyring.errors import KeyringError, PasswordDeleteError
 
 from datasure.utils.secure_credentials import (
+    NO_KEYRING_HINT,
+    PLAINTEXT_KEYRING_HINT,
     SecureCredentialError,
     _get_metadata_path,
     _get_service_name,
     delete_stored_credentials,
     has_scto_credentials,
+    keyring_backend_problem,
     list_stored_credentials,
     migrate_plaintext_credentials,
     retrieve_mapbox_token,
@@ -482,6 +485,7 @@ class TestCrossPlatformCompatibility:
         assert result["success"] is True
         assert result["backend"] == "PlaintextKeyring"
         # Should still work but with warning that it's not secure
+        assert result["warning"] == PLAINTEXT_KEYRING_HINT
 
     @patch("datasure.utils.secure_credentials.Path.chmod")
     def test_permission_setting_cross_platform(self, mock_chmod):
@@ -1096,3 +1100,57 @@ class TestMapboxToken:
     def test_surrounding_whitespace_is_stripped(self, mock_keyring):
         store_mapbox_token("  pk.token\n")
         assert mock_keyring.set_password.call_args.args[2] == "pk.token"
+
+
+class TestKeyringBackendProblem:
+    """keyring_backend_problem flags backends that can't hold credentials safely."""
+
+    def _backend(self, mock_keyring, name, module="keyring.backends.Windows", **attrs):
+        cls = type(name, (), {"__module__": module, **attrs})
+        mock_keyring.get_keyring.return_value = cls()
+
+    @patch("datasure.utils.secure_credentials.keyring")
+    def test_os_keyring_is_fine(self, mock_keyring):
+        self._backend(mock_keyring, "WinVaultKeyring", priority=5)
+        assert keyring_backend_problem() is None
+
+    @patch("datasure.utils.secure_credentials.keyring")
+    def test_fail_backend_means_no_keyring(self, mock_keyring):
+        self._backend(mock_keyring, "Keyring", module="keyring.backends.fail")
+        assert keyring_backend_problem() == NO_KEYRING_HINT
+
+    @patch("datasure.utils.secure_credentials.keyring")
+    def test_zero_priority_means_no_keyring(self, mock_keyring):
+        self._backend(mock_keyring, "NullKeyring", module="x.y", priority=0)
+        assert keyring_backend_problem() == NO_KEYRING_HINT
+
+    @patch("datasure.utils.secure_credentials.keyring")
+    def test_plaintext_backend_is_flagged(self, mock_keyring):
+        self._backend(mock_keyring, "PlaintextKeyring", module="keyrings.alt.file")
+        assert keyring_backend_problem() == PLAINTEXT_KEYRING_HINT
+
+    @patch("datasure.utils.secure_credentials.keyring")
+    def test_store_error_explains_missing_keyring(self, mock_keyring):
+        self._backend(mock_keyring, "Keyring", module="keyring.backends.fail")
+        mock_keyring.set_password.side_effect = KeyringError("No recommended backend")
+
+        result = store_scto_credentials(
+            project_id="test_project",
+            server="testserver",
+            username="test@example.com",
+            password="secret123",
+        )
+
+        assert result["error_type"] == "keyring_error"
+        assert "No recommended backend" in result["error"]
+        assert NO_KEYRING_HINT in result["error"]
+
+    @patch("datasure.utils.secure_credentials.keyring")
+    def test_availability_error_explains_missing_keyring(self, mock_keyring):
+        self._backend(mock_keyring, "Keyring", module="keyring.backends.fail")
+        mock_keyring.set_password.side_effect = KeyringError("No recommended backend")
+
+        result = test_keyring_availability()
+
+        assert result["success"] is False
+        assert NO_KEYRING_HINT in result["error"]

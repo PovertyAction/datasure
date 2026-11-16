@@ -12,12 +12,33 @@ from __future__ import annotations
 
 import ast
 import json
-from collections.abc import Callable
+import logging
+from collections.abc import Callable, Mapping
 from typing import Any
 
 import polars as pl
 
-from datasure.replication.script_generators import _C, _LOG_CLOSE, _header
+from datasure.processing.column_names import stata_name_map
+from datasure.processing.rename_plan import describe_pattern, spec_from_args
+from datasure.processing.row_index import parse_row_indices
+from datasure.replication.script_generators import (
+    _C,
+    _LOG_CLOSE,
+    _header,
+    _mapped_name_labels,
+    _stata_names,
+)
+
+logger = logging.getLogger(__name__)
+
+
+class _UntranslatableStepError(Exception):
+    """A prep step DataSure ran but that has no Stata translation.
+
+    Raised by emitters for expected gaps (an unsupported method or condition),
+    so `_emit_prep_step` writes a NOTE and warns without logging a traceback.
+    """
+
 
 # ---------------------------------------------------------------------------
 # String constants mirroring enum values (avoids importing the full app stack)
@@ -27,8 +48,10 @@ _ACT_REMOVE_COL = "remove column(s)"
 _ACT_REMOVE_ROW = "remove row(s)"
 _ACT_TRANSFORM = "transform column(s)"
 _ACT_ADD_COL = "add new column"
+_ACT_RENAME = "rename column(s)"
 
 _METH_BY_INDEX = "by row index"
+_METH_COPY = "copy of column"
 
 _COND_MISSING = "value is missing"
 _COND_NOT_MISSING = "value is not missing"
@@ -106,13 +129,27 @@ def _stata_remove_columns(args: dict, _desc: str) -> list[str]:
     return [f"drop {_col_list(cols)}"]
 
 
+def _stata_pos(index: int) -> str:
+    """Stata expression for a DataSure row position, for use with ``_n``."""
+    if index >= 0:
+        return str(index + 1)
+    return "_N" if index == -1 else f"_N - {-index - 1}"
+
+
 def _drop_by_index(values: list) -> list[str]:
-    idx_vals = [str(int(v)) for v in values if str(v).strip() not in (",", "")]
-    if not idx_vals:
-        return [f"{_C} NOTE: no row indices provided for drop in"]
-    if len(idx_vals) == 1:
-        return [f"drop in {idx_vals[0]}"]
-    conditions = " | ".join(f"_n == {v}" for v in idx_vals)
+    spans = parse_row_indices(values)
+    if not spans:
+        return [f"{_C} NOTE: no row indices provided for drop by row index"]
+    # Always `drop if` over `_n`, never `drop in`: Stata's `in` stops with
+    # r(198) when a position falls outside 1.._N or a range is reversed, while
+    # resolve_row_positions ignores such positions. One condition also keeps
+    # every value referring to positions before the step.
+    conditions = " | ".join(
+        f"_n == {_stata_pos(span.start)}"
+        if span.is_single
+        else f"inrange(_n, {_stata_pos(span.start)}, {_stata_pos(span.end)})"
+        for span in spans
+    )
     return [f"drop if {conditions}"]
 
 
@@ -144,7 +181,7 @@ def _drop_by_condition(col: str, condition: str, values: list) -> list[str]:
         return [f"drop if !missing({col})"]
     expr = _remove_expr(col, condition, values)
     if expr is None:
-        return [f"{_C} NOTE: condition '{condition}' could not be translated"]
+        raise _UntranslatableStepError(f"condition '{condition}' is not supported")
     # A missing value makes the condition unknown, so the row is kept
     return [f"drop if {expr} & !missing({col})"]
 
@@ -159,7 +196,7 @@ def _stata_remove_rows(args: dict, _desc: str) -> list[str]:
         return _drop_by_index(values)
 
     if not cols or not condition:
-        return [f"{_C} NOTE: remove row step could not be translated"]
+        raise _UntranslatableStepError("no columns or condition recorded")
 
     # One drop per column: a row is removed if any selected column matches
     lines: list[str] = []
@@ -319,7 +356,7 @@ def _stata_transform_column(args: dict, _desc: str) -> list[str]:
     if method == "get dummies":
         return [f"tabulate {col}, gen({col}_)  // creates dummy columns"]
 
-    return [f"{_C} NOTE: transform '{method}' on '{col}' could not be translated"]
+    raise _UntranslatableStepError(f"transform '{method}' on '{col}' is not supported")
 
 
 # (min_cols, expr) — expr receives the source-column list.
@@ -391,29 +428,65 @@ def _stata_add_column(args: dict, _desc: str) -> list[str]:
         raw = values[0] if values else (args.get("value") or "")
         return [f"gen {new_col} = {_fmt_val(raw)}"]
 
+    if method == _METH_COPY and src_cols:
+        source = src_cols[0]
+        # clonevar keeps the storage type, labels and missing values, and
+        # order puts the copy right after its source, as DataSure does.
+        return [f"clonevar {new_col} = {source}", f"order {new_col}, after({source})"]
+
     if method == "concat" and len(src_cols) >= 2:
         return _stata_concat(new_col, src_cols, args.get("value") or "")
 
     if method == "uuid":
-        return [f"{_C} NOTE: uuid column '{new_col}' — no direct Stata equivalent"]
+        raise _UntranslatableStepError(
+            f"uuid column '{new_col}' has no direct Stata equivalent"
+        )
 
     entry = _ADD_COL_EXPRS.get(method)
     if entry and len(src_cols) >= entry[0]:
         _, expr_fn = entry
         return [f"gen {new_col} = {expr_fn(src_cols)}"]
 
-    return [f"{_C} NOTE: add column '{new_col}' ({method}) could not be translated"]
+    raise _UntranslatableStepError(
+        f"add column '{new_col}' ({method}) is not supported"
+    )
 
 
 # ---------------------------------------------------------------------------
 # Dispatch table
 # ---------------------------------------------------------------------------
 
+
+def _stata_rename_columns(args: dict, _desc: str) -> list[str]:
+    """One group ``rename`` built from the pairs the step last renamed.
+
+    Stata applies a group rename all at once, as DataSure does, so swaps and
+    chains come out the same. A pattern step gets a comment with its pattern.
+    """
+    old_names = _cols(args)
+    new_cols = args.get("column_names") or []
+    new_names = [new_cols] if isinstance(new_cols, str) else list(new_cols)
+    if not old_names or len(old_names) != len(new_names):
+        raise _UntranslatableStepError("the step has no recorded renames")
+
+    lines = []
+    try:
+        pattern = describe_pattern(spec_from_args(args.get("method"), _val(args)))
+    except ValueError:
+        logger.warning("Rename step has an unreadable pattern: %r", _val(args))
+        pattern = ""
+    if pattern:
+        lines.append(f"{_C} Pattern: {pattern}")
+    lines.append(f"rename ({_col_list(old_names)}) ({_col_list(new_names)})")
+    return lines
+
+
 _EMITTERS = {
     _ACT_REMOVE_COL: _stata_remove_columns,
     _ACT_REMOVE_ROW: _stata_remove_rows,
     _ACT_TRANSFORM: _stata_transform_column,
     _ACT_ADD_COL: _stata_add_column,
+    _ACT_RENAME: _stata_rename_columns,
 }
 
 # ---------------------------------------------------------------------------
@@ -436,20 +509,109 @@ def _parse_prep_args(raw: object) -> dict:
     return {}
 
 
-def _emit_prep_step(i: int, row: dict) -> list[str]:
-    """Return the Stata lines for one prep-log row."""
+def _names(value: object) -> list[str]:
+    """A ``source_columns`` or ``column_names`` value as a list of names."""
+    if not value:
+        return []
+    return [value] if isinstance(value, str) else [str(v) for v in value]
+
+
+def prep_log_column_names(prep_log: pl.DataFrame) -> list[str]:
+    """Every column name the prep steps use or create, in step order."""
+    names: list[str] = []
+    if prep_log.is_empty():
+        return names
+    for row in prep_log.iter_rows(named=True):
+        args = _parse_prep_args(row.get("prep_args") or "{}")
+        names += _names(args.get("source_columns"))
+        names += _names(args.get("column_names"))
+    return list(dict.fromkeys(names))
+
+
+def _map_step_args(args: dict, name_map: Mapping[str, str]) -> dict:
+    """``args`` with its column names replaced by their Stata names."""
+    mapped = dict(args)
+    for key in ("source_columns", "column_names"):
+        value = args.get(key)
+        if isinstance(value, str):
+            mapped[key] = name_map.get(value, value)
+        elif value:
+            mapped[key] = _stata_names(_names(value), name_map)
+    return mapped
+
+
+def _unknown_action(action: str) -> Callable[[dict, str], list[str]]:
+    """Emitter for an action with no translation: always raises."""
+
+    def emit(_args: dict, _desc: str) -> list[str]:
+        raise _UntranslatableStepError(f"unknown action '{action}'")
+
+    return emit
+
+
+def _emit_prep_step(
+    i: int,
+    row: dict,
+    on_warning: Callable[[str], None] | None = None,
+    name_map: Mapping[str, str] | None = None,
+) -> list[str]:
+    """Return the Stata lines for one prep-log row.
+
+    Column names are written as their Stata names from ``name_map``, and a
+    column the step creates under a mapped name is labelled with its
+    DataSure name. A step that cannot be translated, or raises while being
+    translated, gets a ``NOTE`` line, and ``on_warning`` is told, so one bad
+    step does not stop the whole script.
+    """
+    name_map = name_map or {}
     action = str(row.get("action") or "")
     description = str(row.get("description") or "")
     args = _parse_prep_args(row.get("prep_args") or "{}")
 
     comment = [f"{_C} Step {i}: {description or action}"]
-    emitter = _EMITTERS.get(action)
-    body = (
-        emitter(args, description)
-        if emitter
-        else [f"{_C} NOTE: unknown action '{action}'"]
-    )
+    # A step that failed in DataSure left the data unchanged, but its log
+    # still holds the arguments of an earlier run; running it here would
+    # differ, and can stop the do-file (a copy whose name a re-import took).
+    if row.get("status") == "Failed":
+        return [
+            *comment,
+            f"{_C} Skipped: this step failed the last time DataSure applied it, "
+            "so it changed nothing.",
+            "",
+        ]
+    try:
+        emit = _EMITTERS.get(action, _unknown_action(action))
+        body = emit(_map_step_args(args, name_map), description)
+        if action in (_ACT_ADD_COL, _ACT_RENAME):
+            body += _mapped_name_labels(_names(args.get("column_names")), name_map)
+    # Per-step boundary: one untranslatable step must not stop the package.
+    # The reason is shown as a NOTE in prepare_data.do and, through
+    # on_warning, as a warning on the Replication page.
+    except _UntranslatableStepError as e:
+        body = _untranslated_step(i, action, description, e, on_warning)
+    except Exception as e:
+        logger.exception("Could not translate prep step %d (%s)", i, action)
+        body = _untranslated_step(i, action, description, e, on_warning)
     return comment + body + [""]
+
+
+def _untranslated_step(
+    i: int,
+    action: str,
+    description: str,
+    error: Exception,
+    on_warning: Callable[[str], None] | None,
+) -> list[str]:
+    """NOTE line for a step with no Stata translation; also tells on_warning."""
+    if on_warning is not None:
+        on_warning(
+            f"Step {i} ({description or action}) could not be "
+            f"translated to Stata: {error}. `prepare_data.do` has a NOTE "
+            "in its place."
+        )
+    return [
+        f"{_C} NOTE: step {i} could not be translated ({error}). Reproduce it by hand."
+    ]
 
 
 def generate_prepare_data_script(
@@ -457,6 +619,8 @@ def generate_prepare_data_script(
     project_name: str,
     survey_name: str,
     datasure_version: str,
+    on_warning: Callable[[str], None] | None = None,
+    name_map: Mapping[str, str] | None = None,
 ) -> str:
     """Generate a Stata prepare_data do-file from the prep log.
 
@@ -470,6 +634,12 @@ def generate_prepare_data_script(
         Human-readable survey name.
     datasure_version : str
         Version of DataSure.
+    on_warning : Callable[[str], None] | None
+        Called with a message for each step that could not be translated.
+    name_map : Mapping[str, str] | None
+        Stata names for the column names Stata can't use, from
+        ``column_names.stata_name_map``. Without one, the map is built from
+        the names in the prep log alone.
 
     Returns
     -------
@@ -497,8 +667,10 @@ def generate_prepare_data_script(
         "",
     ]
 
+    if name_map is None:
+        name_map = stata_name_map(prep_log_column_names(prep_log))
     for i, row in enumerate(prep_log.iter_rows(named=True), start=1):
-        lines.extend(_emit_prep_step(i, row))
+        lines.extend(_emit_prep_step(i, row, on_warning, name_map))
 
     lines.append(_LOG_CLOSE)
     return "\n".join(lines) + "\n"

@@ -392,6 +392,29 @@ class TestGenerateSCTOImportScript:
         assert "sort KEY" in script
         assert "by KEY: gen num_for_key" in script
 
+    def test_csv_row_order_recorded_after_insheet(self, script):
+        insheet = script.index("insheet using")
+        record = script.index("gen long _ds_row = _n")
+        assert insheet < record < script.index("if _N>0 {")
+
+    def test_old_rows_take_new_row_position(self, script):
+        append = script.index('append using "`dtafile\'"')
+        carry = script.index(
+            "bysort KEY (new_data_row): replace _ds_row = _ds_row[1] if missing(_ds_row)"
+        )
+        dedupe = script.index("by KEY: gen num_for_key")
+        assert append < carry < dedupe
+
+    def test_csv_row_order_restored_before_save(self, script):
+        # A rerun appends the saved .dta; prep steps by row index need the
+        # rows back in .csv order, not KEY order
+        dedupe = script.index("drop new_data_row")
+        restore = script.index("sort _ds_row KEY")
+        drop = script.index("drop _ds_row")
+        save = script.index('save "`dtafile\'", replace')
+        assert dedupe < restore < drop < save
+        assert "\tsort KEY\n" not in script
+
     def test_save_command_present(self, script):
         assert 'save "`dtafile\'"' in script
 
