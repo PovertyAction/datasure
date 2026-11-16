@@ -34,6 +34,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     and warning sample sizes, sensitivity) is saved under
     `enumerators.response_patterns` in the page settings file; settings that
     no longer validate fall back to the defaults
+  - `utils/column_references` lists the selected variables
+    (`_NESTED_SURVEY_SETTING_KEYS`), so renaming one in Prep warns that the
+    Enumerator stats settings use it
 - **Stata names in the replication package** (#449): every column name the
   package uses that Stata can't use gets a Stata name when the package is
   built
