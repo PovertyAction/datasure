@@ -12,11 +12,11 @@ from datasure.checks.enumerator.response_patterns.compute import (
     infer_variable_types,
 )
 from datasure.checks.enumerator.response_patterns.models import (
-    MODERATE_MARGIN,
+    DIGIT_PREFERENCE_LEVELS,
     SETTINGS_KEY,
-    THRESHOLD_LEVELS,
     VARIABLE_TYPES,
     ResponsePatternSettings,
+    Sensitivity,
 )
 from datasure.utils.settings_utils import (
     load_check_settings,
@@ -28,7 +28,7 @@ logger = logging.getLogger(__name__)
 
 # Session state flag save_check_settings checks before writing the settings
 SAVE_STATE: str = f"{TAB_NAME}_{SETTINGS_KEY}"
-DP_THRESHOLD_KEY = "rp_dp_threshold"
+DP_SENSITIVITY_KEY = "rp_dp_sensitivity"
 _EDITOR_KEY = "rp_variable_editor"
 _EDITOR_BASE_KEY = "rp_variable_editor_base"
 
@@ -146,27 +146,41 @@ def _render_variable_editor(
     return selected, overrides
 
 
-def digit_preference_description(threshold: int) -> str:
-    """Explain what flagging Digit Preference at ``threshold`` means."""
-    ratio = f"{1 + threshold / 100:.2f}".rstrip("0").rstrip(".")
-    return (
+# The "x" in a ratio such as 1.5x
+TIMES = "\N{MULTIPLICATION SIGN}"
+
+
+def format_ratio(ratio: float) -> str:
+    """Return ``ratio`` as a multiplier, such as 1.5x or 1.25x."""
+    return f"{ratio:.2f}".rstrip("0").rstrip(".") + TIMES
+
+
+def digit_preference_description(sensitivity: Sensitivity) -> str:
+    """Explain what flagging Digit Preference at ``sensitivity`` means."""
+    level = DIGIT_PREFERENCE_LEVELS[sensitivity]
+    text = (
         f"Flags an enumerator when their answers end in 0 or 5 at least "
-        f"{ratio} times as often as the rest of the team's (score "
-        f"{threshold} or more)."
+        f"{format_ratio(level.ratio)} as often as the rest of the team's."
     )
+    if level.min_responses:
+        text += (
+            f" Small differences need more evidence, so each enumerator needs "
+            f"at least {level.min_responses:,} responses."
+        )
+    return text
 
 
-def _render_threshold_level(label: str, key: str, default: int) -> int:
-    """Render a check's flag-threshold levels and return the chosen threshold."""
+def _render_sensitivity(label: str, key: str, default: Sensitivity) -> Sensitivity:
+    """Render a check's sensitivity levels and return the chosen one."""
     return st.segmented_control(
         label,
-        options=list(THRESHOLD_LEVELS),
-        format_func=THRESHOLD_LEVELS.get,
+        options=list(DIGIT_PREFERENCE_LEVELS),
+        format_func=lambda s: DIGIT_PREFERENCE_LEVELS[s].label,
         default=default,
         required=True,
         key=key,
-        help="Higher sensitivity flags enumerators at a lower score. "
-        f"Enumerators within {MODERATE_MARGIN} points below the threshold "
+        help="Higher sensitivity flags smaller differences from the rest of "
+        "the team. Enumerators who would be flagged one level more sensitive "
         "are marked Moderate.",
         on_change=mark_settings_changed,
     )
@@ -223,7 +237,8 @@ def response_pattern_settings(
                 value=saved.min_sample,
                 key="rp_min_sample",
                 help="Enumerators with fewer non-missing responses than this "
-                "get no result (N/A).",
+                "get no result (N/A). High sensitivity raises this to "
+                f"{DIGIT_PREFERENCE_LEVELS[Sensitivity.HIGH].min_responses:,}.",
                 on_change=mark_settings_changed,
             )
         with c2:
@@ -238,13 +253,13 @@ def response_pattern_settings(
                 on_change=mark_settings_changed,
             )
 
-        st.markdown("**Flag thresholds**")
-        dp_threshold = _render_threshold_level(
+        st.markdown("**Flag sensitivity**")
+        dp_sensitivity = _render_sensitivity(
             "Digit Preference sensitivity",
-            DP_THRESHOLD_KEY,
-            saved.digit_preference_threshold,
+            DP_SENSITIVITY_KEY,
+            saved.digit_preference_sensitivity,
         )
-        st.caption(digit_preference_description(dp_threshold))
+        st.caption(digit_preference_description(dp_sensitivity))
 
     settings = saved.model_copy(
         update={
@@ -252,7 +267,7 @@ def response_pattern_settings(
             "type_overrides": overrides,
             "min_sample": int(min_sample),
             "warn_sample": int(warn_sample),
-            "digit_preference_threshold": dp_threshold,
+            "digit_preference_sensitivity": dp_sensitivity,
         }
     )
     save_response_pattern_settings(settings_file, settings)

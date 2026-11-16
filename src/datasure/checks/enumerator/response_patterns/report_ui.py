@@ -16,7 +16,7 @@ from datasure.checks.enumerator.response_patterns.compute import (
     compute_response_patterns,
 )
 from datasure.checks.enumerator.response_patterns.models import (
-    THRESHOLD_LEVELS,
+    DIGIT_PREFERENCE_LEVELS,
     Badge,
     CheckCondition,
     DigitPreferenceEnumerator,
@@ -26,6 +26,7 @@ from datasure.checks.enumerator.response_patterns.models import (
     SampleBand,
 )
 from datasure.checks.enumerator.response_patterns.settings_ui import (
+    format_ratio,
     response_pattern_settings,
 )
 from datasure.utils.ui_utils import metric_row, section_header, styled_dataframe
@@ -72,7 +73,7 @@ _ROW_HEIGHT = 35
 
 
 def _badge(badge: Badge) -> str:
-    """Return the Markdown badge for a score's band."""
+    """Return the Markdown badge for a result's band."""
     return f":{BADGE_COLORS[badge]}-badge[{badge.value}]"
 
 
@@ -114,7 +115,7 @@ def _render_digit_table(
 ) -> DigitPreferenceEnumerator:
     """Render the enumerator table and return the selected enumerator.
 
-    Rows are sorted highest score first and the first row is selected by
+    Rows are sorted highest ratio first and the first row is selected by
     default, so the detail shows the enumerator most in need of attention.
     Clearing the selection falls back to that enumerator.
     """
@@ -125,7 +126,7 @@ def _render_digit_table(
             "Responses": [e.n_responses for e in enumerators],
             "Ending in 0 or 5 (%)": [e.enum_pct for e in enumerators],
             "Rest of team (%)": [e.team_pct for e in enumerators],
-            "Score": [e.score for e in enumerators],
+            "Ratio": [e.ratio for e in enumerators],
             "Flag": [e.badge.value for e in enumerators],
         }
     )
@@ -135,7 +136,7 @@ def _render_digit_table(
             "Responses": "{:,}",
             "Ending in 0 or 5 (%)": "{:.1f}",
             "Rest of team (%)": "{:.1f}",
-            "Score": "{:.0f}",
+            "Ratio": format_ratio,
         },
         na_rep="—",
     )
@@ -160,9 +161,10 @@ def _render_digit_table(
             "Rest of team (%)": st.column_config.Column(
                 help="The same share for every other enumerator"
             ),
-            "Score": st.column_config.Column(
-                help="0-100. 100 means answers end in 0 or 5 at least twice "
-                "as often as the rest of the team's."
+            "Ratio": st.column_config.Column(
+                help="How many times as often the enumerator's answers end in "
+                f"0 or 5 as the rest of the team's. {format_ratio(1)} is the same "
+                "rate."
             ),
         },
     )
@@ -211,26 +213,27 @@ def _digit_chart(e: DigitPreferenceEnumerator, flagged: bool) -> go.Figure:
     return fig
 
 
-def _render_digit_detail(e: DigitPreferenceEnumerator, min_sample: int) -> None:
+def _render_digit_detail(e: DigitPreferenceEnumerator, min_responses: int) -> None:
     """Render one enumerator's Digit Preference detail panel."""
     if e.sample_band == SampleBand.INSUFFICIENT:
         st.info(
             f"Not enough responses to run this check for {e.enumerator}: "
-            f"{e.n_responses:,} of the {min_sample:,} needed.",
+            f"{e.n_responses:,} of the {min_responses:,} needed.",
             icon=INFO_ICON,
         )
         return
-    if e.score is None:
+    if e.ratio is None:
         st.info(
-            "The rest of the team has no responses to compare with.",
+            "None of the rest of the team's responses end in 0 or 5, so "
+            "there is no rate to compare with.",
             icon=INFO_ICON,
         )
         return
 
     flagged = e.badge == Badge.HIGH
     st.markdown(
-        f"##### {e.enumerator}: terminal digits · score **{e.score:.0f}** "
-        f"{_badge(e.badge)}"
+        f"##### {e.enumerator}: terminal digits · **{format_ratio(e.ratio)}** "
+        f"the rest of the team's rate {_badge(e.badge)}"
     )
     metric_row(
         [
@@ -260,16 +263,18 @@ def _render_digit_detail(e: DigitPreferenceEnumerator, min_sample: int) -> None:
     st.plotly_chart(_digit_chart(e, flagged), width="stretch")
 
 
-def _render_digit_preference(result: DigitPreferenceResult, min_sample: int) -> None:
+def _render_digit_preference(result: DigitPreferenceResult) -> None:
     """Render the Digit Preference sub-tab."""
     st.markdown(
         "Are an enumerator's numeric answers ending in 0 or 5 more often than "
         "the rest of the team's? Terminal digits are pooled across the "
         "selected integer and continuous variables."
     )
+    level = DIGIT_PREFERENCE_LEVELS[result.sensitivity]
     st.caption(
-        f"Sensitivity: **{THRESHOLD_LEVELS[result.threshold]}** (flagged at a "
-        f"score of {result.threshold} or more). Change it in the settings above."
+        f"Sensitivity: **{level.label}** (flagged at {format_ratio(level.ratio)} "
+        f"the rest of the team's rate or more, with at least "
+        f"{result.min_responses:,} responses). Change it in the settings above."
     )
 
     if result.condition == CheckCondition.NO_APPLICABLE_VARIABLES:
@@ -290,16 +295,17 @@ def _render_digit_preference(result: DigitPreferenceResult, min_sample: int) -> 
         return
     if result.condition == CheckCondition.ALL_BELOW_MINIMUM:
         st.info(
-            f"Every enumerator has fewer than {min_sample:,} responses on the "
-            "selected variables, so Digit Preference can't run yet. Lower "
-            "the minimum in the settings above or wait for more data.",
+            f"Every enumerator has fewer than {result.min_responses:,} "
+            "responses on the selected variables, so Digit Preference can't "
+            "run yet. Lower the minimum or the sensitivity in the settings "
+            "above, or wait for more data.",
             icon=INFO_ICON,
         )
         return
 
     st.caption("Select an enumerator to see their terminal digits.")
     selected = _render_digit_table(result.enumerators, DP_TABLE_KEY)
-    _render_digit_detail(selected, min_sample)
+    _render_digit_detail(selected, result.min_responses)
 
 
 # =============================================================================
@@ -369,4 +375,4 @@ def render_response_patterns(
 
     (digit_tab,) = st.tabs(["Digit Preference"])
     with digit_tab:
-        _render_digit_preference(results.digit_preference, results.min_sample)
+        _render_digit_preference(results.digit_preference)

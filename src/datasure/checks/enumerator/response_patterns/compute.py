@@ -1,7 +1,7 @@
 """Scoring for the enumerator report's Response Patterns section.
 
 Every check compares an enumerator with the rest of the team: all
-enumerators except the one being scored. The UI only renders the results
+enumerators except the one being checked. The UI only renders the results
 model returned by ``compute_response_patterns``.
 """
 
@@ -9,7 +9,7 @@ import polars as pl
 
 from datasure.checks import missing
 from datasure.checks.enumerator.response_patterns.models import (
-    MODERATE_MARGIN,
+    DIGIT_PREFERENCE_LEVELS,
     NUMERIC_TYPES,
     Badge,
     CheckCondition,
@@ -19,6 +19,7 @@ from datasure.checks.enumerator.response_patterns.models import (
     ResponsePatternResults,
     ResponsePatternSettings,
     SampleBand,
+    Sensitivity,
     SkipReason,
     VariableType,
 )
@@ -79,30 +80,26 @@ def sample_band(n: int, min_sample: int, warn_sample: int) -> SampleBand:
     return SampleBand.OK
 
 
-def badge_band(score: float | None, threshold: int) -> Badge:
-    """Return the badge for ``score`` against the flag ``threshold``."""
-    if score is None:
+def badge_band(ratio: float | None, sensitivity: Sensitivity) -> Badge:
+    """Return the badge for ``ratio`` at ``sensitivity``.
+
+    High when the ratio reaches the level's, Moderate when it reaches the next
+    more sensitive level's (the most sensitive level has no Moderate band).
+    """
+    if ratio is None:
         return Badge.NA
-    if score >= threshold:
+    levels = list(DIGIT_PREFERENCE_LEVELS)
+    if ratio >= DIGIT_PREFERENCE_LEVELS[sensitivity].ratio:
         return Badge.HIGH
-    if score >= threshold - MODERATE_MARGIN:
+    position = levels.index(sensitivity)
+    if position > 0 and ratio >= DIGIT_PREFERENCE_LEVELS[levels[position - 1]].ratio:
         return Badge.MODERATE
     return Badge.LOW
 
 
 def _sort_key(result: DigitPreferenceEnumerator) -> tuple:
-    """Order highest score first, unscored enumerators last, then by name."""
-    return (result.score is None, -(result.score or 0), result.enumerator)
-
-
-def _digit_preference_score(enum_pct: float, team_pct: float) -> float:
-    """Return the excess share of 0/5 endings over the team, scaled to 0-100.
-
-    100 means the enumerator's share is at least twice the team's.
-    """
-    if team_pct == 0:
-        return 100.0 if enum_pct > 0 else 0.0
-    return min(100.0, max(0.0, (enum_pct - team_pct) / team_pct * 100))
+    """Order highest ratio first, enumerators without one last, then by name."""
+    return (result.ratio is None, -(result.ratio or 0), result.enumerator)
 
 
 def _pct(counts: list[int]) -> list[float]:
@@ -154,13 +151,17 @@ def _compute_digit_preference(
     interviews: dict[str, int],
     settings: ResponsePatternSettings,
 ) -> DigitPreferenceResult:
-    """Score each enumerator's preference for answers ending in 0 or 5."""
-    threshold = settings.digit_preference_threshold
+    """Rate each enumerator's preference for answers ending in 0 or 5."""
+    sensitivity = settings.digit_preference_sensitivity
+    min_responses = max(
+        settings.min_sample, DIGIT_PREFERENCE_LEVELS[sensitivity].min_responses
+    )
+    base = {"sensitivity": sensitivity, "min_responses": min_responses}
     numeric = [v for v in variables if data.schema[v].is_numeric()]
     skipped = {v: SkipReason.NOT_NUMERIC for v in variables if v not in numeric}
     if not variables:
         return DigitPreferenceResult(
-            threshold=threshold, condition=CheckCondition.NO_APPLICABLE_VARIABLES
+            **base, condition=CheckCondition.NO_APPLICABLE_VARIABLES
         )
 
     eligible = []
@@ -175,7 +176,7 @@ def _compute_digit_preference(
             skipped[var] = reason
     if not eligible:
         return DigitPreferenceResult(
-            threshold=threshold,
+            **base,
             condition=CheckCondition.NO_ELIGIBLE_VARIABLES,
             skipped_variables=skipped,
         )
@@ -187,11 +188,12 @@ def _compute_digit_preference(
         enum_counts = counts.get(enum, [0] * 10)
         team_counts = [t - e for t, e in zip(totals, enum_counts, strict=True)]
         n = sum(enum_counts)
-        band = sample_band(n, settings.min_sample, settings.warn_sample)
+        band = sample_band(n, min_responses, settings.warn_sample)
         enum_pct, team_pct = _round_pct(enum_counts), _round_pct(team_counts)
-        score = (
-            _digit_preference_score(enum_pct, team_pct)
-            if band != SampleBand.INSUFFICIENT and sum(team_counts)
+        # Rounded as shown, so a ratio shown as 1.5x is flagged at 1.5x
+        ratio = (
+            round(enum_pct / team_pct, 2)
+            if band != SampleBand.INSUFFICIENT and team_pct > 0
             else None
         )
         enumerators.append(
@@ -200,8 +202,8 @@ def _compute_digit_preference(
                 interviews=n_interviews,
                 n_responses=n,
                 sample_band=band,
-                score=score,
-                badge=badge_band(score, threshold),
+                ratio=ratio,
+                badge=badge_band(ratio, sensitivity),
                 enum_pct=enum_pct if n else None,
                 team_pct=team_pct if sum(team_counts) else None,
                 enum_digit_pct=_pct(enum_counts),
@@ -213,7 +215,7 @@ def _compute_digit_preference(
         e.sample_band == SampleBand.INSUFFICIENT for e in enumerators
     )
     return DigitPreferenceResult(
-        threshold=threshold,
+        **base,
         condition=CheckCondition.ALL_BELOW_MINIMUM if all_insufficient else None,
         variables=eligible,
         skipped_variables=skipped,
@@ -227,14 +229,14 @@ def compute_response_patterns(
     enumerator_col: str,
     missing_codes: pl.DataFrame | None,
 ) -> ResponsePatternResults:
-    """Score every enumerator on every response pattern check.
+    """Run every response pattern check on every enumerator.
 
     Parameters
     ----------
     data : pl.DataFrame
         The survey data, one row per interview.
     settings : ResponsePatternSettings
-        The selected variables, type overrides and thresholds.
+        The selected variables, type overrides, minimums and sensitivity.
     enumerator_col : str
         The enumerator column.
     missing_codes : pl.DataFrame | None
@@ -243,7 +245,7 @@ def compute_response_patterns(
     Returns
     -------
     ResponsePatternResults
-        Per check and enumerator: score, badge, sample-size band, skipped
+        Per check and enumerator: ratio, badge, sample-size band, skipped
         variables and chart series; plus any condition that stops the
         section from running.
     """

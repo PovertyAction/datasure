@@ -105,6 +105,18 @@ class TestMessages:
 
         assert "fewer than 50 responses" in _texts(at.info)
 
+    def test_high_sensitivity_raises_the_minimum(self, team_data, settings_file):
+        _save(
+            settings_file,
+            selected_variables=["age"],
+            digit_preference_sensitivity="high",
+        )
+
+        at = _run(team_data, settings_file)
+
+        assert "fewer than 100 responses" in _texts(at.info)
+        assert "with at least 100 responses" in _texts(at.caption)
+
     def test_skipped_variable_note(self, team_data, settings_file):
         data = team_data.with_columns(pl.lit(3).alias("kids"))
         _save(settings_file, selected_variables=["age", "kids"])
@@ -125,7 +137,7 @@ class TestMessages:
 
 
 class TestEnumeratorTable:
-    def test_lists_enumerators_by_score_with_interviews_and_rates(
+    def test_lists_enumerators_by_ratio_with_interviews_and_rates(
         self, team_data, settings_file
     ):
         _save(settings_file, selected_variables=["age"])
@@ -137,13 +149,18 @@ class TestEnumeratorTable:
         assert table["Interviews"].tolist() == [40, 40, 40]
         assert table["Ending in 0 or 5 (%)"].tolist()[0] == pytest.approx(60)
         assert table["Rest of team (%)"].tolist()[0] == pytest.approx(20)
+        assert table["Ratio"].tolist()[0] == pytest.approx(3)
+        assert "Score" not in table.columns
         assert table["Flag"].tolist() == ["High", "Low", "Low"]
 
-    def test_highest_score_is_selected_by_default(self, team_data, settings_file):
+    def test_highest_ratio_is_selected_by_default(self, team_data, settings_file):
         _save(settings_file, selected_variables=["age"])
 
         at = _run(team_data, settings_file)
 
+        assert "rounder: terminal digits · **3\N{MULTIPLICATION SIGN}** the rest" in (
+            _texts(at.markdown)
+        )
         assert "rounder's responses end in 0 or 5 notably more often" in _texts(
             at.warning
         )
@@ -272,47 +289,48 @@ class TestSettingsPersistence:
 
         at.number_input(key="rp_min_sample").set_value(10).run()
         at.number_input(key="rp_warn_sample").set_value(20).run()
-        at.segmented_control(key="rp_dp_threshold").set_value(65).run()
+        at.segmented_control(key="rp_dp_sensitivity").set_value("low").run()
         assert not at.exception
 
         new_session = _run(team_data, settings_file)
 
         assert new_session.number_input(key="rp_min_sample").value == 10
         assert new_session.number_input(key="rp_warn_sample").value == 20
-        assert new_session.segmented_control(key="rp_dp_threshold").value == 65
+        assert new_session.segmented_control(key="rp_dp_sensitivity").value == "low"
         with open(settings_file) as f:
             saved = json.load(f)["enumerators"]["response_patterns"]
         assert saved["selected_variables"] == ["age"]
 
 
-class TestFlagThresholds:
-    def test_five_fixed_levels_default_to_medium(self, team_data, settings_file):
+class TestFlagSensitivity:
+    def test_three_levels_default_to_medium(self, team_data, settings_file):
         at = _run(team_data, settings_file)
 
-        control = at.segmented_control(key="rp_dp_threshold")
-        assert control.options == [
-            "Very high",
-            "High",
-            "Medium",
-            "Low",
-            "Very low",
-        ]
-        assert control.value == 50
+        control = at.segmented_control(key="rp_dp_sensitivity")
+        assert control.options == ["High", "Medium", "Low"]
+        assert control.value == "medium"
 
     def test_description_follows_the_level(self, team_data, settings_file):
         at = _run(team_data, settings_file)
 
-        at.segmented_control(key="rp_dp_threshold").set_value(80).run()
+        x = "\N{MULTIPLICATION SIGN}"
+        assert f"at least 1.5{x} as often" in _texts(at.caption)
+        at.segmented_control(key="rp_dp_sensitivity").set_value("low").run()
+        assert f"at least 2{x} as often" in _texts(at.caption)
+        at.segmented_control(key="rp_dp_sensitivity").set_value("high").run()
+        assert f"at least 1.25{x} as often" in _texts(at.caption)
+        assert "at least 100 responses" in _texts(at.caption)
 
-        assert "1.8 times" in _texts(at.caption)
-
-    def test_level_changes_the_flags(self, team_data, settings_file):
-        # rounder's 25% against careful's 20% scores 25
-        data = _frame({"rounder": _values(40, 10), "careful": _values(40, 8)})
+    def test_level_changes_the_flags(self, settings_file):
+        # rounder ends 40 of 100 answers in 0 or 5, careful 30: 1.33x
+        data = _frame({"rounder": _values(100, 40), "careful": _values(100, 30)})
         _save(settings_file, selected_variables=["age"])
-        at = _run(data, settings_file)  # rounder scores 25: Low at Medium
+        at = _run(data, settings_file)
+        assert at.dataframe(key="rp_dp_enumerators").value["Flag"].tolist()[0] == (
+            "Moderate"
+        )
 
-        at.segmented_control(key="rp_dp_threshold").set_value(20).run()
+        at.segmented_control(key="rp_dp_sensitivity").set_value("high").run()
 
         table = at.dataframe(key="rp_dp_enumerators").value
         assert table["Flag"].tolist()[0] == "High"
