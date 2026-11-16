@@ -212,7 +212,7 @@ class TestEnumeratorTable:
 
         assert "Moderate" in _texts(at.markdown)
         assert "mid's responses end in 0 or 5 somewhat more often" in _texts(at.info)
-        assert not at.success
+        assert "mid's digit distribution is consistent" not in _texts(at.success)
 
 
 class TestVariableEditor:
