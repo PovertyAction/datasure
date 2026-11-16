@@ -7,6 +7,157 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Stata names in the replication package** (#449): every column name the
+  package uses that Stata can't use gets a Stata name when the package is
+  built
+  - `processing/column_names.stata_name_map(names, edits)` (Streamlit-free)
+    proposes the names: characters outside `[A-Za-z0-9_]` become `_`
+    (accented letters are NFKD-folded to ASCII), a leading digit gets a `_`
+    prefix, a reserved name gets a `_` suffix, names are cut to 32
+    characters, and taken names get `_2`, `_3` … Valid names are never
+    changed and are never taken by a proposal, nor are `reserved` names
+    (`stata_names.PACKAGE_VARIABLES`, the variables the import scripts
+    create). `edits` without an error from `stata_name_edit_errors` (rules,
+    an unchanged or reserved name, or another edit) claim their names first
+  - `replication/stata_names.py`: `package_column_names` lists the raw
+    columns, then the names prep steps use and create
+    (`prep_script_generator.prep_log_column_names`). Edits are stored per
+    dataset in `stata_names_{alias}` in `logs.duckdb`
+    (`load_stata_name_edits`, `save_stata_name_edits`).
+    `updated_stata_name_edits` decides which table values count as edits:
+    a value is an edit when it differs from the name the column gets without
+    its own edit, so typing a proposal another edit took is reported as a
+    clash
+  - `build_replication_package(stata_name_edits=…)` builds the map and passes
+    it to the generators. `generate_import_script` and
+    `generate_scto_import_script` take `columns` and `name_map` and rename
+    mapped columns right after import by CSV position (one group `rename`
+    using `` `:word k of `ds_vars'' ``), labelling each with its DataSure
+    name; the SurveyCTO script also uses the Stata names in its field lists
+    and keeps the question text of a mapped field in its note only.
+    `generate_prepare_data_script(name_map=…)` maps `source_columns` and
+    `column_names` and labels columns created under a mapped name.
+    `generate_corrections_script(name_map=…)` maps the corrected column and
+    the key. The codebook lists Stata names. With nothing to map, the
+    package is unchanged
+  - The Replication page lists the mapped names in an editable table
+    (`_render_stata_names`). It saves edits only when all of them can be
+    used, otherwise shows the errors and disables the build; it warns when a
+    saved edit no longer applies, and blocks the build when the column names
+    can't be read. The names are read fresh on every render, as the build
+    reads them (the raw columns through the new
+    `duckdb_utils.duckdb_get_columns`, which reads no rows). Edits aren't part of the exported project configuration
+- **Rename columns** (#446): new Prep action **rename column(s)**
+  (`PrepActions.rename_column`), with methods **by name** and **by pattern**
+  (`PrepMethods.by_name`, `PrepMethods.by_pattern`)
+  - `processing/rename_plan.py` (Streamlit-free) holds the rename plan:
+    `plan_rename(columns, spec)` resolves a `ByName`, `Wildcard`,
+    `ChangeCase` or `RegexRename` spec into a `RenamePlan`. The plan has the
+    pairs in column order, the collisions, invalid (empty) names, missing by-name
+    columns, the matched columns, per-row `problems`, and a spec-level
+    `error`. Renames apply all at once, so swaps and chains are allowed. Names
+    are compared ignoring case, as DuckDB does. Wildcards are Stata's `*` and
+    `?`, matched against the whole name, with earlier `*`s matching greedily;
+    `#` and `=` are rejected. Regex uses `re.fullmatch` and `Match.expand`.
+    `spec_to_args`/`spec_from_args` are the logged form, and
+    `describe_pattern` is the readable form
+  - `processing/prep.RenameColumnsOperation` applies the plan with
+    `DataFrame.rename`, which keeps column positions. By name skips old
+    columns that are gone (`failed_count`, `additional_info`) and fails when
+    none are left. A pattern that matches nothing fails. Collisions and empty
+    names fail the step, so replay never overwrites a column. The request is
+    logged in `value` (`[[old, new], …]` by name, `[mode, a, b]` by pattern).
+    Each run's resolved pairs go in `source_columns` → `column_names`, and
+    `_build_log_from_outcomes` keeps a successful rename's args from that
+    run, so pattern steps record what they matched on the latest re-import.
+    `PrepConfirmationMessages.rename_columns` describes the step
+  - `prep_script_generator._stata_rename_columns` writes one
+    `rename (old …) (new …)` from the recorded pairs, with a `* Pattern:`
+    comment for pattern steps. With no recorded pairs, or a new name Stata
+    can't use, the step is a NOTE with a warning. A step of any kind whose
+    log status is `Failed` is written as a skipped-step comment, since it
+    changed nothing (#449: a failed copy-of-column step used to be written
+    as a live `clonevar` and stopped the do-file with r(110))
+  - `utils/column_references.py` (Streamlit-free, read-only):
+    `find_column_references(project_id, alias, columns)` reports where a
+    dataset's check pages use the columns, as survey or backcheck data. It
+    reads the `check_config` fields, the duplicates, outliers, backchecks, GPS
+    and descriptive check tables, and the check settings files without view
+    state. It also counts `corr_log_{alias}` entries per column, including GPS
+    acceptances' coordinate columns
+  - The Prep form (`PrepStepHandler.rename_column_handler`) has a by-name
+    `st.data_editor` table and wildcard, change-case and regex inputs. It
+    shows a live old → new preview (`_rename_preview`) with problems on their
+    rows, and `_is_rename_incomplete` disables **Add** unless
+    `RenamePlan.can_apply`. Before adding, `_add_rename_step` opens
+    `confirm_dialog` listing any references; nothing is rewritten
+- **Duplicate a column** (#445): Add new column has a new **copy of column**
+  method (`PrepFunctions.copy`). `AddNewColumnOperation._add_copy_column`
+  inserts a copy of one source column right after it, keeping its dtype and
+  nulls. It raises `ValidationError` when the source is missing or the new
+  name already exists, including on replay. The step is
+  logged with the new name in `column_names` and the source in
+  `source_columns`. `prep_script_generator._stata_add_column` translates it
+  to `clonevar <new> = <old>` plus `order <new>, after(<old>)`. The Prep form
+  picks the source first and prefills the name as `<source>_copy`
+- **Stata name rules for the replication package** (#445): new
+  `processing/column_names.stata_name_error` (Streamlit-free) reports names
+  Stata can't use: over 32 characters, not starting with a letter or `_`,
+  characters outside `[A-Za-z0-9_]`, or a reserved name
+  (`STATA_RESERVED_NAMES`, from [U] 11.3, plus `str#` types; matched
+  case-sensitively). Prep doesn't apply these rules, since not every user
+  exports to Stata. `prep_script_generator._stata_add_column` uses them to
+  write an add-column step whose new name Stata can't use as a NOTE with a
+  Replication page warning, instead of a line that fails in Stata. Mapping
+  names to Stata-safe ones when the package is built is tracked in #449
+
+- **Headless keyring guidance**: `secure_credentials.keyring_backend_problem`
+  detects a keyring backend that can't hold credentials safely: keyring's
+  "fail" backend (headless Linux with no Secret Service) and plaintext file
+  backends. Keyring errors from `store_scto_credentials` and
+  `test_keyring_availability` now append an explanation that points to the
+  README's new "Running on a server" section. A working plaintext backend
+  still reports success but carries a `warning` that **Keyring Diagnostics**
+  displays, and the diagnostics list a headless-server tip
+- **Read-only notice**: when a project's settings folder contains a
+  `.readonly` marker (`cache_utils.READ_ONLY_MARKER`), `app.py` shows its
+  text as a warning above every page (`cache_utils.read_only_reason`; an
+  empty marker gives a generic message, long text is cut to 300
+  characters, an unreadable marker is ignored). DataSure never writes the
+  marker: a host that opens a project read-only, such as a multi-user
+  deployment where another user holds the project's write lock, drops it
+  so users see why edits won't be saved before they hit a write error
+- **Record project activation**: opening a project from the home page
+  (`start_view._activate_project`) now stamps `last_used` in
+  `cache/projects.json` via `_record_last_used`. The "Last used" caption
+  and sort reflect when a project was last opened, not only when it was
+  created, and tools that manage the cache (such as a hosted deployment's
+  per-project write lock) can tell which project a user opened most
+  recently. `last_used` changes when a project is opened, not while it is
+  in use, so its age doesn't show whether a project is still open. A
+  registry that can't be written is logged and doesn't block opening the
+  project
+
+### Changed
+
+- **No more NOTE for names Stata can't use** (#449): `_stata_add_column` and
+  `_stata_rename_columns` no longer write a step whose new name Stata can't
+  use as a NOTE with a warning (the #445 stopgap); the step is written with
+  the mapped Stata name
+- **Add new column never overwrites a column** (#445): every Add new column
+  method now refuses a new step whose name already exists, ignoring case
+  (DuckDB would otherwise store `Age` beside `age` as `Age_1`). The form and
+  `_apply_single_action` share `column_names.existing_name_error`. Before, a
+  constant, calculated, concat, index, uuid or random column with an existing
+  name replaced that column. Replays don't run the check, so steps saved
+  before this change still replay as they did; a copy step whose name is
+  taken on replay fails instead
+- **Add new column form order** (#445): `PrepStepHandler.add_column_handler`
+  now asks for the method before the column name, so **copy of column** can
+  prefill the name from the chosen source
+
 ### Fixed
 
 - **Progress targets**: Targets entered on the Progress page did not load
@@ -20,6 +171,52 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     (`LEGACY_TARGET_KEYS`) so targets already saved still load. An old
     target loads only when the page config has no value for that field,
     because the config may have been set after it — #407
+- **A failed write could empty the project registry, and sessions sharing
+  a cache could undo each other's changes**: every read and write of
+  `cache/projects.json` now goes through `utils/project_registry.py`, which
+  writes to a temp file and swaps it in with `os.replace`, and holds an OS
+  file lock across each read-modify-write. A corrupt registry no longer
+  crashes the home page; it reads as empty and is kept as
+  `projects.json.corrupt` on the next write
+- **Replication package crashed on row-index ranges, and Stata dropped the
+  wrong rows** (#442): building the package raised
+  `ValueError: invalid literal for int() with base 10: '0:30'` when a
+  **remove row(s) → by row index** step used a range. Even without a range,
+  `prepare_data.do` dropped the wrong rows, and negative indices removed
+  nothing or the wrong range in DataSure itself
+  - Root cause: `_drop_by_index` in
+    `src/datasure/replication/prep_script_generator.py` called `int()` on
+    every value and copied DataSure's 0-based positions into Stata's 1-based
+    `in` and `_n` unchanged. `RemoveRowsOperation._remove_by_index` matched
+    raw values against non-negative row numbers, so `-5` and `5:-2` did not
+    count from the end
+  - Solution: new Streamlit-free `src/datasure/processing/row_index.py`
+    (`parse_row_indices` → `RowSpan`, `resolve_row_positions`) is shared by the
+    prep engine and the generator. Values are a position, a negative position
+    counting from the end, or an inclusive `a:b` range. Earlier prep logs'
+    string values, `","` and `None` entries still parse; anything else raises
+    `ValueError`, which the engine reports as `ValidationError`. The generator
+    emits one `drop if` over `_n` (`_n == i+1`, `inrange(_n, a+1, b+1)`,
+    negative ends as `_N - k`), so all values refer to positions before the
+    step. It never emits `drop in`, which stops with r(198) on positions
+    outside 1.._N or reversed spans, where `resolve_row_positions` ignores them
+  - The SurveyCTO `2_import_data.do` (`scto_import_generator.py`) records
+    the .csv row order in `_ds_row` after `insheet` and restores it before
+    saving. On a rerun, appending the saved .dta and `sort KEY` had left the
+    rows in KEY order, so positional prep steps dropped different
+    submissions. Saved rows take the position of the new row with the same
+    KEY; rows found only in the saved .dta go last
+  - `generate_prepare_data_script` and `build_replication_package` take an
+    `on_warning` callback. A step that can't be translated gets a `NOTE` line
+    in `prepare_data.do` and a warning on the Replication page, which keeps it
+    beside the download button, instead of stopping the build. This covers
+    emitters that raise and the cases they don't support (`uuid` columns,
+    unsupported transform, add-column or remove-row methods and conditions,
+    unknown actions), which now raise `_UntranslatableStepError` instead of
+    returning a silent `NOTE`. A row-index step with no values stays a silent
+    no-op
+  - The row-index help text on the Prep page now describes this syntax.
+    `TestStataRemoveRows` expected the 0-based output and is corrected
 
 ## [1.2.1] - 2026-11-06
 

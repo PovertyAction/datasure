@@ -1,5 +1,4 @@
 import functools
-import json
 import logging
 import random
 from collections.abc import Iterator
@@ -17,6 +16,7 @@ import streamlit as st
 from datasure.checks.backchecks.attribution import ErrorSource
 from datasure.utils.cache_utils import get_cache_path
 from datasure.utils.duckdb_utils import duckdb_remove_table, duckdb_save_table
+from datasure.utils.project_registry import update_registry
 
 logger = logging.getLogger(__name__)
 
@@ -1267,36 +1267,26 @@ def create_demo_project():
         (project_path / "settings").mkdir(exist_ok=True)
 
     # Save project info
-    projects_file = get_cache_path("projects.json")
-    projects = {}
-    if projects_file.exists():
-        with open(projects_file) as f:
-            projects = json.load(f)
+    def _register(projects: dict) -> bool:
+        projects[DEMO_PROJECT_ID] = {
+            "name": DEMO_PROJECT_NAME,
+            "created_at": "2025-01-01 00:00:00",
+            "last_used": "2025-01-01 00:00:00",
+            "is_demo": True,
+        }
+        return True
 
-    projects[DEMO_PROJECT_ID] = {
-        "name": DEMO_PROJECT_NAME,
-        "created_at": "2025-01-01 00:00:00",
-        "last_used": "2025-01-01 00:00:00",
-        "is_demo": True,
-    }
-
-    with open(projects_file, "w") as f:
-        json.dump(projects, f, indent=4)
+    update_registry(get_cache_path("projects.json"), _register)
 
     return DEMO_PROJECT_ID
 
 
 def unregister_demo_project() -> None:
     """Remove the demo project from ``projects.json``, leaving its folder."""
-    projects_file = get_cache_path("projects.json")
-    if not projects_file.exists():
-        return
-    with open(projects_file) as f:
-        projects = json.load(f)
-    if projects.pop(DEMO_PROJECT_ID, None) is None:
-        return
-    with open(projects_file, "w") as f:
-        json.dump(projects, f, indent=4)
+    update_registry(
+        get_cache_path("projects.json"),
+        lambda projects: projects.pop(DEMO_PROJECT_ID, None) is not None,
+    )
 
 
 class InterviewTimes(NamedTuple):

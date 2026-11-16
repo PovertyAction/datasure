@@ -50,13 +50,17 @@ src/datasure/
 ├── processing/
 │   ├── prep.py             # Data preparation operations (Polars)
 │   ├── corrections.py      # Corrections and accept entries (CorrectionProcessor)
-│   └── correction_log.py   # Correction log schema/backfill, Action enum (no Streamlit)
+│   ├── correction_log.py   # Correction log schema/backfill, Action enum (no Streamlit)
+│   ├── column_names.py     # Stata name rules and mapping for replication (no Streamlit)
+│   ├── rename_plan.py      # Rename specs -> old/new pairs, collisions (no Streamlit)
+│   └── row_index.py        # Row-index parsing shared by prep and replication (no Streamlit)
 ├── replication/            # Stata/Python replication package export
 ├── models/
 │   ├── schemas.py          # Pydantic models
 │   └── enums.py            # Prep action/method enums
 ├── utils/                  # Shared utilities (DuckDB, cache, config, charts,
 │                           # credentials, SurveyCTO API, UI helpers, ...)
+│   ├── column_references.py #  Where check settings/corrections use columns (no Streamlit)
 │   ├── correction_form.py  #   Shared correction form used across pages
 │   ├── navigation.py       #   Navigation resolver and status types (no Streamlit)
 │   └── nav_ui.py           #   Shared navigation controls and render wrapper
@@ -444,11 +448,25 @@ Per project (UUID-keyed):
   correction logs `corr_log_{alias}`, the backcheck attribution logs
   `bc_attribution_{page_name_id}`, see [Correction log](#correction-log),
   each check page's check tables, such as the Descriptive Stats column
-  selection `descriptive_columns_{page_name_id}`, and the project's missing
-  codes `missing_codes_{project_id}`), JSON settings (including
+  selection `descriptive_columns_{page_name_id}`, the project's missing
+  codes `missing_codes_{project_id}`, and the Stata names chosen on the
+  Replication page `stata_names_{alias}`), JSON settings (including
   each check page's, Prepare Data's and Corrections'
   [view state](#view-state)), and credential metadata
-- `cache/projects.json` — the project registry
+- `cache/projects.json` — the project registry: `name`, `created_at`, and
+  `last_used`. All reads and writes go through `utils/project_registry.py`:
+  updates hold an OS lock on `projects.json.lock` so sessions sharing one
+  cache can't overwrite each other's changes, and each write replaces the
+  file in one step so a failed write leaves the previous registry intact. A
+  corrupt registry reads as empty, and the next write keeps it as
+  `projects.json.corrupt`. `last_used` is stamped whenever a project is
+  opened from the home page. It changes when a project is opened, not while
+  it is in use, so its age says nothing about whether the project is still
+  open: DataSure has no "close project" action (the home page keeps the
+  project in the session) and Streamlit has no session-end event. A host
+  that locks projects per user should treat a change in `last_used` as that
+  project being opened, and judge whether a project is still in use from
+  its own signals, such as session shutdown or recent file changes.
 - `cache/user_settings.json` — per-user preferences, currently the
   "Reviewer name" recorded as `user` in correction logs
   (`utils/reviewer.py`). Display names only, never credentials.
@@ -464,6 +482,13 @@ columns, and the old table is left in place. Exporting a page that has no
 selection table yet exports the old selection's selected rows as the page's
 own. Importing a page bundled without a selection writes an empty one, so the
 page is not seeded from the destination's old selection.
+
+A host that opens a project read-only (for example a multi-user deployment
+where another user holds the project's write lock) can drop a
+`cache/{project_id}/settings/.readonly` marker. `app.py` then shows the
+marker's text as a warning above every page (`cache_utils.read_only_reason`).
+DataSure only reads the marker; it never creates or deletes it, and does not
+enforce read-only itself.
 
 The `cache/` directory is gitignored.
 
@@ -577,6 +602,12 @@ is written to JSON. The Mapbox token saved from the GPS Checks settings is also
 kept in the keyring, as one entry shared by every project on the machine; a
 token set by hand in `secrets.toml` is still read as a fallback. Credentials
 are never written to disk, logs, or session state.
+
+`keyring_backend_problem()` flags a backend that can't hold credentials safely:
+keyring's "fail" backend (a headless Linux machine with no Secret Service) and
+plaintext file backends. Keyring errors and **Keyring Diagnostics** append its
+explanation, which points to the README's "Running on a server" section for
+selecting an encrypted backend with `PYTHON_KEYRING_BACKEND`.
 
 ## DataFrames and SQL
 

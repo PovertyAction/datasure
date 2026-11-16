@@ -463,6 +463,22 @@ class TestPrepConfirmationMessages:
 
         assert "specified parameters" in message
 
+    def test_add_new_column_message_copy(self):
+        """A copy's log entry names the copy and its source."""
+        result = PrepActionResult(
+            action="add new column",
+            column_names="age_copy",
+            remaining_rows=5,
+            remaining_columns=6,
+            method="copy of column",
+            source_columns=["age"],
+        )
+
+        message = PrepConfirmationMessages.add_new_column(result)
+
+        assert '"age_copy" added as a copy of "age"' in message
+        assert "5 rows and 6 columns" in message
+
     def test_remove_columns_message(self):
         """Test remove_columns message generation."""
         result = PrepActionResult(

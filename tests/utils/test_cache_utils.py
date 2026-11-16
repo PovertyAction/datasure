@@ -6,9 +6,11 @@ from unittest.mock import patch
 import pytest
 
 from datasure.utils.cache_utils import (
+    READ_ONLY_MARKER,
     ensure_cache_dir,
     get_cache_base_dir,
     get_cache_path,
+    read_only_reason,
 )
 
 
@@ -282,3 +284,42 @@ class TestIntegration:
             assert data_dir == expected_data_dir
             assert data_dir.exists()
             assert data_dir.is_dir()
+
+
+class TestReadOnlyReason:
+    """Test read_only_reason (host-provided read-only marker)."""
+
+    @pytest.fixture(autouse=True)
+    def _cache(self, tmp_path, monkeypatch):
+        monkeypatch.setattr(
+            "datasure.utils.cache_utils.get_cache_base_dir", lambda: tmp_path
+        )
+        self.settings = tmp_path / "abcd1234" / "settings"
+        self.settings.mkdir(parents=True)
+
+    def test_no_marker_means_writable(self):
+        assert read_only_reason("abcd1234") is None
+
+    def test_no_project_means_writable(self):
+        assert read_only_reason("") is None
+
+    def test_marker_text_is_the_reason(self):
+        (self.settings / READ_ONLY_MARKER).write_text(
+            "  Being edited by someone@example.org since 10:42 UTC\n",
+            encoding="utf-8",
+        )
+        assert read_only_reason("abcd1234") == (
+            "Being edited by someone@example.org since 10:42 UTC"
+        )
+
+    def test_empty_marker_gives_generic_message(self):
+        (self.settings / READ_ONLY_MARKER).write_text("", encoding="utf-8")
+        assert "read-only" in read_only_reason("abcd1234")
+
+    def test_long_reason_is_truncated(self):
+        (self.settings / READ_ONLY_MARKER).write_text("x" * 1000, encoding="utf-8")
+        assert len(read_only_reason("abcd1234")) == 300
+
+    def test_marker_directory_is_ignored(self):
+        (self.settings / READ_ONLY_MARKER).mkdir()
+        assert read_only_reason("abcd1234") is None

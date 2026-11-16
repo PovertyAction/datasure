@@ -9,8 +9,14 @@ per-variable labels, notes, and value labels for select fields.
 from __future__ import annotations
 
 import re
+from collections.abc import Iterable, Mapping
 
-from datasure.replication.script_generators import _C, _LOG_CLOSE
+from datasure.replication.script_generators import (
+    _C,
+    _LOG_CLOSE,
+    _rename_imported_columns,
+    _stata_names,
+)
 
 _HTML_TAG_RE = re.compile(r"<[^>]+>")
 
@@ -408,19 +414,27 @@ def _emit_system_labels() -> list[str]:
 def _emit_survey_labels(
     survey_fields: list[tuple[str, str, str, str]],
     choices_map: dict[str, list[tuple[str, str]]],
+    name_map: Mapping[str, str] | None = None,
 ) -> list[str]:
-    """Emit per-variable labels, notes, and value labels for all survey fields."""
+    """Emit per-variable labels, notes, and value labels for all survey fields.
+
+    A field with a Stata name from ``name_map`` keeps its DataSure name as
+    its label, so its question text goes only in its note.
+    """
+    name_map = name_map or {}
     lines: list[str] = []
     used_label_sets: set[str] = set()
 
-    for name, base, list_name, label in survey_fields:
+    for field, base, list_name, label in survey_fields:
         if base in _NOTE_TYPES:
             continue
+        name = name_map.get(field, field)
 
         esc = _clean_label(label)
         short = _truncate(esc, _LABEL_VAR_MAX)
 
-        lines.append(f'\tcap label variable {name} "{short}"')
+        if field not in name_map:
+            lines.append(f'\tcap label variable {name} "{short}"')
         if label:
             lines.append(f'\tcap note {name}: "{esc}"')
 
@@ -449,12 +463,18 @@ def _emit_append_and_save() -> list[str]:
         "\tif _rc == 0 {",
         "\t\tgen new_data_row=1",
         '\t\tappend using "`dtafile\'"',
-        "\t\tsort KEY",
+        "\t\t* old rows take the .csv position of the new row with the same KEY",
+        "\t\tbysort KEY (new_data_row): replace _ds_row = _ds_row[1] if missing(_ds_row)",
         "\t\tby KEY: gen num_for_key = _N",
         "\t\tdrop if num_for_key > 1 & ((`overwrite_old_data' == 0 & new_data_row == 1) | (`overwrite_old_data' == 1 & new_data_row != 1))",
         "\t\tdrop num_for_key",
         "\t\tdrop new_data_row",
         "\t}",
+        "",
+        "\t* restore .csv row order so prep steps by row index match DataSure;",
+        "\t* rows found only in old data go last, in KEY order",
+        "\tsort _ds_row KEY",
+        "\tdrop _ds_row",
         "",
         "\t* save data to Stata format",
         '\tsave "`dtafile\'", replace',
@@ -476,6 +496,8 @@ def generate_scto_import_script(
     form_title: str,
     survey_name: str,
     datasure_version: str,
+    columns: Iterable[str] = (),
+    name_map: Mapping[str, str] | None = None,
 ) -> str:
     """Generate a Stata import do-file from a SurveyCTO form definition JSON.
 
@@ -496,6 +518,12 @@ def generate_scto_import_script(
         Survey name used for raw CSV and DTA file naming.
     datasure_version : str
         DataSure version string (used in the script header comment).
+    columns : Iterable[str]
+        The raw CSV's columns, in order.
+    name_map : Mapping[str, str] | None
+        Stata names for column names Stata can't use. Mapped columns are
+        renamed right after import, and the rest of the script uses their
+        Stata names.
 
     Returns
     -------
@@ -509,6 +537,7 @@ def generate_scto_import_script(
     f_hdr, f_data, c_hdr, c_data = _parse_form(form_def)
     choices_map = _build_choices_map(c_hdr, c_data)
     lbl_col = _find_label_col(f_hdr)
+    name_map = name_map or {}
 
     note_fields, text_fields, date_fields, datetime_fields, survey_fields = (
         _classify_fields(f_hdr, f_data, lbl_col)
@@ -517,10 +546,10 @@ def generate_scto_import_script(
     L: list[str] = []
     L += _emit_preamble(form_title, form_id, csv_file, dta_file, datasure_version)
     L += _emit_type_locals(
-        _chunk_names(note_fields),
-        _chunk_names(text_fields),
-        _chunk_names(date_fields),
-        _chunk_names(datetime_fields),
+        _chunk_names(_stata_names(note_fields, name_map)),
+        _chunk_names(_stata_names(text_fields, name_map)),
+        _chunk_names(_stata_names(date_fields, name_map)),
+        _chunk_names(_stata_names(datetime_fields, name_map)),
     )
     L += [
         'disp ""',
@@ -529,6 +558,10 @@ def generate_scto_import_script(
         "",
         "* import data from primary .csv file",
         'insheet using "`csvfile\'", names case clear',
+        "",
+        *_rename_imported_columns(columns, name_map),
+        "* record .csv row order; prep steps by row index rely on it",
+        "gen long _ds_row = _n",
         "",
         "* drop extra table-list columns",
         "cap drop reserved_name_for_field_*",
@@ -542,7 +575,7 @@ def generate_scto_import_script(
     L += _emit_coerce_text_fields()
     L += _emit_consolidate_key()
     L += _emit_system_labels()
-    L += _emit_survey_labels(survey_fields, choices_map)
+    L += _emit_survey_labels(survey_fields, choices_map, name_map)
     L += _emit_append_and_save()
     L += [
         "}",

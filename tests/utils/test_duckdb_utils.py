@@ -13,6 +13,7 @@ from datasure.utils.duckdb_utils import (
     check_table_name,
     duckdb_delete_rows,
     duckdb_get_aliases,
+    duckdb_get_columns,
     duckdb_get_imported_datasets,
     duckdb_get_table,
     duckdb_save_table,
@@ -463,6 +464,15 @@ class TestIntegration:
                 retrieved_df.to_pandas().sort_values("id").reset_index(drop=True)
             )
             pd.testing.assert_frame_equal(test_pd, retrieved_pd)
+
+    def test_get_columns_lists_names_in_order_without_rows(self, tmp_path):
+        with patch("datasure.utils.duckdb_utils.get_cache_path") as mock_path:
+            mock_path.return_value = tmp_path / "test.duckdb"
+            df = pl.DataFrame({"visit date": [1], "b": ["x"], "a": [2.0]})
+            duckdb_save_table("p", df, "survey", "raw")
+
+            assert duckdb_get_columns("p", "survey", "raw") == ["visit date", "b", "a"]
+            assert duckdb_get_columns("p", "missing", "raw") == []
 
 
 class TestValidateColumnName:
