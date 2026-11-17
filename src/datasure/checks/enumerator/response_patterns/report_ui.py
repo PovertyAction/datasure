@@ -587,7 +587,9 @@ def _render_range_detail(e: RangeCompressionEnumerator, min_sample: int) -> None
             ),
         ]
     )
-    if v.sample_band == SampleBand.LOW:
+    # The heading and verdict describe the scoring variable, so keep its
+    # caution even when the selected variable has enough responses
+    if SampleBand.LOW in (e.sample_band, v.sample_band):
         st.warning(LOW_SAMPLE_WARNING, icon=":material/warning:")
     st.plotly_chart(
         _range_histogram(v, e.enumerator, v.variable in e.flagged_variables),

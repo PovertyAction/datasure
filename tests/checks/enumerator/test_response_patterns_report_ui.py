@@ -7,7 +7,10 @@ import polars as pl
 import pytest
 from streamlit.testing.v1 import AppTest
 
-from datasure.checks.enumerator.response_patterns.report_ui import _bucket_label
+from datasure.checks.enumerator.response_patterns.report_ui import (
+    LOW_SAMPLE_WARNING,
+    _bucket_label,
+)
 
 ENUM = "enum"
 
@@ -513,6 +516,25 @@ class TestRangeCompressionTab:
         assert not at.exception
         spec = json.loads(at.get("plotly_chart")[1].proto.spec)
         assert "income" in spec["layout"]["xaxis"]["title"]["text"]
+
+    def test_low_sample_warning_follows_the_scoring_variable(self, settings_file):
+        # anchor answers age only 20 times (low sample) but income 40 times;
+        # age still sets the flag, so its caution stays on income too
+        data = _range_frame(
+            {"anchor": SPREAD, "steady": SPREAD, "careful": SPREAD}
+        ).with_columns(
+            age=pl.Series(_narrowed(SPREAD, 0.4)[:20] + [None] * 20 + SPREAD * 2)
+        )
+        _save(settings_file, selected_variables=["age", "income"])
+        at = _run(data, settings_file)
+        assert LOW_SAMPLE_WARNING in _texts(_range_tab(at).warning)
+
+        _range_tab(at).selectbox[0].set_value("income").run()
+
+        assert not at.exception
+        tab = _range_tab(at)
+        assert "on **age**" in _texts(tab.markdown)
+        assert LOW_SAMPLE_WARNING in _texts(tab.warning)
 
     def test_selecting_a_row_shows_that_enumerator(self, range_data, settings_file):
         _save(settings_file, selected_variables=["age"])
