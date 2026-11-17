@@ -57,6 +57,8 @@ CAT_CHART_KEY = "rp_cat_chart"
 # Digit Preference table column names
 _ROUND_PCT_COL = "Ending in 0 or 5 (%)"
 _TEAM_PCT_COL = "Rest of team (%)"
+# Range Compression table column and detail metric name
+_SD_RATIO_LABEL = "SD ratio"
 
 BADGE_COLORS: dict[Badge, str] = {
     Badge.NA: "gray",
@@ -427,17 +429,17 @@ def _render_range_table(
             "Enumerator": [e.enumerator for e in enumerators],
             "Interviews": [e.interviews for e in enumerators],
             "Top variable": [v.variable if v else None for v in top],
-            "SD ratio": [e.sd_ratio for e in enumerators],
+            _SD_RATIO_LABEL: [e.sd_ratio for e in enumerators],
             "Flag": [e.badge.value for e in enumerators],
         }
     )
     row = _render_enumerator_table(
         table,
-        {"Interviews": "{:,}", "SD ratio": "{:.2f}"},
+        {"Interviews": "{:,}", _SD_RATIO_LABEL: "{:.2f}"},
         {
             "Top variable": "The variable where the enumerator's spread is "
             "narrowest compared with the rest of the team's",
-            "SD ratio": "The enumerator's standard deviation on the top "
+            _SD_RATIO_LABEL: "The enumerator's standard deviation on the top "
             "variable over the rest of the team's. Under 1 means a narrower "
             "spread.",
         },
@@ -608,7 +610,7 @@ def _render_range_detail(e: RangeCompressionEnumerator, min_sample: int) -> None
                 f"Rest of team: {_num(v.team_sd)}",
             ),
             (
-                "SD ratio",
+                _SD_RATIO_LABEL,
                 f"{v.sd_ratio:.2f}",
                 "Under 1 means a narrower spread than the rest of the team's",
             ),
