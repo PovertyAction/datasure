@@ -33,6 +33,10 @@ from datasure.utils.ui_utils import metric_row, section_header, styled_dataframe
 
 DP_TABLE_KEY = "rp_dp_enumerators"
 
+# Digit Preference table column names
+_ROUND_PCT_COL = "Ending in 0 or 5 (%)"
+_TEAM_PCT_COL = "Rest of team (%)"
+
 BADGE_COLORS: dict[Badge, str] = {
     Badge.NA: "gray",
     Badge.LOW: "green",
@@ -124,8 +128,8 @@ def _render_digit_table(
             "Enumerator": [e.enumerator for e in enumerators],
             "Interviews": [e.interviews for e in enumerators],
             "Responses": [e.n_responses for e in enumerators],
-            "Ending in 0 or 5 (%)": [e.enum_pct for e in enumerators],
-            "Rest of team (%)": [e.team_pct for e in enumerators],
+            _ROUND_PCT_COL: [e.enum_pct for e in enumerators],
+            _TEAM_PCT_COL: [e.team_pct for e in enumerators],
             "Ratio": [e.ratio for e in enumerators],
             "Flag": [e.badge.value for e in enumerators],
         }
@@ -134,8 +138,8 @@ def _render_digit_table(
         {
             "Interviews": "{:,}",
             "Responses": "{:,}",
-            "Ending in 0 or 5 (%)": "{:.1f}",
-            "Rest of team (%)": "{:.1f}",
+            _ROUND_PCT_COL: "{:.1f}",
+            _TEAM_PCT_COL: "{:.1f}",
             "Ratio": format_ratio,
         },
         na_rep="—",
@@ -155,10 +159,10 @@ def _render_digit_table(
             "Responses": st.column_config.Column(
                 help="Non-missing responses pooled across the checked variables"
             ),
-            "Ending in 0 or 5 (%)": st.column_config.Column(
+            _ROUND_PCT_COL: st.column_config.Column(
                 help="Share of the enumerator's responses ending in 0 or 5"
             ),
-            "Rest of team (%)": st.column_config.Column(
+            _TEAM_PCT_COL: st.column_config.Column(
                 help="The same share for every other enumerator"
             ),
             "Ratio": st.column_config.Column(
