@@ -43,6 +43,9 @@ class CheckData:
     # None when the page has no backcheck dataset. Otherwise kept as loaded,
     # even with no rows, so the Backchecks check can say why it is empty.
     backcheck_data: pl.DataFrame | None = None
+    # The Progress check's tracking file or master list: None when the page
+    # has none, otherwise kept as loaded, like the backcheck data.
+    tracking_data: pl.DataFrame | None = None
 
     @property
     def backcheck_state(self) -> TableState:
@@ -58,6 +61,20 @@ class CheckData:
             return self.backcheck_data
         return None
 
+    @property
+    def tracking_state(self) -> TableState:
+        """The state of the tracking table; MISSING when none is configured."""
+        if self.tracking_data is None:
+            return TableState.MISSING
+        return get_table_state(self.tracking_data)
+
+    @property
+    def tracking_data_with_rows(self) -> pl.DataFrame | None:
+        """The tracking data for Progress, or None when it has no rows."""
+        if self.tracking_state is TableState.HAS_ROWS:
+            return self.tracking_data
+        return None
+
 
 @dataclass(frozen=True)
 class CheckContext:
@@ -70,7 +87,7 @@ class CheckContext:
     config : PageConfig
         The check page's configuration.
     data : CheckData
-        The survey data and backcheck data loaded for the page.
+        The survey, backcheck and tracking data loaded for the page.
     survey_columns : ColumnByType
         The survey data's columns by type.
     """
