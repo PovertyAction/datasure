@@ -115,9 +115,11 @@ class TestStopIfNoSurveyData:
 class TestLoadCheckData:
     """Zero-row backcheck data is told apart from no backcheck data."""
 
-    def _config(self, backcheck_data_name):
+    def _config(self, backcheck_data_name, tracking_data_name=None):
         return SimpleNamespace(
-            survey_data_name=ALIAS, backcheck_data_name=backcheck_data_name
+            survey_data_name=ALIAS,
+            backcheck_data_name=backcheck_data_name,
+            tracking_data_name=tracking_data_name,
         )
 
     def test_zero_row_backcheck_has_no_rows(self):
@@ -153,6 +155,24 @@ class TestLoadCheckData:
 
         assert data.backcheck_state is TableState.HAS_ROWS
         assert data.backcheck_data_with_rows.height == 1
+
+    def test_tracking_dataset_is_loaded_with_the_same_fallback(self):
+        _save(_rows(2), "raw")
+        duckdb_save_table(PROJECT_ID, _rows(3), "tracking", "raw")
+        duckdb_save_table(PROJECT_ID, _rows(1), "tracking", "prep")
+
+        data = template.load_check_data(
+            PROJECT_ID, self._config(None, tracking_data_name="tracking")
+        )
+
+        assert data.tracking_data.height == 1  # prep before raw
+
+    def test_unconfigured_tracking_dataset_is_none(self):
+        _save(_rows(2), "raw")
+
+        data = template.load_check_data(PROJECT_ID, self._config(None))
+
+        assert data.tracking_data is None
 
 
 class TestNoRowsMessage:

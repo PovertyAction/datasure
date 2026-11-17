@@ -460,7 +460,7 @@ The log entry shows the renames each run actually made.
 
 **Columns used by checks or corrections**: if a column you rename is used by
 a check page's settings (such as the survey ID, enumerator, duplicate or GPS
-columns) or by entries in the correction log, clicking **Add** lists those
+columns, or Progress's Target source columns in a tracking dataset) or by entries in the correction log, clicking **Add** lists those
 uses in a warning in the same dialog before the step is added. Choose **Rename anyway** to go ahead or **Cancel**
 to stop. DataSure doesn't update those settings or corrections for you, so
 update them afterwards. Renames that touch no such columns add the step
@@ -543,7 +543,14 @@ Convert `submissiondate` column to datetime format for both survey and backcheck
    - Must have matching ID column
    - Used for validation comparisons
 
-6. Click "Add Check Configuration"
+6. **Optional: Add Tracking Dataset**:
+   - A tracking file (one row per unit, such as a village, with its target)
+     or a master list (one row per expected respondent)
+   - Import it on the Import Data page like any other dataset
+   - The Progress check takes its target from it; see
+     [Target from a tracking dataset](#target-from-a-tracking-dataset)
+
+7. Click "Add Check Configuration"
 
 #### What Happens Next
 
@@ -1065,7 +1072,7 @@ one shared column header, and each check sits in its own box. Each row shows:
 
 | Check | Outstanding | Detail | Resolved |
 | --- | --- | --- | --- |
-| Progress | Submissions out of the target, for example "310 / 500", or the submissions when no target is set | Share of the target reached | — |
+| Progress | Completed IDs out of the target, for example "310 / 500", or the completed IDs when no target is set. With a tracking dataset the target is its total | Share of the target reached | — |
 | Missing Values | Share of columns where every value is missing, counting missing codes | "of columns all missing (5 of 40)" | — |
 | Duplicates | Duplicate survey IDs not yet resolved, after Records to Include | "duplicate IDs" | Duplicate IDs resolved through corrections |
 | Outliers & Constraints | Outliers plus constraint violations, leaving out accepted flags | For example "3 outliers (1.4% of values), 1 constraint violation" | Flags accepted as valid, and corrected values that were flagged before the correction and are no longer flagged, once for each check that flagged them. Correcting a value that was never flagged does not count |
@@ -1114,7 +1121,7 @@ as new.
 
 | Check | Change shows |
 | --- | --- |
-| Progress | New submissions dated in the period, for example "▲ 12 new submissions since yesterday" |
+| Progress | IDs first completed in the period, for example "▲ 12 new completions since yesterday". An ID completed before the period does not count again when it is submitted again |
 | Missing Values | The change in the share of columns all missing, in percentage points, for example "▼ 2.50 pp since yesterday" |
 | Duplicates | Unresolved duplicate IDs held by a submission dated in the period, for example "▲ 3 new since yesterday". An ID that was already duplicated before the period counts when a submission in the period joins it |
 | Outliers & Constraints | Flags on submissions dated in the period that are not accepted or corrected. The flags are not worked out again on the earlier submissions, since that would move the outlier bounds |
@@ -1161,58 +1168,260 @@ have no button; their row says why.
 
 ### Progress Report
 
-**Purpose**: Detailed submission tracking and progress monitoring
+**Purpose**: Track completed interviews against the target, and see whether
+fieldwork will finish on time
 
-#### Sections
+#### Counts
 
-##### Progress Settings
+Progress counts three things:
 
-Configure parameters:
+- **Submissions**: every submission
+- **Unique**: distinct survey IDs
+- **Completed**: distinct survey IDs with at least one submission that meets
+  the completion condition. With no completion condition, Completed equals
+  Unique
 
-- **Survey ID**: Respondent identifier
-- **Survey Key**: Unique row identifier
-- **Date**: Submission date column
-- **Enumerator**: Data collector column
-- **Target Number of Interviews**: Expected total
-- **Target Submissions Per Period**: Target rate per time interval
+The percentage complete, the progress bar and the Progress row on Summary use
+Completed out of the target, so duplicate submissions, refusals and partial
+interviews don't overstate progress.
 
-##### Progress Summary
+#### Header
 
-High-level metrics:
+The header sits at the top of the page, above the sections. It shows:
 
-- Submission progress (%)
-- Target interviews
-- Total submitted interviews
+- any problems with the tracking dataset (see
+  [Target from a tracking dataset](#target-from-a-tracking-dataset))
+- where the target comes from (a fixed number, a tracking file or a master
+  list, with the dataset's name) and the completion condition the numbers
+  are based on
+- a **things need attention** pill when Overview has to-do cards. Select it
+  to jump to them
+- the percentage complete and the completed IDs out of the target, with how
+  many are still to go, above a progress bar. Past the target the bar stays
+  full and the percentage goes above 100%
+- a status box that says in a sentence whether fieldwork will finish on
+  time. The projected finish is when the target is reached at the current
+  pace, counting today as a day of fieldwork, as **Days left** does:
+  - **On track** (green): the projected finish and how many days before the
+    field end date it falls
+  - **Behind schedule** (amber): how many days after the field end date the
+    projected finish falls, and the completions a day needed to finish on
+    time
+  - With no field end date, the projected finish alone
+  - It also tells you when the target is reached, when the field end date
+    has passed, when there are fewer than 3 days of submissions to work out
+    a pace, and when nothing was completed in the last 7 days
+- a row of smaller numbers:
+  - **Submissions** and **Unique**, and **Completed** when no target is set
+  - **Today**, **This week** or **This month**: IDs first completed in the
+    current period against the per-period target, following the period
+    chosen on Overview. Shown only when a per-period target is set
+  - **Pace**: the mean completions per day over the 7 days up to the last
+    submission (or since the first submission, when fieldwork lasted less
+    than 7 days). A pause in submissions doesn't lower the pace. Shown as
+    "—" with fewer than 3 days of submissions
+  - **Days left**: days to the field end date, counting today. Shown only
+    when a field end date is set
 
-##### Submission Trends
+#### Overview
 
-Visualize collection patterns:
+To-do cards come first, each shown only when its count is above zero and
+linking to the section with the detail:
 
-- **Time Interval Toggle**: Day, Week, Month
-- Line chart showing cumulative submissions
-- Identify collection peaks and gaps
+- **Unexpected IDs**: survey IDs not on the master list (Respondents)
+- **Units below 50% of target** (By unit)
+- **Untracked units**: survey units the tracking file has no target for
+  (By unit)
+- **Respondents open after 3+ attempts** (Follow-up)
 
-##### Attempted Interviews
+Then a chart of completions against the target, with a **Daily**,
+**Weekly** or **Monthly** choice:
 
-Track multiple attempts:
+- **Cumulative** (the default): completed IDs over time against the target
+  path. With a field end date the target path rises from 0 to the target on
+  that date; without one, or when the field end date is before the first
+  completion, it is a flat line at the target
+- **Per period**: completions in each period against the per-period target.
+  Green bars meet the target, red bars fall short
 
-- Total submitted interviews
-- Number of unique IDs
-- Min/Max attempts per respondent
-- **Bar chart**: Attempts over time
-- **Data table**: Attempts by respondent ID
+Each ID counts once, in the period of its first submission that meets the
+completion condition. The chart runs from the first completion to the
+period of the last submission, so periods after data collection stopped are
+not shown; periods in between with no completions show 0. A submission
+dated after today, for example from a device with a wrong clock, counts as
+Completed but is left out of the chart, the current period and the pace, so
+the chart never runs past today. When the last
+period is the current one it is drawn as unfinished: a dotted line or a
+faded bar.
 
-##### Consent and Completion Progress
+The chart view and period are remembered for the page.
 
-Monitor survey completion:
+#### Follow-up
 
-- **Consent Rate**: % who provided consent
-- **Completion Rate**: % who completed survey
+Who needs another visit, and how many tries a completion takes. An attempt
+is a submission of an ID; an ID's attempts are numbered from 1 in date order.
 
-**Setup**:
+- **Need follow-up**: IDs attempted but never completed
+- **Done on 1st try**: completions at the first attempt, as a share of all
+  completions
+- **Avg attempts per completion**: the mean attempt number completions came at.
+  Submissions after an ID's first completion are not counted
+- **3+ attempts, still open**: IDs still open after 3 or more attempts. When
+  there are any, Overview shows a **Respondents open after 3+ attempts** card
+  with a link down to this section
+- **Attempts to outcome**: a chart that shows, for attempts 1, 2, 3 and 4+, how
+  many IDs were completed at that attempt and how many are still open after
+  exactly that many attempts (4 or more for 4+), so each open ID is in one bar
+- **Follow-up queue**: one row per open ID, with its number of attempts and
+  the outcome, date, days since and enumerator of its last attempt. The IDs
+  with the most attempts come first, then those waiting longest since their
+  last attempt. Filter it by last outcome and minimum attempts, and download
+  it as CSV with the filters applied. Select a row to see each of its
+  attempts: number, date, outcome and enumerator
 
-- Consent column and value (e.g., "consent" = "yes")
-- Completion column and value (e.g., "completion_status" = "complete")
+The last outcome is the value of the outcome column in the completion
+condition. Without an outcome column it shows "not complete". The enumerator
+is the page's enumerator column.
+
+The section's title shows how many IDs are in the queue when there are any.
+
+Without a completion condition there is no queue. The section shows repeat IDs
+(IDs submitted more than once), the submissions per ID and the most
+submissions of one ID, with a chart of how many IDs were submitted 1, 2, 3 or
+4+ times, and a note that setting a completion condition turns on the queue.
+
+Follow-up needs the survey ID column. Without it the section asks you to
+choose one, and shows no queue, badge or to-do card.
+
+The queue filters are remembered for the page.
+
+#### Target from a tracking dataset
+
+The target is a fixed number unless the page configuration sets a
+**Tracking Dataset**. The settings then decide how it is read:
+
+| Tracking dataset | Target column chosen | Target |
+| --- | --- | --- |
+| none | — | Fixed number |
+| set | yes | **Tracking file**: one row per unit with its target |
+| set | no | **Master list**: one row per expected respondent |
+
+- **Tracking file**: each unit's target is its target column. Submissions
+  get their unit from the survey's unit column.
+- **Master list**: each unit's target is its number of respondents.
+  Submissions get their unit by matching their survey ID to the master
+  list's ID column, so the survey needs no unit column. The master list's
+  unit column is optional: without one, the first parent column is the
+  unit, and without either, everyone is in a single **All** unit.
+- **Parent columns** (optional, finest first, such as district then region)
+  add levels to By unit. A parent's target is the sum of its units'.
+- The total target is the sum of the units' targets. **Total Expected
+  Interviews** then shows that total and can't be edited.
+- **Completed**, **Remaining** and **% complete** count only completions in
+  units with a target, as do the chart and the pace. Completions in
+  untracked units, or by survey IDs not on the master list, have no share
+  of the target, so they are left out and the header says how many there
+  are. They are still in **Submissions** and **Unique**, and in the
+  Untracked group on By unit.
+
+IDs and units are matched as text with spaces trimmed, so `R-0012 ` matches
+`R-0012`. Case matters. **Ignore leading zeros in IDs and units** also matches
+`0123` to `123`.
+
+The page tells you about any problem with the tracking dataset:
+
+- A unit (tracking file) or ID (master list) that appears more than once
+  stops the dataset being used, and the repeated values are listed. Fix the
+  dataset and import it again.
+- A row with no unit or ID is left out, and the page says how many.
+- A missing, non-numeric or negative target counts as 0, and the page lists
+  those units. A fractional target is rounded down, with its own warning.
+- A master-list respondent with no unit is counted in a "(blank)" unit, with
+  a warning. A unit whose rows disagree on a parent column is placed under
+  the first value, and the page lists those units.
+
+A tracking dataset that is set but not imported, or has no rows, leaves the
+fixed target in use until it is imported. If a re-imported tracking
+dataset, or a prep step on the survey, removes or renames a column chosen in
+Target source, the page warns you and counts without it until you pick the
+column again; Summary's Progress row won't match until you do.
+
+#### By unit
+
+Shown with a tracking file or a master list. A table of each unit's target,
+submissions, unique and completed IDs, % complete and remaining
+completions, with the lowest % complete first and the Untracked group last:
+
+- **Level**: units, or a parent level, when parent columns are set
+- **Show**: all units, those **behind** (below 50% of target), those **over
+  target** (above 100%, tagged "Over target"), or the **Untracked** group
+- **% complete** is a bar that fills at 100% and is red below 50%
+- **Untracked** counts submissions whose unit isn't in the tracking
+  dataset or has a target of 0, and survey IDs not on the master list
+- Download the table as CSV, with the filter applied
+
+The level and filter are remembered for the page.
+
+#### Respondents
+
+Shown with a master list. Each respondent on the list has a status:
+
+- **Completed**: has a submission that meets the completion condition
+- **Attempted not completed**: has submissions, none that meet it
+- **Pending**: has no submissions
+
+A survey ID not on the master list is **Unexpected**. Unexpected IDs have
+no unit and are counted in the Untracked group.
+
+- **To visit**: one table of the Pending and Attempted-not-completed
+  respondents, grouped by unit with the unit furthest behind first, and
+  each unit's % complete. Download it as a CSV
+- **Unexpected IDs**: with their number of submissions and last submission
+  date
+- **Completed**: the respondents who completed
+
+Choose **Extra columns for respondent lists** in the settings to show and
+export master-list columns, such as a landmark, with each list.
+
+Master lists often hold names and phone numbers. Treat them as
+confidential, and check your organization's data rules before choosing them
+as extra columns or sharing the exported lists.
+
+#### Settings
+
+The **settings** expander at the top of the page, as on Summary, holds every
+Progress setting. Each is saved for the page as you change it:
+
+- **Survey Key**, **Survey ID** and **Survey Date** columns
+- **Target source**: with a tracking dataset, the target column, the unit
+  column in the tracking dataset, the unit column in the survey (tracking
+  file) or the ID column in the master list, the parent columns, the
+  leading-zero toggle and the extra columns for respondent lists. To clear
+  the target column or either unit column, choose **None**: a master list
+  has no target column, and its unit column is optional. Without
+  one, a note that adding a tracking dataset turns on By unit (and
+  Respondents for a master list)
+- **Total Expected Interviews**: the target number of completed IDs. It
+  starts from the page's survey target. With a tracking dataset it shows the
+  dataset's total and can't be edited
+- **Target Completions Per Period**: completions per day, week or month; 0
+  sets no target
+- **Field End Date** (optional): the day fieldwork should finish
+- **Completion condition** (optional): a consent column and the values that
+  mean consent, and an outcome column and the values that mean a completed
+  interview (for example `consent` = "yes" and `completion_status` =
+  "complete"). A submission meets the condition when it has one of the
+  values in each column set. Text, category, whole-number and true/false
+  columns are offered, including decimal columns whose values are all whole
+  numbers (as Stata's `gen` stores 0/1 codes). Date columns and columns with
+  fractions are not. If refreshed data changes a column's type, saved values
+  are converted to it (1 becomes "1" for a text column); values that can't
+  be converted are dropped and the page warns you. When you change a column,
+  values the new column doesn't have are dropped, so Summary's Progress row
+  counts the same condition as the page. Values you chose stay chosen when
+  refreshed data no longer has them. If a prep step removes or renames a
+  column the condition uses, or it starts holding fractions, the page warns
+  you and counts without it until you pick another column
 
 ---
 

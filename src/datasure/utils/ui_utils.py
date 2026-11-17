@@ -59,7 +59,7 @@ def page_header(title: str, subtitle: str | None = None, *, divider: bool = True
         st.divider()
 
 
-def section_header(text: str, icon: str | None = None):
+def section_header(text: str, icon: str | None = None, anchor: str | None = None):
     """Render a standard section subheader.
 
     Parameters
@@ -71,11 +71,14 @@ def section_header(text: str, icon: str | None = None):
     icon : str, optional
         A Material Symbols shortcode (e.g. ``":material/key:"``) rendered
         before the label.
+    anchor : str, optional
+        A fixed anchor, so a ``[link](#anchor)`` reaches the section even
+        when its label changes. By default Streamlit makes one from the label.
     """
     import streamlit as st
 
     label = f"{icon} {text}" if icon else text
-    st.subheader(label)
+    st.subheader(label, anchor=anchor)
 
 
 def metric_row(metrics: Sequence[tuple]):

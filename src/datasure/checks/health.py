@@ -218,7 +218,7 @@ def _change_text(change: float, kind: DeltaKind, since: str) -> str:
     if change == 0:
         nothing = {
             DeltaKind.NEW: "No new issues",
-            DeltaKind.SUBMISSIONS: "No new submissions",
+            DeltaKind.COMPLETIONS: "No new completions",
         }.get(kind, "No change")
         return f"{nothing} since {since}"
     arrow = "▲" if change > 0 else "▼"
@@ -226,8 +226,8 @@ def _change_text(change: float, kind: DeltaKind, since: str) -> str:
     if kind is DeltaKind.POINTS:
         return f"{arrow} {size:.2f} pp since {since}"
     size = int(size)
-    if kind is DeltaKind.SUBMISSIONS:
-        noun = "submission" if size == 1 else "submissions"
+    if kind is DeltaKind.COMPLETIONS:
+        noun = "completion" if size == 1 else "completions"
         return f"{arrow} {size:,} new {noun} since {since}"
     if kind is DeltaKind.ACTIVE:
         more = "more" if change > 0 else "fewer"
@@ -330,6 +330,9 @@ def _settings_hash(path: Path) -> Hashable | None:
 def _page_fingerprint(ctx: CheckContext) -> Hashable:
     """What headlines depend on: data, page settings and settings tables.
 
+    The data is the survey, backcheck and tracking frames: Progress takes
+    its target from the tracking dataset.
+
     The settings files are hashed. The logs database (outlier and backcheck
     columns, missing codes, accepted flags, backcheck attributions) and the
     intermediate database (consent and outcome data, corrections) are stamped
@@ -345,6 +348,7 @@ def _page_fingerprint(ctx: CheckContext) -> Hashable:
         astuple(config),
         _frame_fingerprint(ctx.data.page_data),
         _frame_fingerprint(ctx.data.backcheck_data),
+        _frame_fingerprint(ctx.data.tracking_data),
         _settings_hash(Path(config.setting_file)),
         _content_hash(Path(config.missing_setting_file)),
         tuple(
