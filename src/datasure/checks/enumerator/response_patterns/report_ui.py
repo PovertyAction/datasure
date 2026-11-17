@@ -54,6 +54,10 @@ RC_VARIABLE_KEY = "rp_rc_variable"
 # Prefix of each question's Categorical Response Patterns chart
 CAT_CHART_KEY = "rp_cat_chart"
 
+# Digit Preference table column names
+_ROUND_PCT_COL = "Ending in 0 or 5 (%)"
+_TEAM_PCT_COL = "Rest of team (%)"
+
 BADGE_COLORS: dict[Badge, str] = {
     Badge.NA: "gray",
     Badge.LOW: "green",
@@ -247,8 +251,8 @@ def _render_digit_table(
             "Enumerator": [e.enumerator for e in enumerators],
             "Interviews": [e.interviews for e in enumerators],
             "Responses": [e.n_responses for e in enumerators],
-            "Ending in 0 or 5 (%)": [e.enum_pct for e in enumerators],
-            "Rest of team (%)": [e.team_pct for e in enumerators],
+            _ROUND_PCT_COL: [e.enum_pct for e in enumerators],
+            _TEAM_PCT_COL: [e.team_pct for e in enumerators],
             "Ratio": [e.ratio for e in enumerators],
             "Flag": [e.badge.value for e in enumerators],
         }
@@ -258,15 +262,14 @@ def _render_digit_table(
         {
             "Interviews": "{:,}",
             "Responses": "{:,}",
-            "Ending in 0 or 5 (%)": "{:.1f}",
-            "Rest of team (%)": "{:.1f}",
+            _ROUND_PCT_COL: "{:.1f}",
+            _TEAM_PCT_COL: "{:.1f}",
             "Ratio": format_ratio,
         },
         {
             "Responses": "Non-missing responses pooled across the checked variables",
-            "Ending in 0 or 5 (%)": "Share of the enumerator's responses ending "
-            "in 0 or 5",
-            "Rest of team (%)": "The same share for every other enumerator",
+            _ROUND_PCT_COL: "Share of the enumerator's responses ending in 0 or 5",
+            _TEAM_PCT_COL: "The same share for every other enumerator",
             "Ratio": "How many times as often the enumerator's answers end in "
             f"0 or 5 as the rest of the team's. {format_ratio(1)} is the same "
             "rate.",
