@@ -80,8 +80,8 @@ class DeltaKind(StrEnum):
     NEW = "new"
     # A change in percentage points, as for Missing Values.
     POINTS = "points"
-    # Submissions dated in the period, as for Progress.
-    SUBMISSIONS = "submissions"
+    # IDs first completed in the period, as for Progress.
+    COMPLETIONS = "completions"
     # A change in active enumerators, as for Enumerator Stats.
     ACTIVE = "active"
 

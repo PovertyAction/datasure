@@ -91,7 +91,17 @@ The `archived/` directory holds legacy code and is gitignored.
    dataset is read from the first of its `corrected`, `prep` and `raw` tables
    that exists (`load_data_with_fallback`). A table with no rows still counts,
    so a prep step or correction that removed every record shows an empty
-   dataset rather than older data
+   dataset rather than older data. `load_check_data` loads the survey data
+   and, when the page config names them, the backcheck and tracking datasets
+   this way into `CheckData`. The tracking dataset (a tracking file or a
+   master list) is used only by Progress: `CheckData.tracking_data_with_rows`
+   reaches `progress_report`, `progress_headline` and `resolve_progress`,
+   and an empty or unimported one leaves the fixed target in use.
+   `checks/progress_tracking.py` checks and keys it (`read_tracking`), gives
+   each submission its unit (`assign_units`) and computes the By unit
+   levels and the respondent statuses; `resolve_progress(ctx)` is the
+   contract other pages read the target, the achieved count and the unit
+   targets through
 6. **Corrections / replication**: apply corrections; export a replication
    package that reproduces the pipeline outside DataSure. Once an alias has a
    corrected table, any change to its prep data (a re-import, a prep step
@@ -350,8 +360,10 @@ On a check page this is the page settings file
   Data" header.
 - **Not saved.** Pagination, search boxes and inputs inside dialogs or
   popovers are never bound, so they start fresh in a new session. Bound
-  today: Summary's "Progress by" column and time period; the Progress time
-  period and extra attempted-interview columns; the Missing Values
+  today: Summary's "Progress by" column and time period; the Progress
+  chart view, time period and follow-up queue filters (last outcome and
+  minimum attempts); the
+  Missing Values
   threshold, date column, group-by and compare columns, all-columns toggle
   and correlation columns;
   the duplicates dataset switcher, card sort, column selector and extra
@@ -374,8 +386,13 @@ On a check page this is the page settings file
   `ViewState.adopt_legacy` when opened: a legacy value moves into the
   check's scope (unless one is already there) and leaves the settings
   section, so old files still load and the value then behaves as view
-  state. Configuration (Progress and Summary columns and targets, Progress
-  consent and outcome) stays with the check's settings.
+  state. Configuration (Progress and Summary columns and targets, the
+  Progress field end date and completion condition) stays with the check's
+  settings. Progress targets
+  saved under the old `target` and `target_per_period` keys are read as
+  `survey_target` and `target_submissions_per_period`
+  (`progress.LEGACY_TARGET_KEYS`), but only when the page config has no
+  value for that field.
 - **Not shared.** View state is personal. `without_view_state` drops it from
   project configuration exports, together with legacy values not yet moved
   (`LEGACY_VIEW_KEYS`, which `view_factory` checks each check's legacy keys

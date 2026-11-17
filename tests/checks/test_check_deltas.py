@@ -118,11 +118,32 @@ SURVEY = pl.DataFrame(
 
 
 class TestProgressDelta:
-    def test_new_submissions_are_the_ones_dated_in_the_period(self, tmp_path):
-        ctx = _ctx(_config(tmp_path), SURVEY)
+    # k4 repeats h3, already completed before the period; h5 is new in it.
+    DATA = pl.concat(
+        [SURVEY, pl.DataFrame({"key": ["k6"], "hhid": ["h5"], "when": ["2026-10-26"]})]
+    )
+
+    def test_new_completions_are_ids_first_completed_in_the_period(self, tmp_path):
+        ctx = _ctx(_config(tmp_path), self.DATA)
 
         assert _delta("progress", ctx) == CheckDelta(
-            outstanding=1, kind=DeltaKind.SUBMISSIONS
+            outstanding=1, kind=DeltaKind.COMPLETIONS
+        )
+
+    def test_ids_meeting_the_condition_only_in_the_period_are_new(self, tmp_path):
+        # h3 fails the condition before the period and meets it on k4.
+        data = self.DATA.with_columns(
+            pl.Series("status", ["done", "done", "partial", "done", "done", "done"])
+        )
+        config = _config(tmp_path)
+        _save_settings(
+            config.setting_file,
+            "progress",
+            {"outcome": "status", "outcome_vals": ["done"]},
+        )
+
+        assert _delta("progress", _ctx(config, data)) == CheckDelta(
+            outstanding=2, kind=DeltaKind.COMPLETIONS
         )
 
     def test_no_delta_without_a_date_column(self, tmp_path):
