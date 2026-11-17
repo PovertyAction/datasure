@@ -12,8 +12,8 @@ import polars as pl
 from datasure.checks import missing
 from datasure.checks.enumerator.response_patterns.models import (
     DIGIT_PREFERENCE_LEVELS,
-    MODERATE_MARGIN,
     NUMERIC_TYPES,
+    RANGE_COMPRESSION_LEVELS,
     Badge,
     CheckCondition,
     DigitPreferenceEnumerator,
@@ -21,7 +21,6 @@ from datasure.checks.enumerator.response_patterns.models import (
     PageCondition,
     RangeCompressionEnumerator,
     RangeCompressionResult,
-    RangeSignal,
     RangeVariable,
     ResponsePatternResults,
     ResponsePatternSettings,
@@ -48,13 +47,10 @@ _DIGIT = "__rp_digit"
 ROUND_DIGITS: tuple[int, ...] = (0, 5)
 MIN_DIGIT_RANGE: int = 10
 
-# Range Compression: each team SD between the means adds 33 points, so a
-# shift of about 1.5 SD scores 50 and about 3 SD scores 100
-SHIFT_POINTS_PER_SD: int = 33
-# Each side's values are capped at its own 5th and 95th percentiles before
-# scoring, so one extreme answer can't inflate everyone else's baseline SD
+# Range Compression: each side's values are capped at its own 5th and 95th
+# percentiles before taking SDs, so one extreme answer can't inflate everyone
+# else's baseline SD
 TRIM_QUANTILES: tuple[float, float] = (0.05, 0.95)
-_SCORE_DECIMALS: int = 6
 HISTOGRAM_BUCKETS: int = 10
 # The histogram spans the rest of the team's 1st to 99th percentile
 HISTOGRAM_QUANTILES: tuple[float, float] = (0.01, 0.99)
@@ -149,20 +145,29 @@ def _sort_key(result: DigitPreferenceEnumerator) -> tuple:
     return (result.ratio is None, -(result.ratio or 0), result.enumerator)
 
 
-def threshold_badge_band(score: float | None, threshold: int) -> Badge:
-    """Return the badge for a 0-100 ``score`` against the flag ``threshold``."""
-    if score is None:
+def range_badge_band(sd_ratio: float | None, sensitivity: Sensitivity) -> Badge:
+    """Return the badge for an SD ratio at ``sensitivity``.
+
+    High when the ratio is at or below the level's. Moderate when the next
+    more sensitive level would flag the enumerator. The most sensitive level
+    has no Moderate band.
+    """
+    if sd_ratio is None:
         return Badge.NA
-    if score >= threshold:
+    if sd_ratio <= RANGE_COMPRESSION_LEVELS[sensitivity].max_sd_ratio:
         return Badge.HIGH
-    if score >= threshold - MODERATE_MARGIN:
-        return Badge.MODERATE
+    levels = list(RANGE_COMPRESSION_LEVELS)
+    position = levels.index(sensitivity)
+    if position > 0:
+        stricter = RANGE_COMPRESSION_LEVELS[levels[position - 1]]
+        if sd_ratio <= stricter.max_sd_ratio:
+            return Badge.MODERATE
     return Badge.LOW
 
 
-def _score_sort_key(result: RangeCompressionEnumerator) -> tuple:
-    """Order highest score first, unscored enumerators last, then by name."""
-    return (result.score is None, -(result.score or 0), result.enumerator)
+def _range_sort_key(result: RangeCompressionEnumerator) -> tuple:
+    """Order lowest SD ratio first, enumerators without one last, then by name."""
+    return (result.sd_ratio is None, result.sd_ratio or 0, result.enumerator)
 
 
 def _pct(counts: list[int]) -> list[float]:
@@ -309,20 +314,6 @@ def _compute_digit_preference(
     )
 
 
-def _compression_score(sd_ratio: float) -> float:
-    """Return how far the enumerator's spread falls below the team's, 0-100.
-
-    50 means an SD ratio of 0.5; a spread at least as wide as the team's
-    scores 0.
-    """
-    return max(0.0, (1 - sd_ratio) * 100)
-
-
-def _shift_score(enum_mean: float, team_mean: float, team_sd: float) -> float:
-    """Return how far the enumerator's mean sits from the team's, 0-100."""
-    return min(100.0, abs(enum_mean - team_mean) / team_sd * SHIFT_POINTS_PER_SD)
-
-
 def _bucket_shares(values: pl.Series, low: float, width: float) -> list[float]:
     """Return the percentage of ``values`` in each histogram bucket.
 
@@ -371,7 +362,7 @@ def _range_variable(
     team_values: pl.Series,
     settings: ResponsePatternSettings,
 ) -> RangeVariable | SkipReason:
-    """Score one enumerator on one variable, or return why it can't be."""
+    """Compare one enumerator's spread on one variable, or return why not."""
     n = enum_values.len()
     band = sample_band(n, settings.min_sample, settings.warn_sample)
     # An SD needs at least two responses, whatever the minimum
@@ -385,25 +376,17 @@ def _range_variable(
     enum_trimmed = _trimmed(enum_values)
     enum_mean, team_mean = enum_trimmed.mean(), team_trimmed.mean()
     enum_sd = enum_trimmed.std()
-    sd_ratio = enum_sd / team_sd
-    # Rounded so float noise can't drop a score at a threshold just below it
-    compression = round(_compression_score(sd_ratio), _SCORE_DECIMALS)
-    shift = round(_shift_score(enum_mean, team_mean, team_sd), _SCORE_DECIMALS)
     edges, enum_pct, team_pct = _histogram(enum_values, team_values)
     return RangeVariable(
         variable=variable,
         n_responses=n,
         sample_band=band,
-        score=max(compression, shift),
-        # Compression wins a tie, as its verdict comes first
-        signal=RangeSignal.COMPRESSION if compression >= shift else RangeSignal.SHIFT,
-        compression_score=compression,
-        shift_score=shift,
         enum_mean=enum_mean,
         team_mean=team_mean,
         enum_sd=enum_sd,
         team_sd=team_sd,
-        sd_ratio=sd_ratio,
+        # Rounded as shown, so a ratio shown as 0.50 is flagged at 0.5
+        sd_ratio=round(enum_sd / team_sd, 2),
         bucket_edges=edges,
         enum_bucket_pct=enum_pct,
         team_bucket_pct=team_pct,
@@ -424,12 +407,13 @@ def _range_enumerator(
     values: dict[str, pl.DataFrame],
     settings: ResponsePatternSettings,
 ) -> RangeCompressionEnumerator:
-    """Score one enumerator on every eligible variable.
+    """Compare one enumerator's spread on every eligible variable.
 
-    The enumerator's score is their highest variable score, so one problem
-    question is never averaged away.
+    The enumerator's SD ratio is their lowest across variables, so one
+    problem question is never averaged away.
     """
-    threshold = settings.range_compression_threshold
+    sensitivity = settings.range_compression_sensitivity
+    max_sd_ratio = RANGE_COMPRESSION_LEVELS[sensitivity].max_sd_ratio
     scored: list[RangeVariable] = []
     skipped: dict[str, SkipReason] = {}
     bands: list[SampleBand] = []
@@ -447,21 +431,17 @@ def _range_enumerator(
         else:
             scored.append(result)
 
-    scored.sort(key=lambda v: -v.score)
+    scored.sort(key=lambda v: v.sd_ratio)
     top = scored[0] if scored else None
-    score = top.score if top else None
+    sd_ratio = top.sd_ratio if top else None
     return RangeCompressionEnumerator(
         enumerator=enum,
         interviews=n_interviews,
         sample_band=top.sample_band if top else _best_band(bands),
-        score=score,
-        badge=threshold_badge_band(score, threshold),
-        signal=top.signal if top else None,
+        sd_ratio=sd_ratio,
+        badge=range_badge_band(sd_ratio, sensitivity),
         variables=scored,
-        compression_variables=[
-            v.variable for v in scored if v.compression_score >= threshold
-        ],
-        shift_variables=[v.variable for v in scored if v.shift_score >= threshold],
+        flagged_variables=[v.variable for v in scored if v.sd_ratio <= max_sd_ratio],
         skipped_variables=skipped,
     )
 
@@ -472,11 +452,11 @@ def _compute_range_compression(
     interviews: dict[str, int],
     settings: ResponsePatternSettings,
 ) -> RangeCompressionResult:
-    """Score each enumerator's spread and level against the rest of the team."""
-    threshold = settings.range_compression_threshold
+    """Compare each enumerator's spread with the rest of the team's."""
+    sensitivity = settings.range_compression_sensitivity
     if not variables:
         return RangeCompressionResult(
-            threshold=threshold, condition=CheckCondition.NO_APPLICABLE_VARIABLES
+            sensitivity=sensitivity, condition=CheckCondition.NO_APPLICABLE_VARIABLES
         )
 
     skipped: dict[str, SkipReason] = {}
@@ -497,7 +477,7 @@ def _compute_range_compression(
             skipped[var] = reason
     if not values:
         return RangeCompressionResult(
-            threshold=threshold,
+            sensitivity=sensitivity,
             condition=CheckCondition.NO_ELIGIBLE_VARIABLES,
             skipped_variables=skipped,
         )
@@ -510,11 +490,11 @@ def _compute_range_compression(
         e.sample_band == SampleBand.INSUFFICIENT for e in enumerators
     )
     return RangeCompressionResult(
-        threshold=threshold,
+        sensitivity=sensitivity,
         condition=CheckCondition.ALL_BELOW_MINIMUM if all_insufficient else None,
         variables=list(values),
         skipped_variables=skipped,
-        enumerators=sorted(enumerators, key=_score_sort_key),
+        enumerators=sorted(enumerators, key=_range_sort_key),
     )
 
 
@@ -540,7 +520,7 @@ def compute_response_patterns(
     Returns
     -------
     ResponsePatternResults
-        Per check and enumerator: ratio or score, badge, sample-size band,
+        Per check and enumerator: ratio, badge, sample-size band,
         skipped variables and chart series; plus any condition that stops
         the section from running.
     """

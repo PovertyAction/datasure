@@ -461,73 +461,49 @@ def _range(results, name: str):
     )
 
 
-class TestRangeCompressionScore:
-    @pytest.mark.parametrize(("factor", "score"), [(1.0, 0), (0.5, 50), (0.0, 100)])
-    def test_compression_score_falls_with_the_sd_ratio(self, factor, score):
+class TestRangeCompressionSdRatio:
+    @pytest.mark.parametrize("factor", [1.0, 0.5, 0.0, 2.0])
+    def test_sd_ratio_is_the_enumerator_sd_over_the_team_sd(self, factor):
         data = _frame({"A": _scaled(BASE, factor), "B": BASE})
 
         results = compute_response_patterns(data, _settings(), ENUM, None)
 
         a = _range(results, "A")
-        assert a.score == pytest.approx(score)
-        assert a.signal == "compression"
+        assert a.sd_ratio == pytest.approx(factor)
         (var,) = a.variables
         assert var.sd_ratio == pytest.approx(factor)
-        assert var.compression_score == pytest.approx(score)
-        assert var.shift_score == pytest.approx(0)
+        assert var.enum_sd == pytest.approx(factor * BASE_SD)
+        assert var.team_sd == pytest.approx(BASE_SD)
 
-    def test_wider_spread_than_the_team_scores_0(self):
-        data = _frame({"A": _scaled(BASE, 2.0), "B": BASE})
+    def test_sd_ratio_is_rounded_to_two_decimals_as_shown(self):
+        data = _frame({"A": _scaled(BASE, 0.4444), "B": BASE})
 
         results = compute_response_patterns(data, _settings(), ENUM, None)
 
-        assert _range(results, "A").score == pytest.approx(0)
+        assert _range(results, "A").sd_ratio == 0.44
 
     @pytest.mark.parametrize(
-        ("team_sds", "score"), [(0, 0), (50 / 33, 50), (100 / 33, 100), (5, 100)]
+        ("factor", "badge"), [(0.5, "High"), (0.6, "Moderate"), (0.7, "Low")]
     )
-    def test_shift_score_rises_33_points_per_team_sd(self, team_sds, score):
-        data = _frame({"A": _scaled(BASE, 1.0, shift=team_sds * BASE_SD), "B": BASE})
+    def test_medium_flags_at_half_the_team_spread(self, factor, badge):
+        data = _frame({"A": _scaled(BASE, factor), "B": BASE})
 
         results = compute_response_patterns(data, _settings(), ENUM, None)
 
         a = _range(results, "A")
-        assert a.score == pytest.approx(score)
+        assert a.badge == badge
+        assert a.flagged_variables == (["x"] if badge == "High" else [])
+
+    def test_a_shifted_mean_with_the_same_spread_is_not_flagged(self):
+        data = _frame({"A": _scaled(BASE, 1.0, shift=3 * BASE_SD), "B": BASE})
+
+        results = compute_response_patterns(data, _settings(), ENUM, None)
+
+        a = _range(results, "A")
+        assert a.sd_ratio == pytest.approx(1)
+        assert a.badge == "Low"
         (var,) = a.variables
-        assert var.shift_score == pytest.approx(score)
-        assert var.compression_score == pytest.approx(0)
-        assert var.enum_mean - var.team_mean == pytest.approx(team_sds * BASE_SD)
-
-    def test_shift_below_the_team_scores_the_same_as_above(self):
-        data = _frame({"A": _scaled(BASE, 1.0, shift=-50 / 33 * BASE_SD), "B": BASE})
-
-        results = compute_response_patterns(data, _settings(), ENUM, None)
-
-        assert _range(results, "A").score == pytest.approx(50)
-        assert _range(results, "A").signal == "shift"
-
-    def test_both_signals_fire_and_the_higher_sets_the_score(self):
-        # Half the spread (compression 50) and 2 team SDs up (shift 66)
-        data = _frame({"A": _scaled(BASE, 0.5, shift=2 * BASE_SD), "B": BASE})
-
-        results = compute_response_patterns(data, _settings(), ENUM, None)
-
-        a = _range(results, "A")
-        assert a.score == pytest.approx(66)
-        assert a.signal == "shift"
-        assert a.badge == "High"
-        assert a.compression_variables == ["x"]
-        assert a.shift_variables == ["x"]
-
-    def test_only_signals_reaching_the_threshold_are_listed(self):
-        data = _frame({"A": _scaled(BASE, 0.4, shift=1 * BASE_SD), "B": BASE})
-
-        results = compute_response_patterns(data, _settings(), ENUM, None)
-
-        a = _range(results, "A")
-        assert a.signal == "compression"
-        assert a.compression_variables == ["x"]
-        assert a.shift_variables == []
+        assert var.enum_mean - var.team_mean == pytest.approx(3 * BASE_SD)
 
     def test_baseline_leaves_out_the_enumerator_being_scored(self):
         # A answers 100 higher than B and C. A's rest of team is B and C
@@ -541,7 +517,7 @@ class TestRangeCompressionScore:
         assert var.team_mean == pytest.approx(49.5)
         assert _range(results, "B").variables[0].team_mean == pytest.approx(99.5)
 
-    def test_enumerator_score_is_the_highest_variable_score(self):
+    def test_enumerator_sd_ratio_is_the_lowest_variable_ratio(self):
         data = pl.DataFrame(
             {
                 ENUM: ["A"] * 40 + ["B"] * 40,
@@ -554,22 +530,30 @@ class TestRangeCompressionScore:
         results = compute_response_patterns(data, settings, ENUM, None)
 
         a = _range(results, "A")
-        assert a.score == pytest.approx(70)
+        assert a.sd_ratio == pytest.approx(0.3)
         assert [v.variable for v in a.variables] == ["y", "x"]
-        assert a.variables[1].score == pytest.approx(20)
+        assert a.variables[1].sd_ratio == pytest.approx(0.8)
+        assert a.flagged_variables == ["y"]
+
+    def test_enumerators_are_sorted_lowest_sd_ratio_first(self):
+        data = _frame({"A": _scaled(BASE, 0.9), "B": _scaled(BASE, 0.3), "C": BASE[:5]})
+
+        results = compute_response_patterns(data, _settings(), ENUM, None)
+
+        names = [e.enumerator for e in results.range_compression.enumerators]
+        assert names == ["B", "A", "C"]
 
 
 class TestRangeCompressionTrimming:
     def test_one_extreme_value_does_not_flag_the_rest_of_the_team(self):
         # C recorded one 4,400 among answers of 30-69. Untrimmed, it sits in
-        # A's and B's rest of team, so both would score 100 for compression,
-        # and C would score 100 for shift.
+        # A's and B's rest of team, so both would have an SD ratio near 0.
         data = _frame({"A": BASE, "B": BASE, "C": BASE[:-1] + [4400.0]})
 
         results = compute_response_patterns(data, _settings(), ENUM, None)
 
         for name in ("A", "B", "C"):
-            assert _range(results, name).score < 15, name
+            assert _range(results, name).sd_ratio > 0.85, name
 
     def test_extreme_values_are_capped_at_the_5th_and_95th_percentiles(self):
         # 0-99 capped at its 4.95 and 94.05 percentiles: the mean stays 49.5
@@ -582,7 +566,7 @@ class TestRangeCompressionTrimming:
         assert var.enum_mean == pytest.approx(49.5)
         assert var.team_mean < 51
 
-    def test_enumerator_entirely_above_the_team_is_flagged_for_shift(self):
+    def test_enumerator_entirely_above_the_team_keeps_their_spread(self):
         # Every one of A's answers is above the team's 95th percentile, with
         # the same spread. Each side is capped at its own percentiles, so A's
         # spread is kept and A is not mistaken for compression.
@@ -591,9 +575,8 @@ class TestRangeCompressionTrimming:
         results = compute_response_patterns(data, _settings(), ENUM, None)
 
         a = _range(results, "A")
-        assert a.signal == "shift"
-        assert a.variables[0].sd_ratio == pytest.approx(1)
-        assert a.compression_variables == []
+        assert a.sd_ratio == pytest.approx(1)
+        assert a.flagged_variables == []
 
 
 class TestRangeCompressionSkips:
@@ -615,7 +598,7 @@ class TestRangeCompressionSkips:
             "x": "no variation in the rest of the team's responses"
         }
         assert [v.variable for v in a.variables] == ["y"]
-        assert a.score == pytest.approx(50)
+        assert a.sd_ratio == pytest.approx(0.5)
         # B's rest of team (A) does vary, so B is scored on x
         assert "x" in [v.variable for v in _range(results, "B").variables]
 
@@ -638,7 +621,7 @@ class TestRangeCompressionSkips:
 
         results = compute_response_patterns(data, _settings(), ENUM, None)
 
-        assert _range(results, "A").score == pytest.approx(50)
+        assert _range(results, "A").sd_ratio == pytest.approx(0.5)
 
     def test_variable_below_the_minimum_is_skipped_for_that_enumerator(self):
         data = pl.DataFrame(
@@ -662,7 +645,7 @@ class TestRangeCompressionSkips:
         results = compute_response_patterns(data, _settings(), ENUM, None)
 
         a = _range(results, "A")
-        assert a.score is None
+        assert a.sd_ratio is None
         assert a.badge == "N/A"
         assert a.sample_band == "insufficient"
         assert results.range_compression.enumerators[-1].enumerator == "A"
@@ -689,7 +672,7 @@ class TestRangeCompressionSkips:
 
         (var,) = _range(results, "A").variables
         assert var.n_responses == 40
-        assert var.score == pytest.approx(0)
+        assert var.sd_ratio == pytest.approx(1)
 
     def test_no_applicable_variables(self):
         data = pl.DataFrame({ENUM: ["A"] * 20 + ["B"] * 20, "x": ["yes", "no"] * 20})
@@ -729,20 +712,33 @@ class TestRangeCompressionHistogram:
         assert var.enum_bucket_pct[-1] == 0
 
 
-class TestRangeCompressionThreshold:
+class TestRangeCompressionSensitivity:
     @pytest.mark.parametrize(
-        ("threshold", "badge"), [(50, "High"), (65, "Moderate"), (80, "Low")]
+        ("sensitivity", "badge"),
+        [("high", "High"), ("medium", "Moderate"), ("low", "Low")],
     )
-    def test_badge_follows_its_own_threshold(self, threshold, badge):
-        data = _frame({"A": _scaled(BASE, 0.5), "B": BASE})
-        settings = _settings(range_compression_threshold=threshold)
+    def test_badge_follows_its_own_sensitivity(self, sensitivity, badge):
+        # SD ratio 0.6: within High's 0.65 but above Medium's 0.5
+        data = _frame({"A": _scaled(BASE, 0.6), "B": BASE})
+        settings = _settings(range_compression_sensitivity=sensitivity)
 
         results = compute_response_patterns(data, settings, ENUM, None)
 
         assert _range(results, "A").badge == badge
-        assert results.range_compression.threshold == threshold
+        assert results.range_compression.sensitivity == sensitivity
 
-    def test_saved_threshold_snaps_to_the_nearest_level(self):
-        settings = ResponsePatternSettings(range_compression_threshold=90)
+    def test_most_sensitive_level_has_no_moderate_band(self):
+        data = _frame({"A": _scaled(BASE, 0.7), "B": BASE})
+        settings = _settings(range_compression_sensitivity="high")
 
-        assert settings.range_compression_threshold == 80
+        results = compute_response_patterns(data, settings, ENUM, None)
+
+        assert _range(results, "A").badge == "Low"
+
+    def test_sensitivity_is_independent_of_digit_preference(self):
+        settings = ResponsePatternSettings(
+            digit_preference_sensitivity="low", range_compression_sensitivity="high"
+        )
+
+        assert settings.digit_preference_sensitivity == "low"
+        assert settings.range_compression_sensitivity == "high"

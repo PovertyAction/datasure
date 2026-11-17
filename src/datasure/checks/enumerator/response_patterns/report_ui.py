@@ -20,7 +20,7 @@ from datasure.checks.enumerator.response_patterns.compute import (
 )
 from datasure.checks.enumerator.response_patterns.models import (
     DIGIT_PREFERENCE_LEVELS,
-    THRESHOLD_LEVELS,
+    RANGE_COMPRESSION_LEVELS,
     Badge,
     CheckCondition,
     DigitPreferenceEnumerator,
@@ -31,9 +31,11 @@ from datasure.checks.enumerator.response_patterns.models import (
     RangeVariable,
     ResponsePatternResults,
     SampleBand,
+    Sensitivity,
 )
 from datasure.checks.enumerator.response_patterns.settings_ui import (
     format_ratio,
+    format_sd_ratio,
     response_pattern_settings,
 )
 from datasure.utils.ui_utils import metric_row, section_header, styled_dataframe
@@ -130,7 +132,7 @@ def _render_enumerator_table(
 ) -> int:
     """Render a check's enumerator table and return the selected row.
 
-    Rows come sorted highest ratio or score first and the first row is
+    Rows come sorted most notable ratio first and the first row is
     selected by default, so the detail shows the enumerator most in need of
     attention. Clearing the selection falls back to that enumerator.
     """
@@ -195,11 +197,13 @@ def _render_check_conditions(
     return False
 
 
-def _render_threshold(threshold: int) -> None:
-    """Note Range Compression's flag threshold and where to change it."""
+def _render_range_sensitivity(sensitivity: Sensitivity) -> None:
+    """Note Range Compression's sensitivity and where to change it."""
+    level = RANGE_COMPRESSION_LEVELS[sensitivity]
     st.caption(
-        f"Sensitivity: **{THRESHOLD_LEVELS[threshold]}** (flagged at a "
-        f"score of {threshold} or more). Change it in the settings above."
+        f"Sensitivity: **{level.label}** (flagged at an SD ratio of "
+        f"{format_sd_ratio(level.max_sd_ratio)} or less). Change it in the "
+        "settings above."
     )
 
 
@@ -394,27 +398,19 @@ def _render_range_table(
             "Enumerator": [e.enumerator for e in enumerators],
             "Interviews": [e.interviews for e in enumerators],
             "Top variable": [v.variable if v else None for v in top],
-            "SD ratio": [v.sd_ratio if v else None for v in top],
-            "Score": [e.score for e in enumerators],
-            "Signal": [
-                e.signal.value.capitalize() if e.signal else None for e in enumerators
-            ],
+            "SD ratio": [e.sd_ratio for e in enumerators],
             "Flag": [e.badge.value for e in enumerators],
         }
     )
     row = _render_enumerator_table(
         table,
-        {"Interviews": "{:,}", "SD ratio": "{:.2f}", "Score": "{:.0f}"},
+        {"Interviews": "{:,}", "SD ratio": "{:.2f}"},
         {
-            "Top variable": "The variable with the enumerator's highest score",
+            "Top variable": "The variable where the enumerator's spread is "
+            "narrowest compared with the rest of the team's",
             "SD ratio": "The enumerator's standard deviation on the top "
             "variable over the rest of the team's. Under 1 means a narrower "
             "spread.",
-            "Score": "0-100, the highest score across the checked variables. "
-            "50 means half the team's spread or a mean about 1.5 standard "
-            "deviations away.",
-            "Signal": "Compression: answers spread less widely than the "
-            "team's. Shift: answers sit above or below the team's.",
         },
         key,
     )
@@ -475,38 +471,27 @@ def _variables_text(names: list[str]) -> str:
     return bold[0] if len(bold) == 1 else ", ".join(bold[:-1]) + " and " + bold[-1]
 
 
-def _render_range_verdicts(e: RangeCompressionEnumerator) -> None:
-    """Show the compression and shift verdicts, compression first."""
-    if e.compression_variables:
+def _render_range_verdict(e: RangeCompressionEnumerator) -> None:
+    """Show whether the enumerator's answers are compressed."""
+    if e.flagged_variables:
         st.warning(
             f"{e.enumerator}'s answers on "
-            f"{_variables_text(e.compression_variables)} spread much less "
+            f"{_variables_text(e.flagged_variables)} spread much less "
             "widely than the rest of the team's. They may be anchoring on a "
             "typical value; consider reviewing their interviews.",
             icon=":material/flag:",
         )
-    if e.shift_variables:
-        by_variable = {v.variable: v for v in e.variables}
-        above = [
-            n
-            for n in e.shift_variables
-            if by_variable[n].enum_mean > by_variable[n].team_mean
-        ]
-        below = [n for n in e.shift_variables if n not in above]
-        parts = [
-            f"well {direction} the rest of the team's on {_variables_text(names)}"
-            for direction, names in (("above", above), ("below", below))
-            if names
-        ]
-        st.warning(
-            f"{e.enumerator}'s answers sit {', and '.join(parts)}. Check "
-            "whether they record answers systematically high or low.",
-            icon=":material/flag:",
+    elif e.badge == Badge.MODERATE:
+        st.info(
+            f"{e.enumerator}'s answers on **{e.variables[0].variable}** spread "
+            "somewhat less widely than the rest of the team's: one level "
+            "higher sensitivity would flag them. Keep an eye on their next "
+            "interviews.",
+            icon=":material/visibility:",
         )
-    if not e.compression_variables and not e.shift_variables:
+    else:
         st.success(
-            f"{e.enumerator}'s answers are spread and centred like the rest "
-            "of the team's.",
+            f"{e.enumerator}'s answers are spread like the rest of the team's.",
             icon=":material/check_circle:",
         )
 
@@ -520,30 +505,24 @@ def _render_range_detail(e: RangeCompressionEnumerator, min_sample: int) -> None
             icon=INFO_ICON,
         )
         return
-    if e.score is None:
+    if e.sd_ratio is None:
         st.info(
-            f"None of the checked variables could be scored for {e.enumerator}.",
+            f"None of the checked variables could be compared for {e.enumerator}.",
             icon=INFO_ICON,
         )
         _render_skipped(e.skipped_variables)
         return
 
-    top = e.variables[0]
     st.markdown(
-        f"##### {e.enumerator}: spread and level · score **{e.score:.0f}** "
-        f"{_badge(e.badge)}"
+        f"##### {e.enumerator}: spread · SD ratio **{e.sd_ratio:.2f}** on "
+        f"**{e.variables[0].variable}** {_badge(e.badge)}"
     )
-    st.markdown(
-        f"Score set by {top.signal.value} on **{top.variable}** (compression "
-        f"{top.compression_score:.0f}, shift {top.shift_score:.0f}; the "
-        "higher sets the score)."
-    )
-    _render_range_verdicts(e)
+    _render_range_verdict(e)
     variable = st.selectbox(
         "Variable",
         options=[v.variable for v in e.variables],
         key=f"{RC_VARIABLE_KEY}_{e.enumerator}",
-        help="Variables are listed highest score first.",
+        help="Variables are listed lowest SD ratio first.",
     )
     v = next(v for v in e.variables if v.variable == variable)
     metric_row(
@@ -570,7 +549,7 @@ def _render_range_detail(e: RangeCompressionEnumerator, min_sample: int) -> None
     if v.sample_band == SampleBand.LOW:
         st.warning(LOW_SAMPLE_WARNING, icon=":material/warning:")
     st.plotly_chart(
-        _range_histogram(v, e.enumerator, v.variable in e.compression_variables),
+        _range_histogram(v, e.enumerator, v.variable in e.flagged_variables),
         width="stretch",
     )
     _render_skipped(e.skipped_variables)
@@ -580,15 +559,15 @@ def _render_range_compression(result: RangeCompressionResult, min_sample: int) -
     """Render the Range Compression sub-tab."""
     st.markdown(
         "Are an enumerator's numeric answers spread much less widely than the "
-        "rest of the team's (compression), or do they sit well above or below "
-        "them (shift)? Each selected integer and continuous variable is "
-        "scored separately; the enumerator's score is the highest."
+        "rest of the team's? Each selected integer and continuous variable is "
+        "compared separately, by the ratio of the enumerator's standard "
+        "deviation to the rest of the team's; the lowest ratio counts."
     )
-    _render_threshold(result.threshold)
+    _render_range_sensitivity(result.sensitivity)
     if _render_check_conditions(result, "Range Compression", min_sample):
         return
 
-    st.caption("Select an enumerator to see their answers' spread and level.")
+    st.caption("Select an enumerator to see their answers' spread.")
     selected = _render_range_table(result.enumerators, RC_TABLE_KEY)
     _render_range_detail(selected, min_sample)
 

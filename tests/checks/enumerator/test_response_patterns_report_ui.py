@@ -407,7 +407,7 @@ def _range_tab(at: AppTest):
 
 
 class TestRangeCompressionTab:
-    def test_lists_enumerators_by_score_with_flags(self, range_data, settings_file):
+    def test_lists_enumerators_by_sd_ratio_with_flags(self, range_data, settings_file):
         _save(settings_file, selected_variables=["age"])
 
         at = _run(range_data, settings_file)
@@ -416,9 +416,10 @@ class TestRangeCompressionTab:
         assert table["Enumerator"].tolist()[0] == "anchor"
         assert table["Flag"].tolist()[0] == "High"
         assert table["SD ratio"].tolist()[0] == pytest.approx(0.4, abs=0.01)
-        assert table["Signal"].tolist()[0] == "Compression"
+        assert "Score" not in table.columns
+        assert "Signal" not in table.columns
 
-    def test_highest_score_shows_tiles_and_compression_verdict(
+    def test_lowest_sd_ratio_shows_tiles_and_compression_verdict(
         self, range_data, settings_file
     ):
         _save(settings_file, selected_variables=["age"])
@@ -426,9 +427,8 @@ class TestRangeCompressionTab:
         at = _run(range_data, settings_file)
 
         tab = _range_tab(at)
-        assert "anchor: spread and level" in _texts(tab.markdown)
+        assert "anchor: spread · SD ratio **0.40** on **age**" in _texts(tab.markdown)
         assert "spread much less widely" in _texts(tab.warning)
-        assert "Score set by compression on **age**" in _texts(tab.markdown)
         mean, sd, ratio = tab.metric
         assert [m.label for m in tab.metric] == [
             "Mean",
@@ -456,26 +456,7 @@ class TestRangeCompressionTab:
         assert len(enum_bars["x"]) == 10
         assert set(enum_bars["marker"]["color"]) == {"#f5cb57"}
 
-    def test_both_verdicts_show_compression_first(self, settings_file):
-        data = _range_frame(
-            {
-                "drifter": _narrowed(SPREAD, 0.4, shift=30),
-                "steady": SPREAD,
-                "careful": SPREAD,
-            }
-        )
-        _save(settings_file, selected_variables=["age"])
-
-        at = _run(data, settings_file)
-
-        warnings = [w.value for w in _range_tab(at).warning]
-        assert "spread much less widely" in warnings[0]
-        assert "above the rest of the team's" in warnings[1]
-        # Compressed as well as shifted, so the bars are amber
-        spec = json.loads(at.get("plotly_chart")[1].proto.spec)
-        assert set(spec["data"][0]["marker"]["color"]) == {"#f5cb57"}
-
-    def test_shift_only_keeps_the_usual_bar_colour(self, settings_file):
+    def test_shifted_mean_alone_is_not_flagged(self, settings_file):
         data = _range_frame(
             {
                 "high": _narrowed(SPREAD, 1, shift=30),
@@ -486,12 +467,35 @@ class TestRangeCompressionTab:
         _save(settings_file, selected_variables=["age"])
 
         at = _run(data, settings_file)
+        # high widens the others' rest of team, so it doesn't sort first
+        names = at.dataframe(key="rp_rc_enumerators").value["Enumerator"].tolist()
+        at.session_state["rp_rc_enumerators"] = {
+            "selection": {"rows": [names.index("high")], "columns": [], "cells": []}
+        }
+        at.run()
 
-        warnings = [w.value for w in _range_tab(at).warning]
-        assert len(warnings) == 1
-        assert "above the rest of the team's" in warnings[0]
+        tab = _range_tab(at)
+        assert "high: spread · SD ratio **1.0" in _texts(tab.markdown)
+        assert not tab.warning
+        assert "high's answers are spread like the rest" in _texts(tab.success)
         spec = json.loads(at.get("plotly_chart")[1].proto.spec)
         assert set(spec["data"][0]["marker"]["color"]) == {"#155240"}
+
+    def test_moderate_enumerator_gets_a_caution(self, settings_file):
+        # SD ratio 0.6: flagged at High, Moderate at Medium
+        data = _range_frame(
+            {"mid": _narrowed(SPREAD, 0.6), "steady": SPREAD, "careful": SPREAD}
+        )
+        _save(settings_file, selected_variables=["age"])
+
+        at = _run(data, settings_file)
+
+        tab = _range_tab(at)
+        assert "Moderate" in _texts(tab.markdown)
+        assert "mid's answers on **age** spread somewhat less widely" in _texts(
+            tab.info
+        )
+        assert not tab.success
 
     def test_switching_the_variable_redraws_the_histogram(
         self, range_data, settings_file
@@ -517,9 +521,7 @@ class TestRangeCompressionTab:
         at.run()
 
         assert not at.exception
-        assert "spread and centred like the rest of the team's" in _texts(
-            _range_tab(at).success
-        )
+        assert "spread like the rest of the team's" in _texts(_range_tab(at).success)
 
     def test_team_without_variation_is_noted(self, settings_file):
         # varied's rest of team is flat, which always answers 50
@@ -544,16 +546,26 @@ class TestRangeCompressionTab:
 
         assert "Range Compression has nothing to check" in _texts(_range_tab(at).info)
 
-    def test_threshold_survives_a_new_session(self, range_data, settings_file):
+    def test_sensitivity_defaults_to_medium_with_three_levels(
+        self, range_data, settings_file
+    ):
+        at = _run(range_data, settings_file)
+
+        control = at.segmented_control(key="rp_rc_sensitivity")
+        assert control.options == ["High", "Medium", "Low"]
+        assert control.value == "medium"
+        assert "at most 0.5 times as widely" in _texts(at.caption)
+
+    def test_sensitivity_survives_a_new_session(self, range_data, settings_file):
         _save(settings_file, selected_variables=["age"])
         at = _run(range_data, settings_file)
 
-        at.segmented_control(key="rp_rc_threshold").set_value(65).run()
+        at.segmented_control(key="rp_rc_sensitivity").set_value("low").run()
         assert not at.exception
         assert "0.35 times as widely" in _texts(at.caption)
 
         new_session = _run(range_data, settings_file)
 
-        assert new_session.segmented_control(key="rp_rc_threshold").value == 65
+        assert new_session.segmented_control(key="rp_rc_sensitivity").value == "low"
         table = new_session.dataframe(key="rp_rc_enumerators").value
         assert table["Flag"].tolist()[0] == "Moderate"

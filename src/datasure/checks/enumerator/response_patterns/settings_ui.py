@@ -8,15 +8,11 @@ from pydantic import ValidationError
 
 from datasure.checks import missing
 from datasure.checks.enumerator.models import TAB_NAME
-from datasure.checks.enumerator.response_patterns.compute import (
-    SHIFT_POINTS_PER_SD,
-    infer_variable_types,
-)
+from datasure.checks.enumerator.response_patterns.compute import infer_variable_types
 from datasure.checks.enumerator.response_patterns.models import (
     DIGIT_PREFERENCE_LEVELS,
-    MODERATE_MARGIN,
+    RANGE_COMPRESSION_LEVELS,
     SETTINGS_KEY,
-    THRESHOLD_LEVELS,
     VARIABLE_TYPES,
     ResponsePatternSettings,
     Sensitivity,
@@ -32,7 +28,7 @@ logger = logging.getLogger(__name__)
 # Session state flag save_check_settings checks before writing the settings
 SAVE_STATE: str = f"{TAB_NAME}_{SETTINGS_KEY}"
 DP_SENSITIVITY_KEY = "rp_dp_sensitivity"
-RC_THRESHOLD_KEY = "rp_rc_threshold"
+RC_SENSITIVITY_KEY = "rp_rc_sensitivity"
 _EDITOR_KEY = "rp_variable_editor"
 _EDITOR_BASE_KEY = "rp_variable_editor_base"
 
@@ -175,41 +171,29 @@ def digit_preference_description(sensitivity: Sensitivity) -> str:
     return text
 
 
-def range_compression_description(threshold: int) -> str:
-    """Explain what flagging Range Compression at ``threshold`` means."""
-    ratio = f"{1 - threshold / 100:.2f}".rstrip("0").rstrip(".")
-    shift = f"{threshold / SHIFT_POINTS_PER_SD:.1f}"
+def format_sd_ratio(ratio: float) -> str:
+    """Return an SD ratio without trailing zeros, such as 0.5 or 0.65."""
+    return f"{ratio:.2f}".rstrip("0").rstrip(".")
+
+
+def range_compression_description(sensitivity: Sensitivity) -> str:
+    """Explain what flagging Range Compression at ``sensitivity`` means."""
+    ratio = format_sd_ratio(RANGE_COMPRESSION_LEVELS[sensitivity].max_sd_ratio)
     return (
         f"Flags an enumerator when, on any checked variable, their answers "
         f"spread at most {ratio} times as widely as the rest of the team's "
-        f"(SD ratio {ratio} or less), or their average sits about {shift} or "
-        f"more of the team's standard deviations away from the team's (score "
-        f"{threshold} or more)."
+        f"(SD ratio {ratio} or less)."
     )
 
 
-def _render_threshold_level(label: str, key: str, default: int) -> int:
-    """Render a check's flag-threshold levels and return the chosen threshold."""
+def _render_sensitivity(
+    label: str, key: str, default: Sensitivity, levels: dict
+) -> Sensitivity:
+    """Render a check's sensitivity ``levels`` and return the chosen one."""
     return st.segmented_control(
         label,
-        options=list(THRESHOLD_LEVELS),
-        format_func=THRESHOLD_LEVELS.get,
-        default=default,
-        required=True,
-        key=key,
-        help="Higher sensitivity flags enumerators at a lower score. "
-        f"Enumerators within {MODERATE_MARGIN} points below the threshold "
-        "are marked Moderate.",
-        on_change=mark_settings_changed,
-    )
-
-
-def _render_sensitivity(label: str, key: str, default: Sensitivity) -> Sensitivity:
-    """Render a check's sensitivity levels and return the chosen one."""
-    return st.segmented_control(
-        label,
-        options=list(DIGIT_PREFERENCE_LEVELS),
-        format_func=lambda s: DIGIT_PREFERENCE_LEVELS[s].label,
+        options=list(levels),
+        format_func=lambda s: levels[s].label,
         default=default,
         required=True,
         key=key,
@@ -293,14 +277,16 @@ def response_pattern_settings(
             "Digit Preference sensitivity",
             DP_SENSITIVITY_KEY,
             saved.digit_preference_sensitivity,
+            DIGIT_PREFERENCE_LEVELS,
         )
         st.caption(digit_preference_description(dp_sensitivity))
-        rc_threshold = _render_threshold_level(
+        rc_sensitivity = _render_sensitivity(
             "Range Compression sensitivity",
-            RC_THRESHOLD_KEY,
-            saved.range_compression_threshold,
+            RC_SENSITIVITY_KEY,
+            saved.range_compression_sensitivity,
+            RANGE_COMPRESSION_LEVELS,
         )
-        st.caption(range_compression_description(rc_threshold))
+        st.caption(range_compression_description(rc_sensitivity))
 
     settings = saved.model_copy(
         update={
@@ -309,7 +295,7 @@ def response_pattern_settings(
             "min_sample": int(min_sample),
             "warn_sample": int(warn_sample),
             "digit_preference_sensitivity": dp_sensitivity,
-            "range_compression_threshold": rc_threshold,
+            "range_compression_sensitivity": rc_sensitivity,
         }
     )
     save_response_pattern_settings(settings_file, settings)
