@@ -5,6 +5,7 @@ enumerators except the one being checked. The UI only renders the results
 model returned by ``compute_response_patterns``.
 """
 
+import math
 import re
 
 import numpy as np
@@ -318,33 +319,54 @@ def _compute_digit_preference(
     )
 
 
-def _bucket_shares(values: pl.Series, low: float, width: float) -> list[float]:
+def _bucket_shares(
+    values: pl.Series, low: float, width: float, n_buckets: int
+) -> list[float]:
     """Return the percentage of ``values`` in each histogram bucket.
 
-    Values beyond either end count in the end bucket, so shares sum to 100.
+    Buckets include their lower edge and exclude their upper one. Values
+    beyond either end count in the end bucket, so shares sum to 100.
     """
-    buckets = ((values - low) / width).floor().clip(0, HISTOGRAM_BUCKETS - 1)
-    counts = np.bincount(buckets.cast(pl.Int64).to_numpy(), minlength=HISTOGRAM_BUCKETS)
+    buckets = ((values - low) / width).floor().clip(0, n_buckets - 1)
+    counts = np.bincount(buckets.cast(pl.Int64).to_numpy(), minlength=n_buckets)
     return _pct(counts.tolist())
+
+
+def _is_whole(values: pl.Series) -> bool:
+    """Return whether every value is a whole number."""
+    return bool((values == values.floor()).all())
 
 
 def _histogram(
     enum_values: pl.Series, team_values: pl.Series
-) -> tuple[list[float], list[float], list[float]]:
-    """Return shared bucket edges and each series' share per bucket.
+) -> tuple[list[float], list[float], list[float], bool]:
+    """Return shared bucket edges, each series' share per bucket, and wholeness.
 
-    The equal-width buckets span the rest of the team's 1st to 99th
-    percentile, or its full range when those are equal.
+    The buckets span the rest of the team's 1st to 99th percentile, or its
+    full range when those are equal. When every value is a whole number,
+    the edges are whole numbers too, so each bucket holds a whole run of
+    values ("10 to 19"); a narrow range then gets fewer than
+    ``HISTOGRAM_BUCKETS`` buckets, one value each. Otherwise there are
+    ``HISTOGRAM_BUCKETS`` equal-width buckets.
     """
     low, high = (team_values.quantile(q, "linear") for q in HISTOGRAM_QUANTILES)
     if high <= low:
         low, high = team_values.min(), team_values.max()
-    width = (high - low) / HISTOGRAM_BUCKETS
-    edges = [low + i * width for i in range(HISTOGRAM_BUCKETS + 1)]
+    whole = _is_whole(enum_values) and _is_whole(team_values)
+    if whole:
+        low, high = math.floor(low), math.ceil(high)
+        n_values = high - low + 1
+        width = math.ceil(n_values / HISTOGRAM_BUCKETS)
+        n_buckets = math.ceil(n_values / width)
+    else:
+        width = (high - low) / HISTOGRAM_BUCKETS
+        n_buckets = HISTOGRAM_BUCKETS
+    edges = [low + i * width for i in range(n_buckets + 1)]
     return (
         edges,
-        _bucket_shares(enum_values, low, width),
-        _bucket_shares(team_values, low, width),
+        _bucket_shares(enum_values, low, width, n_buckets),
+        _bucket_shares(team_values, low, width, n_buckets),
+        whole,
     )
 
 
@@ -378,7 +400,7 @@ def _range_variable(
     enum_trimmed = _trimmed(enum_values)
     enum_mean, team_mean = enum_trimmed.mean(), team_trimmed.mean()
     enum_sd = enum_trimmed.std()
-    edges, enum_pct, team_pct = _histogram(enum_values, team_values)
+    edges, enum_pct, team_pct, whole = _histogram(enum_values, team_values)
     return RangeVariable(
         variable=variable,
         n_responses=n,
@@ -390,6 +412,7 @@ def _range_variable(
         # Rounded as shown, so a ratio shown as 0.50 is flagged at 0.5
         sd_ratio=round(enum_sd / team_sd, 2),
         bucket_edges=edges,
+        whole_numbers=whole,
         enum_bucket_pct=enum_pct,
         team_bucket_pct=team_pct,
     )

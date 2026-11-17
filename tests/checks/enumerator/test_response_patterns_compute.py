@@ -747,6 +747,51 @@ class TestRangeCompressionHistogram:
         assert var.enum_bucket_pct[0] == 0
         assert var.enum_bucket_pct[-1] == 0
 
+    def test_fractional_answers_are_not_whole_numbers(self):
+        team = [float(v) for v in range(101)]
+        data = _frame({"A": _scaled(team, 0.5), "B": team})
+
+        results = compute_response_patterns(data, _settings(), ENUM, None)
+
+        (var,) = _range(results, "A").variables
+        assert var.whole_numbers is False
+
+    def test_whole_number_buckets_have_whole_number_edges(self):
+        team = [float(v) for v in range(101)]  # 1st percentile 1, 99th 99
+        data = _frame({"A": [float(v) for v in range(25, 76)], "B": team})
+
+        results = compute_response_patterns(data, _settings(), ENUM, None)
+
+        (var,) = _range(results, "A").variables
+        assert var.whole_numbers is True
+        # 99 values (1 to 99) in buckets of 10: 1-10, 11-20, ..., 91-100
+        assert var.bucket_edges == [1 + 10 * i for i in range(11)]
+        # 0 counts in the first bucket and 91 to 100 in the last
+        assert var.team_bucket_pct[0] == pytest.approx(11 / 101 * 100)
+        assert var.team_bucket_pct[-1] == pytest.approx(10 / 101 * 100)
+
+    def test_whole_number_edges_widen_fractional_percentiles(self):
+        # 1st percentile 0.1 and 99th 9.9 widen to 0 and 10: 11 values
+        team = [float(v) for v in range(11)] * 3
+        data = _frame({"A": [4.0, 5.0, 6.0] * 10, "B": team})
+
+        results = compute_response_patterns(data, _settings(), ENUM, None)
+
+        (var,) = _range(results, "A").variables
+        assert var.bucket_edges == [0, 2, 4, 6, 8, 10, 12]
+        assert var.enum_bucket_pct == pytest.approx([0, 0, 200 / 3, 100 / 3, 0, 0])
+
+    def test_a_short_whole_number_scale_gets_one_bucket_per_value(self):
+        team = [1.0, 2.0, 3.0, 4.0, 5.0] * 8
+        data = _frame({"A": [2.0, 3.0, 4.0] * 10, "B": team})
+
+        results = compute_response_patterns(data, _settings(), ENUM, None)
+
+        (var,) = _range(results, "A").variables
+        assert var.bucket_edges == [1, 2, 3, 4, 5, 6]
+        assert var.team_bucket_pct == pytest.approx([20.0] * 5)
+        assert var.enum_bucket_pct == pytest.approx([0, 100 / 3, 100 / 3, 100 / 3, 0])
+
 
 class TestRangeCompressionSensitivity:
     @pytest.mark.parametrize(

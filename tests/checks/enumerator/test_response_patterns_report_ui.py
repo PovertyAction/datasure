@@ -593,3 +593,23 @@ class TestBucketLabel:
         labels = [_bucket_label(lo, hi, width) for lo, hi in pairwise(edges)]
 
         assert len(set(labels)) == 10
+
+    @pytest.mark.parametrize(
+        ("low", "high", "expected"),
+        [
+            (10, 20, "10 to 19"),
+            (7, 8, "7"),
+            (-5, -2, "-5 to -3"),
+            (1000, 2000, "1,000 to 1,999"),
+        ],
+    )
+    def test_whole_number_buckets_show_the_values_they_hold(self, low, high, expected):
+        assert _bucket_label(low, high, high - low, whole=True) == expected
+
+    def test_whole_number_neighbours_share_no_value(self):
+        edges = [1 + 10 * i for i in range(11)]
+
+        labels = [_bucket_label(lo, hi, 10, whole=True) for lo, hi in pairwise(edges)]
+
+        assert labels[:2] == ["1 to 10", "11 to 20"]
+        assert len(set(labels)) == 10

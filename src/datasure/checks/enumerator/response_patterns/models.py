@@ -195,7 +195,9 @@ class RangeVariable(BaseModel):
     ``enum_sd / team_sd``, rounded to two decimals as shown. The histogram
     uses the uncapped values and shares ``bucket_edges`` between the two
     series; values beyond the team's 1st and 99th percentiles count in the
-    end buckets. Bucket shares are percentages.
+    end buckets. Each bucket includes its lower edge and excludes its upper
+    one. ``whole_numbers`` is True when every answer is a whole number; the
+    edges are then whole numbers too. Bucket shares are percentages.
     """
 
     variable: str
@@ -207,6 +209,7 @@ class RangeVariable(BaseModel):
     team_sd: float
     sd_ratio: float
     bucket_edges: list[float]
+    whole_numbers: bool = False
     enum_bucket_pct: list[float]
     team_bucket_pct: list[float]
 

@@ -435,12 +435,18 @@ def _cached_response_patterns(
     return compute_response_patterns(data, settings, enumerator_col, missing_codes)
 
 
-def _bucket_label(low: float, high: float, width: float) -> str:
+def _bucket_label(low: float, high: float, width: float, whole: bool = False) -> str:
     """Return a histogram bucket's range, as precise as its width needs.
 
-    Edges get at least 2 decimals under a width of 1, and enough to show a
-    whole width, so neighbouring buckets never share a label.
+    A bucket holds values from ``low`` up to, but not including, ``high``.
+    With ``whole`` (whole-number edges and answers) it shows the whole
+    numbers it holds, "10 to 19" or just "7", so neighbouring labels never
+    share a value. Otherwise edges get at least 2 decimals under a width of
+    1, and enough to show a whole width, so labels stay unique.
     """
+    if whole:
+        first, last = round(low), round(high) - 1
+        return f"{first:,}" if first == last else f"{first:,} to {last:,}"
     decimals = 0 if width >= 1 else max(2, math.ceil(-math.log10(width)))
     spec = f",.{decimals}f"
     return f"{low:{spec}} to {high:{spec}}"
@@ -454,7 +460,9 @@ def _range_histogram(v: RangeVariable, enumerator: str, compressed: bool) -> go.
     """
     edges = v.bucket_edges
     width = edges[1] - edges[0]
-    buckets = [_bucket_label(lo, hi, width) for lo, hi in pairwise(edges)]
+    buckets = [
+        _bucket_label(lo, hi, width, v.whole_numbers) for lo, hi in pairwise(edges)
+    ]
     hover = "%{x}: %{y:.1f}%<extra></extra>"
     fig = go.Figure(
         [
