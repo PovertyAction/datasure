@@ -8,16 +8,12 @@ from pydantic import ValidationError
 
 from datasure.checks import missing
 from datasure.checks.enumerator.models import TAB_NAME
-from datasure.checks.enumerator.response_patterns.compute import (
-    CATEGORICAL_POINTS_PER_PP,
-    infer_variable_types,
-)
+from datasure.checks.enumerator.response_patterns.compute import infer_variable_types
 from datasure.checks.enumerator.response_patterns.models import (
+    CATEGORICAL_LEVELS,
     DIGIT_PREFERENCE_LEVELS,
-    MODERATE_MARGIN,
     RANGE_COMPRESSION_LEVELS,
     SETTINGS_KEY,
-    THRESHOLD_LEVELS,
     VARIABLE_TYPES,
     ResponsePatternSettings,
     Sensitivity,
@@ -34,7 +30,7 @@ logger = logging.getLogger(__name__)
 SAVE_STATE: str = f"{TAB_NAME}_{SETTINGS_KEY}"
 DP_SENSITIVITY_KEY = "rp_dp_sensitivity"
 RC_SENSITIVITY_KEY = "rp_rc_sensitivity"
-CAT_THRESHOLD_KEY = "rp_cat_threshold"
+CAT_SENSITIVITY_KEY = "rp_cat_sensitivity"
 _EDITOR_KEY = "rp_variable_editor"
 _EDITOR_BASE_KEY = "rp_variable_editor_base"
 
@@ -193,29 +189,13 @@ def range_compression_description(sensitivity: Sensitivity) -> str:
     )
 
 
-def categorical_description(threshold: int) -> str:
-    """Explain what flagging Categorical Response Patterns at ``threshold`` means."""
-    gap = f"{threshold / CATEGORICAL_POINTS_PER_PP:g}"
+def categorical_description(sensitivity: Sensitivity) -> str:
+    """Explain what flagging Categorical Response Patterns at ``sensitivity`` means."""
+    gap = f"{CATEGORICAL_LEVELS[sensitivity].min_gap:g}"
     return (
         f"Flags an enumerator when, on any checked question, their share of "
         f"one answer option differs from the rest of the team's by at least "
-        f"{gap} percentage points (score {threshold} or more)."
-    )
-
-
-def _render_threshold_level(label: str, key: str, default: int) -> int:
-    """Render a check's flag-threshold levels and return the chosen threshold."""
-    return st.segmented_control(
-        label,
-        options=list(THRESHOLD_LEVELS),
-        format_func=THRESHOLD_LEVELS.get,
-        default=default,
-        required=True,
-        key=key,
-        help="Higher sensitivity flags enumerators at a lower score. "
-        f"Enumerators within {MODERATE_MARGIN} points below the threshold "
-        "are marked Moderate.",
-        on_change=mark_settings_changed,
+        f"{gap} percentage points."
     )
 
 
@@ -320,12 +300,13 @@ def response_pattern_settings(
             RANGE_COMPRESSION_LEVELS,
         )
         st.caption(range_compression_description(rc_sensitivity))
-        cat_threshold = _render_threshold_level(
+        cat_sensitivity = _render_sensitivity(
             "Categorical Response Patterns sensitivity",
-            CAT_THRESHOLD_KEY,
-            saved.categorical_threshold,
+            CAT_SENSITIVITY_KEY,
+            saved.categorical_sensitivity,
+            CATEGORICAL_LEVELS,
         )
-        st.caption(categorical_description(cat_threshold))
+        st.caption(categorical_description(cat_sensitivity))
 
     settings = saved.model_copy(
         update={
@@ -335,7 +316,7 @@ def response_pattern_settings(
             "warn_sample": int(warn_sample),
             "digit_preference_sensitivity": dp_sensitivity,
             "range_compression_sensitivity": rc_sensitivity,
-            "categorical_threshold": cat_threshold,
+            "categorical_sensitivity": cat_sensitivity,
         }
     )
     save_response_pattern_settings(settings_file, settings)

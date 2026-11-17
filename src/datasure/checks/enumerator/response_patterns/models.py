@@ -3,7 +3,7 @@
 from enum import StrEnum
 from typing import Literal
 
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field
 
 # Key under the enumerator report's settings that holds this section's settings
 SETTINGS_KEY: str = "response_patterns"
@@ -11,27 +11,6 @@ SETTINGS_KEY: str = "response_patterns"
 VariableType = Literal["integer", "continuous", "categorical"]
 VARIABLE_TYPES: list[str] = ["integer", "continuous", "categorical"]
 NUMERIC_TYPES: tuple[str, ...] = ("integer", "continuous")
-
-# Categorical Response Patterns scores answers 0-100. Moderate badges start
-# this many points below the flag threshold.
-MODERATE_MARGIN: int = 15
-
-# Fixed Categorical flag-threshold levels, most sensitive first: score ->
-# label. Levels are MODERATE_MARGIN apart, so a Moderate badge means the
-# enumerator would be flagged one level more sensitive.
-THRESHOLD_LEVELS: dict[int, str] = {
-    20: "Very high",
-    35: "High",
-    50: "Medium",
-    65: "Low",
-    80: "Very low",
-}
-DEFAULT_THRESHOLD: int = 50
-
-
-def nearest_threshold_level(threshold: int) -> int:
-    """Return the fixed threshold level closest to ``threshold``."""
-    return min(THRESHOLD_LEVELS, key=lambda level: (abs(level - threshold), level))
 
 
 class Sensitivity(StrEnum):
@@ -98,6 +77,32 @@ RANGE_COMPRESSION_LEVELS: dict[Sensitivity, RangeCompressionLevel] = {
 }
 
 
+class CategoricalLevel(BaseModel):
+    """What a Categorical Response Patterns sensitivity level flags.
+
+    Attributes
+    ----------
+    label : str
+        The level's name in the UI.
+    min_gap : float
+        An enumerator is flagged when, on any checked question, their share
+        of one answer option differs from the rest of the team's by at least
+        this many percentage points.
+    """
+
+    label: str
+    min_gap: float
+
+
+# Most sensitive first. A Moderate badge means the enumerator would be flagged
+# one level more sensitive.
+CATEGORICAL_LEVELS: dict[Sensitivity, CategoricalLevel] = {
+    Sensitivity.HIGH: CategoricalLevel(label="High", min_gap=15),
+    Sensitivity.MEDIUM: CategoricalLevel(label="Medium", min_gap=25),
+    Sensitivity.LOW: CategoricalLevel(label="Low", min_gap=35),
+}
+
+
 class ResponsePatternSettings(BaseModel):
     """Settings for the Response Patterns section, saved per project.
 
@@ -117,9 +122,9 @@ class ResponsePatternSettings(BaseModel):
     range_compression_sensitivity : Sensitivity
         How readily Range Compression flags an enumerator, one of
         ``RANGE_COMPRESSION_LEVELS``.
-    categorical_threshold : int
-        Categorical Response Patterns score at or above which an enumerator
-        is flagged, one of ``THRESHOLD_LEVELS``.
+    categorical_sensitivity : Sensitivity
+        How readily Categorical Response Patterns flags an enumerator, one of
+        ``CATEGORICAL_LEVELS``.
     """
 
     selected_variables: list[str] = Field(default_factory=list)
@@ -128,13 +133,7 @@ class ResponsePatternSettings(BaseModel):
     warn_sample: int = Field(30, ge=1)
     digit_preference_sensitivity: Sensitivity = DEFAULT_SENSITIVITY
     range_compression_sensitivity: Sensitivity = DEFAULT_SENSITIVITY
-    categorical_threshold: int = Field(DEFAULT_THRESHOLD, ge=0, le=100)
-
-    @field_validator("categorical_threshold")
-    @classmethod
-    def snap_to_level(cls, v: int) -> int:
-        """Move a threshold saved off the fixed levels to the nearest level."""
-        return nearest_threshold_level(v)
+    categorical_sensitivity: Sensitivity = DEFAULT_SENSITIVITY
 
 
 class SampleBand(StrEnum):
@@ -280,8 +279,8 @@ class CategoricalOption(BaseModel):
 
     Shares are percentages; an option one side never chose is 0% there.
     ``gap`` is the enumerator's share minus the team's, in percentage
-    points. ``flagged`` options have a gap of at least half the flag
-    threshold either way.
+    points. ``flagged`` options have a gap of at least the sensitivity
+    level's either way.
     """
 
     option: str
@@ -298,13 +297,13 @@ class CategoricalQuestion(BaseModel):
     largest absolute gap on any option, in percentage points, and
     ``scoring_option`` the option it is on, which may be one the enumerator
     chose less often than the team. ``dominant_option`` is the option the
-    enumerator chose most often relative to the team, if any.
+    enumerator chose most often relative to the team, if any. ``flagged``
+    questions have a largest gap of at least the sensitivity level's.
     """
 
     variable: str
     n_responses: int
     sample_band: SampleBand
-    score: float
     largest_gap: float
     scoring_option: str
     flagged: bool
@@ -315,23 +314,24 @@ class CategoricalQuestion(BaseModel):
 class CategoricalEnumerator(BaseModel):
     """One enumerator's Categorical Response Patterns result.
 
-    The score and sample band are those of ``questions[0]``, the
-    highest-scoring question.
+    ``questions`` are sorted largest gap first. The largest gap and sample
+    band are those of ``questions[0]``, so one problem question is never
+    averaged away.
     """
 
     enumerator: str
     interviews: int
     sample_band: SampleBand
-    score: float | None
+    largest_gap: float | None
     badge: Badge
     questions: list[CategoricalQuestion] = Field(default_factory=list)
     skipped_variables: dict[str, SkipReason] = Field(default_factory=dict)
 
 
 class CategoricalResult(BaseModel):
-    """Categorical Response Patterns results, highest score first."""
+    """Categorical Response Patterns results, largest gap first."""
 
-    threshold: int
+    sensitivity: Sensitivity
     condition: CheckCondition | None = None
     variables: list[str] = Field(default_factory=list)
     skipped_variables: dict[str, SkipReason] = Field(default_factory=dict)

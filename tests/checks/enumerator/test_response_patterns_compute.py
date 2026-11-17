@@ -839,14 +839,13 @@ def _categorical(results, name: str):
     return next(e for e in results.categorical.enumerators if e.enumerator == name)
 
 
-class TestCategoricalScore:
+class TestCategoricalGap:
     @pytest.mark.parametrize(
-        ("enum_yes", "gap", "score"),
-        [(20, 0, 0), (30, 25, 50), (40, 50, 100), (36, 40, 80)],
+        ("enum_yes", "gap"), [(20, 0), (30, 25), (40, 50), (36, 40)]
     )
-    def test_score_is_twice_the_largest_gap(self, enum_yes, gap, score):
+    def test_largest_gap_is_the_biggest_share_difference(self, enum_yes, gap):
         # The rest of the team answers yes half the time; A's yes share of
-        # 50%, 75% and 100% is a gap of 0, 25 and 50 points
+        # 50%, 75%, 100% and 90% is a gap of 0, 25, 50 and 40 points
         data = _frame(
             {
                 "A": _choices({"yes": enum_yes, "no": 40 - enum_yes}),
@@ -857,23 +856,29 @@ class TestCategoricalScore:
         results = compute_response_patterns(data, _settings(), ENUM, None)
 
         a = _categorical(results, "A")
-        assert a.score == pytest.approx(score)
+        assert a.largest_gap == pytest.approx(gap)
         (question,) = a.questions
-        assert question.score == pytest.approx(score)
         assert question.largest_gap == pytest.approx(gap)
 
-    def test_gap_beyond_50_points_is_capped_at_100(self):
-        data = _frame({"A": _choices({"yes": 40}), "B": _choices({"yes": 8, "no": 32})})
+    @pytest.mark.parametrize(("enum_yes", "flagged"), [(29, False), (30, True)])
+    def test_question_is_flagged_from_the_level_gap(self, enum_yes, flagged):
+        # Gaps of 22.5 and 25 points against Medium's 25
+        data = _frame(
+            {
+                "A": _choices({"yes": enum_yes, "no": 40 - enum_yes}),
+                "B": _choices({"yes": 20, "no": 20}),
+            }
+        )
 
         results = compute_response_patterns(data, _settings(), ENUM, None)
 
-        assert _categorical(results, "A").score == pytest.approx(100)
+        (question,) = _categorical(results, "A").questions
+        assert question.flagged is flagged
 
-    def test_baseline_leaves_out_the_enumerator_being_scored(self):
+    def test_baseline_leaves_out_the_enumerator_being_compared(self):
         # A always says yes; B and C split evenly. A's rest of team says yes
-        # 50% of the time (gap 50, score 100). B's rest of team is A and C,
-        # 75% yes (gap 25, score 50). A project-wide 66.7% would give 67 and
-        # 33.
+        # 50% of the time (gap 50). B's rest of team is A and C, 75% yes
+        # (gap 25). A project-wide 66.7% would give 33.3 and 16.7.
         data = _frame(
             {
                 "A": _choices({"yes": 40}),
@@ -884,12 +889,12 @@ class TestCategoricalScore:
 
         results = compute_response_patterns(data, _settings(), ENUM, None)
 
-        assert _categorical(results, "A").score == pytest.approx(100)
-        assert _categorical(results, "B").score == pytest.approx(50)
+        assert _categorical(results, "A").largest_gap == pytest.approx(50)
+        assert _categorical(results, "B").largest_gap == pytest.approx(25)
         yes = _categorical(results, "B").questions[0].options[1]
         assert (yes.option, yes.team_pct) == ("yes", pytest.approx(75))
 
-    def test_enumerator_score_is_the_highest_question_score(self):
+    def test_enumerator_gap_is_the_largest_question_gap(self):
         data = pl.DataFrame(
             {
                 ENUM: ["A"] * 40 + ["B"] * 40,
@@ -902,9 +907,27 @@ class TestCategoricalScore:
         results = compute_response_patterns(data, settings, ENUM, None)
 
         a = _categorical(results, "A")
-        assert a.score == pytest.approx(60)
+        assert a.largest_gap == pytest.approx(30)
         assert [q.variable for q in a.questions] == ["y", "x"]
-        assert [q.score for q in a.questions] == [pytest.approx(60), pytest.approx(20)]
+        assert [q.largest_gap for q in a.questions] == [
+            pytest.approx(30),
+            pytest.approx(10),
+        ]
+
+    def test_enumerators_are_sorted_largest_gap_first(self):
+        data = _frame(
+            {
+                "A": _choices({"yes": 24, "no": 16}),
+                "B": _choices({"yes": 36, "no": 4}),
+                "C": _choices({"yes": 20, "no": 20}),
+            }
+        )
+
+        results = compute_response_patterns(data, _settings(), ENUM, None)
+
+        gaps = [e.largest_gap for e in results.categorical.enumerators]
+        assert gaps == sorted(gaps, reverse=True)
+        assert results.categorical.enumerators[0].enumerator == "B"
 
 
 class TestCategoricalOptions:
@@ -926,10 +949,10 @@ class TestCategoricalOptions:
             "maybe": (0, pytest.approx(50)),
             "yes": (pytest.approx(50), pytest.approx(50)),
         }
-        assert question.score == pytest.approx(100)
+        assert question.largest_gap == pytest.approx(50)
 
-    def test_options_at_half_the_threshold_are_flagged_either_way(self):
-        # Gaps: yes +25, no -15, dk -10. At threshold 50 the cut-off is 25.
+    def test_options_at_the_level_gap_are_flagged_either_way(self):
+        # Gaps: yes +25, no -15, dk -10. Medium's cut-off is 25.
         data = _frame(
             {
                 "A": _choices({"yes": 30, "no": 6, "dk": 4}),
@@ -953,15 +976,15 @@ class TestCategoricalOptions:
             "yes": pytest.approx(25),
         }
 
-    def test_under_used_option_is_flagged_below_the_threshold_too(self):
-        # Gaps: no -15 and yes +15. At threshold 20 the cut-off is 10.
+    def test_under_used_option_is_flagged_too(self):
+        # Gaps: no -15 and yes +15. High's cut-off is 15.
         data = _frame(
             {
                 "A": _choices({"yes": 26, "no": 14}),
                 "B": _choices({"yes": 20, "no": 20}),
             }
         )
-        settings = _settings(categorical_threshold=20)
+        settings = _settings(categorical_sensitivity="high")
 
         results = compute_response_patterns(data, settings, ENUM, None)
 
@@ -970,7 +993,7 @@ class TestCategoricalOptions:
 
     def test_scoring_option_can_be_one_the_enumerator_avoids(self):
         # Team a/b/c 60/20/20, A 0/50/50: never choosing a (-60) sets the
-        # score; b is the first of the over-chosen options (+30)
+        # largest gap; b is the first of the over-chosen options (+30)
         data = _frame(
             {
                 "A": _choices({"b": 20, "c": 20}),
@@ -981,7 +1004,7 @@ class TestCategoricalOptions:
         results = compute_response_patterns(data, _settings(), ENUM, None)
 
         (question,) = _categorical(results, "A").questions
-        assert question.score == pytest.approx(100)
+        assert question.largest_gap == pytest.approx(60)
         assert question.scoring_option == "a"
         assert question.dominant_option == "b"
 
@@ -1062,7 +1085,7 @@ class TestCategoricalSkipsAndConditions:
         results = compute_response_patterns(data, _settings(), ENUM, None)
 
         a = _categorical(results, "A")
-        assert a.score is None
+        assert a.largest_gap is None
         assert a.skipped_variables == {"x": "no responses from the rest of the team"}
 
     def test_enumerator_below_the_minimum_everywhere_is_na_and_last(self):
@@ -1077,7 +1100,11 @@ class TestCategoricalSkipsAndConditions:
         results = compute_response_patterns(data, _settings(), ENUM, None)
 
         a = _categorical(results, "A")
-        assert (a.score, a.badge, a.sample_band) == (None, "N/A", "insufficient")
+        assert (a.largest_gap, a.badge, a.sample_band) == (
+            None,
+            "N/A",
+            "insufficient",
+        )
         assert results.categorical.enumerators[-1].enumerator == "A"
 
     def test_everyone_below_the_minimum(self):
@@ -1100,28 +1127,47 @@ class TestCategoricalSkipsAndConditions:
 
         (question,) = _categorical(results, "A").questions
         assert question.n_responses == 40
-        assert question.score == pytest.approx(0)
+        assert question.largest_gap == pytest.approx(0)
 
 
-class TestCategoricalThreshold:
+class TestCategoricalSensitivity:
     @pytest.mark.parametrize(
-        ("threshold", "badge"), [(50, "High"), (65, "Moderate"), (80, "Low")]
+        ("sensitivity", "badge"),
+        [("high", "High"), ("medium", "Moderate"), ("low", "Low")],
     )
-    def test_badge_follows_its_own_threshold(self, threshold, badge):
+    def test_badge_follows_its_own_sensitivity(self, sensitivity, badge):
+        # Gap 20: within High's 15 but below Medium's 25
         data = _frame(
             {
-                "A": _choices({"yes": 30, "no": 10}),
+                "A": _choices({"yes": 28, "no": 12}),
                 "B": _choices({"yes": 20, "no": 20}),
             }
-        )  # gap 25, score 50
-        settings = _settings(categorical_threshold=threshold)
+        )
+        settings = _settings(categorical_sensitivity=sensitivity)
 
         results = compute_response_patterns(data, settings, ENUM, None)
 
         assert _categorical(results, "A").badge == badge
-        assert results.categorical.threshold == threshold
+        assert results.categorical.sensitivity == sensitivity
 
-    def test_saved_threshold_snaps_to_the_nearest_level(self):
-        settings = ResponsePatternSettings(categorical_threshold=10)
+    def test_most_sensitive_level_has_no_moderate_band(self):
+        # Gap 10, below High's 15
+        data = _frame(
+            {
+                "A": _choices({"yes": 24, "no": 16}),
+                "B": _choices({"yes": 20, "no": 20}),
+            }
+        )
+        settings = _settings(categorical_sensitivity="high")
 
-        assert settings.categorical_threshold == 20
+        results = compute_response_patterns(data, settings, ENUM, None)
+
+        assert _categorical(results, "A").badge == "Low"
+
+    def test_defaults_to_medium(self):
+        assert ResponsePatternSettings().categorical_sensitivity == "medium"
+
+    def test_old_score_threshold_setting_is_ignored(self):
+        settings = ResponsePatternSettings(categorical_threshold=20)
+
+        assert settings.categorical_sensitivity == "medium"

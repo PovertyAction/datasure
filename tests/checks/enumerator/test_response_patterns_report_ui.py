@@ -634,7 +634,7 @@ def _categorical_tab(at: AppTest):
 
 
 class TestCategoricalTab:
-    def test_lists_enumerators_by_score_with_flags(
+    def test_lists_enumerators_by_largest_gap_with_flags(
         self, categorical_data, settings_file
     ):
         _save(settings_file, selected_variables=["choice"])
@@ -645,7 +645,7 @@ class TestCategoricalTab:
         assert table["Enumerator"].tolist()[0] == "defaulter"
         assert table["Top question"].tolist()[0] == "choice"
         assert table["Largest gap (pp)"].tolist()[0] == pytest.approx(40)
-        assert table["Score"].tolist()[0] == pytest.approx(80)
+        assert "Score" not in table.columns
         assert table["Flag"].tolist()[0] == "High"
 
     def test_flagged_question_shows_anomaly_verdict_and_red_options(
@@ -664,10 +664,10 @@ class TestCategoricalTab:
         assert enum_bars["orientation"] == team_bars["orientation"] == "h"
         assert team_bars["name"] == "Rest of team"
         assert enum_bars["y"] == ["no", "yes"]
-        # Both gaps (-40 and +40) reach half the threshold, 25 points
+        # Both gaps (-40 and +40) reach Medium's 25 points
         assert enum_bars["marker"]["color"] == ["#f26529", "#f26529"]
 
-    def test_verdict_names_an_avoided_option_that_set_the_score(self, settings_file):
+    def test_verdict_names_an_avoided_option_that_set_the_gap(self, settings_file):
         team = _answers({"a": 24, "b": 8, "c": 8})
         data = _categorical_frame(
             {"avoider": _answers({"b": 20, "c": 20}), "steady": team, "careful": team}
@@ -730,20 +730,20 @@ class TestCategoricalTab:
             _categorical_tab(at).info
         )
 
-    def test_threshold_survives_a_new_session(self, categorical_data, settings_file):
+    def test_sensitivity_survives_a_new_session(self, categorical_data, settings_file):
         _save(settings_file, selected_variables=["choice"])
         at = _run(categorical_data, settings_file)
 
-        at.segmented_control(key="rp_cat_threshold").set_value(20).run()
+        at.segmented_control(key="rp_cat_sensitivity").set_value("low").run()
         assert not at.exception
-        assert "at least 10 percentage points" in _texts(at.caption)
+        assert "at least 35 percentage points" in _texts(at.caption)
 
         new_session = _run(categorical_data, settings_file)
 
-        assert new_session.segmented_control(key="rp_cat_threshold").value == 20
+        assert new_session.segmented_control(key="rp_cat_sensitivity").value == "low"
         with open(settings_file) as f:
             saved = json.load(f)["enumerators"]["response_patterns"]
-        assert saved["categorical_threshold"] == 20
+        assert saved["categorical_sensitivity"] == "low"
 
 
 class TestBucketLabel:

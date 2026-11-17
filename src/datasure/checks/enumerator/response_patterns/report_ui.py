@@ -20,9 +20,9 @@ from datasure.checks.enumerator.response_patterns.compute import (
     compute_response_patterns,
 )
 from datasure.checks.enumerator.response_patterns.models import (
+    CATEGORICAL_LEVELS,
     DIGIT_PREFERENCE_LEVELS,
     RANGE_COMPRESSION_LEVELS,
-    THRESHOLD_LEVELS,
     Badge,
     CategoricalEnumerator,
     CategoricalQuestion,
@@ -214,11 +214,12 @@ def _render_check_conditions(
     return False
 
 
-def _render_threshold(threshold: int) -> None:
-    """Note a scored check's flag threshold and where to change it."""
+def _render_categorical_sensitivity(sensitivity: Sensitivity) -> None:
+    """Note Categorical Response Patterns' sensitivity and where to change it."""
+    level = CATEGORICAL_LEVELS[sensitivity]
     st.caption(
-        f"Sensitivity: **{THRESHOLD_LEVELS[threshold]}** (flagged at a "
-        f"score of {threshold} or more). Change it in the settings above."
+        f"Sensitivity: **{level.label}** (flagged at a gap of {level.min_gap:g} "
+        "percentage points or more). Change it in the settings above."
     )
 
 
@@ -654,23 +655,20 @@ def _render_categorical_table(
             "Interviews": [e.interviews for e in enumerators],
             "Top question": [q.variable if q else None for q in top],
             "Most over-chosen option": [q.dominant_option if q else None for q in top],
-            "Largest gap (pp)": [q.largest_gap if q else None for q in top],
-            "Score": [e.score for e in enumerators],
+            "Largest gap (pp)": [e.largest_gap for e in enumerators],
             "Flag": [e.badge.value for e in enumerators],
         }
     )
     row = _render_enumerator_table(
         table,
-        {"Interviews": "{:,}", "Largest gap (pp)": "{:.1f}", "Score": "{:.0f}"},
+        {"Interviews": "{:,}", "Largest gap (pp)": "{:.1f}"},
         {
-            "Top question": "The question with the enumerator's highest score",
+            "Top question": "The question with the enumerator's largest gap",
             "Most over-chosen option": "On the top question, the option the "
             "enumerator chose most often compared with the rest of the team",
             "Largest gap (pp)": "On the top question, the largest difference "
             "in percentage points between the enumerator's and the rest of "
             "the team's share of any option",
-            "Score": "0-100, twice the largest gap on any checked question. "
-            "50 means a gap of 25 percentage points.",
         },
         key,
     )
@@ -680,8 +678,8 @@ def _render_categorical_table(
 def _option_chart(q: CategoricalQuestion, enumerator: str) -> go.Figure:
     """Return each option's share, enumerator against the team.
 
-    The enumerator's bars are red-orange on options whose gap reaches half
-    the flag threshold.
+    The enumerator's bars are red-orange on options whose gap reaches the
+    sensitivity level's.
     """
     options = [o.option for o in q.options]
     hover = "%{y}: %{x:.1f}%<extra></extra>"
@@ -731,7 +729,7 @@ def _render_question_verdict(q: CategoricalQuestion, enumerator: str) -> None:
     scoring = by_option[q.scoring_option]
     dominant = by_option.get(q.dominant_option)
     if q.flagged and scoring.gap < 0 and dominant:
-        # The score comes from an option the enumerator avoids
+        # The largest gap is on an option the enumerator avoids
         st.warning(
             f"{enumerator} chose **{scoring.option}** in only "
             f"{scoring.enum_pct:.1f}% of answers, against "
@@ -761,11 +759,11 @@ def _render_question(q: CategoricalQuestion, enumerator: str) -> None:
     """Render one question's title, verdict and option chart."""
     with st.container(border=True):
         anomaly = " :red-badge[ANOMALY]" if q.flagged else ""
-        st.markdown(f"**{q.variable}**{anomaly} · score **{q.score:.0f}**")
-        st.caption(
-            f"{q.n_responses:,} responses · largest gap {q.largest_gap:.1f} "
+        st.markdown(
+            f"**{q.variable}**{anomaly} · largest gap **{q.largest_gap:.1f}** "
             "percentage points"
         )
+        st.caption(f"{q.n_responses:,} responses")
         if q.sample_band == SampleBand.LOW:
             st.warning(LOW_SAMPLE_WARNING, icon=":material/warning:")
         _render_question_verdict(q, enumerator)
@@ -785,19 +783,19 @@ def _render_categorical_detail(e: CategoricalEnumerator, min_sample: int) -> Non
             icon=INFO_ICON,
         )
         return
-    if e.score is None:
+    if e.largest_gap is None:
         st.info(
-            f"None of the checked questions could be scored for {e.enumerator}.",
+            f"None of the checked questions could be compared for {e.enumerator}.",
             icon=INFO_ICON,
         )
         _render_skipped(e.skipped_variables)
         return
 
     st.markdown(
-        f"##### {e.enumerator}: answer options · score **{e.score:.0f}** "
-        f"{_badge(e.badge)}"
+        f"##### {e.enumerator}: answer options · largest gap "
+        f"**{e.largest_gap:.1f}** pp {_badge(e.badge)}"
     )
-    st.caption("Questions are listed highest score first.")
+    st.caption("Questions are listed largest gap first.")
     for q in e.questions:
         _render_question(q, e.enumerator)
     _render_skipped(e.skipped_variables)
@@ -808,9 +806,10 @@ def _render_categorical(result: CategoricalResult, min_sample: int) -> None:
     st.markdown(
         "Does one answer option dominate an enumerator's answers compared "
         "with the rest of the team's? Each selected categorical variable is "
-        "scored separately; the enumerator's score is the highest."
+        "compared separately; the enumerator's largest gap on any of them "
+        "decides the flag."
     )
-    _render_threshold(result.threshold)
+    _render_categorical_sensitivity(result.sensitivity)
     if _render_check_conditions(
         result, "Categorical Response Patterns", min_sample, kind="categorical"
     ):

@@ -13,8 +13,8 @@ import polars as pl
 
 from datasure.checks import missing
 from datasure.checks.enumerator.response_patterns.models import (
+    CATEGORICAL_LEVELS,
     DIGIT_PREFERENCE_LEVELS,
-    MODERATE_MARGIN,
     NUMERIC_TYPES,
     RANGE_COMPRESSION_LEVELS,
     Badge,
@@ -64,13 +64,8 @@ HISTOGRAM_BUCKETS: int = 10
 # The histogram spans the rest of the team's 1st to 99th percentile
 HISTOGRAM_QUANTILES: tuple[float, float] = (0.01, 0.99)
 
-# Categorical Response Patterns: each percentage point between the
-# enumerator's and the team's share of one option adds 2 points, so a gap of
-# 25 points scores 50 and 50 points scores 100
-CATEGORICAL_POINTS_PER_PP: int = 2
-
-# Decimals gaps are rounded to before scoring
-_SCORE_DECIMALS: int = 6
+# Decimals Categorical gaps are rounded to before comparing them with a level
+_GAP_DECIMALS: int = 6
 
 
 def is_gps_column(name: str) -> bool:
@@ -164,20 +159,27 @@ def _sort_key(result: DigitPreferenceEnumerator) -> tuple:
     return (result.ratio is None, -(result.ratio or 0), result.enumerator)
 
 
-def score_badge_band(score: float | None, threshold: int) -> Badge:
-    """Return the badge for a 0-100 ``score`` against the flag ``threshold``."""
-    if score is None:
+def categorical_badge_band(gap: float | None, sensitivity: Sensitivity) -> Badge:
+    """Return the badge for a largest option gap at ``sensitivity``.
+
+    High when the gap reaches the level's. Moderate when the next more
+    sensitive level would flag the enumerator. The most sensitive level has
+    no Moderate band.
+    """
+    if gap is None:
         return Badge.NA
-    if score >= threshold:
+    if gap >= CATEGORICAL_LEVELS[sensitivity].min_gap:
         return Badge.HIGH
-    if score >= threshold - MODERATE_MARGIN:
+    levels = list(CATEGORICAL_LEVELS)
+    position = levels.index(sensitivity)
+    if position > 0 and gap >= CATEGORICAL_LEVELS[levels[position - 1]].min_gap:
         return Badge.MODERATE
     return Badge.LOW
 
 
-def _score_sort_key(result: CategoricalEnumerator) -> tuple:
-    """Order highest score first, unscored enumerators last, then by name."""
-    return (result.score is None, -(result.score or 0), result.enumerator)
+def _categorical_sort_key(result: CategoricalEnumerator) -> tuple:
+    """Order largest gap first, enumerators without one last, then by name."""
+    return (result.largest_gap is None, -(result.largest_gap or 0), result.enumerator)
 
 
 def range_badge_band(sd_ratio: float | None, sensitivity: Sensitivity) -> Badge:
@@ -585,7 +587,7 @@ def _categorical_question(
     team_counts: list[int],
     settings: ResponsePatternSettings,
 ) -> CategoricalQuestion | SkipReason:
-    """Score one enumerator on one question, or return why it can't be.
+    """Compare one enumerator with the team on one question, or say why not.
 
     The options are those either side chose, so an option only one side
     chose counts as 0% on the other.
@@ -598,13 +600,12 @@ def _categorical_question(
         return SkipReason.TEAM_NO_RESPONSES
 
     enum_pct, team_pct = _pct(enum_counts), _pct(team_counts)
-    # Rounded so float noise can't drop a score at a threshold just below it
+    # Rounded so float noise can't drop a gap at a level just below it
     gaps = [
-        round(e - t, _SCORE_DECIMALS) for e, t in zip(enum_pct, team_pct, strict=True)
+        round(e - t, _GAP_DECIMALS) for e, t in zip(enum_pct, team_pct, strict=True)
     ]
     largest_gap = max(abs(g) for g in gaps)
-    score = min(100.0, largest_gap * CATEGORICAL_POINTS_PER_PP)
-    highlight = settings.categorical_threshold / CATEGORICAL_POINTS_PER_PP
+    min_gap = CATEGORICAL_LEVELS[settings.categorical_sensitivity].min_gap
     top = max(range(len(options)), key=lambda i: gaps[i])
     # An over-chosen option wins a tie, as it names what the enumerator chose
     scoring = max(range(len(options)), key=lambda i: (abs(gaps[i]), gaps[i]))
@@ -612,10 +613,9 @@ def _categorical_question(
         variable=variable,
         n_responses=n,
         sample_band=band,
-        score=score,
         largest_gap=largest_gap,
         scoring_option=options[scoring],
-        flagged=score >= settings.categorical_threshold,
+        flagged=largest_gap >= min_gap,
         dominant_option=options[top] if gaps[top] > 0 else None,
         options=[
             CategoricalOption(
@@ -623,7 +623,7 @@ def _categorical_question(
                 enum_pct=e,
                 team_pct=t,
                 gap=g,
-                flagged=abs(g) >= highlight,
+                flagged=abs(g) >= min_gap,
             )
             for option, e, t, g in zip(options, enum_pct, team_pct, gaps, strict=True)
         ],
@@ -636,10 +636,10 @@ def _categorical_enumerator(
     counts: dict[str, tuple[list[str], dict[str, list[int]]]],
     settings: ResponsePatternSettings,
 ) -> CategoricalEnumerator:
-    """Score one enumerator on every eligible question.
+    """Compare one enumerator with the team on every eligible question.
 
-    The enumerator's score is their highest question score, so one badly
-    asked question is enough to flag them.
+    The enumerator's largest gap is the largest on any question, so one
+    badly asked question is enough to flag them.
     """
     scored: list[CategoricalQuestion] = []
     skipped: dict[str, SkipReason] = {}
@@ -657,15 +657,15 @@ def _categorical_enumerator(
         else:
             scored.append(result)
 
-    scored.sort(key=lambda q: -q.score)
+    scored.sort(key=lambda q: -q.largest_gap)
     top = scored[0] if scored else None
-    score = top.score if top else None
+    gap = top.largest_gap if top else None
     return CategoricalEnumerator(
         enumerator=enum,
         interviews=n_interviews,
         sample_band=top.sample_band if top else _best_band(bands),
-        score=score,
-        badge=score_badge_band(score, settings.categorical_threshold),
+        largest_gap=gap,
+        badge=categorical_badge_band(gap, settings.categorical_sensitivity),
         questions=scored,
         skipped_variables=skipped,
     )
@@ -677,11 +677,11 @@ def _compute_categorical(
     interviews: dict[str, int],
     settings: ResponsePatternSettings,
 ) -> CategoricalResult:
-    """Score how far each enumerator's answer options differ from the team's."""
-    threshold = settings.categorical_threshold
+    """Measure how far each enumerator's answer options differ from the team's."""
+    sensitivity = settings.categorical_sensitivity
     if not variables:
         return CategoricalResult(
-            threshold=threshold, condition=CheckCondition.NO_APPLICABLE_VARIABLES
+            sensitivity=sensitivity, condition=CheckCondition.NO_APPLICABLE_VARIABLES
         )
 
     skipped: dict[str, SkipReason] = {}
@@ -695,7 +695,7 @@ def _compute_categorical(
             skipped[var] = reason
     if not counts:
         return CategoricalResult(
-            threshold=threshold,
+            sensitivity=sensitivity,
             condition=CheckCondition.NO_ELIGIBLE_VARIABLES,
             skipped_variables=skipped,
         )
@@ -708,11 +708,11 @@ def _compute_categorical(
         e.sample_band == SampleBand.INSUFFICIENT for e in enumerators
     )
     return CategoricalResult(
-        threshold=threshold,
+        sensitivity=sensitivity,
         condition=CheckCondition.ALL_BELOW_MINIMUM if all_insufficient else None,
         variables=list(counts),
         skipped_variables=skipped,
-        enumerators=sorted(enumerators, key=_score_sort_key),
+        enumerators=sorted(enumerators, key=_categorical_sort_key),
     )
 
 
