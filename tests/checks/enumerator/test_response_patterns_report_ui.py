@@ -1,10 +1,13 @@
 """AppTest tests for the Response Patterns section (seam B)."""
 
 import json
+from itertools import pairwise
 
 import polars as pl
 import pytest
 from streamlit.testing.v1 import AppTest
+
+from datasure.checks.enumerator.response_patterns.report_ui import _bucket_label
 
 ENUM = "enum"
 
@@ -569,3 +572,24 @@ class TestRangeCompressionTab:
         assert new_session.segmented_control(key="rp_rc_sensitivity").value == "low"
         table = new_session.dataframe(key="rp_rc_enumerators").value
         assert table["Flag"].tolist()[0] == "Moderate"
+
+
+class TestBucketLabel:
+    @pytest.mark.parametrize(
+        ("width", "expected"),
+        [
+            (9.8, "1 to 11"),
+            (0.25, "1.00 to 1.25"),
+            (0.005, "1.000 to 1.005"),
+        ],
+    )
+    def test_precision_follows_the_width(self, width, expected):
+        assert _bucket_label(1, 1 + width, width) == expected
+
+    def test_narrow_buckets_get_unique_labels(self):
+        width = 0.005
+        edges = [i * width for i in range(11)]
+
+        labels = [_bucket_label(lo, hi, width) for lo, hi in pairwise(edges)]
+
+        assert len(set(labels)) == 10

@@ -410,7 +410,16 @@ class TestInferVariableTypes:
             "plot_lng",
             "GPS_lon",
         ]
-        kept = ["age", "how_long", "relation", "plate_count", "accuracy_score"]
+        kept = [
+            "age",
+            "how_long",
+            "relation",
+            "plate_count",
+            "accuracy_score",
+            # GPS-measured answers, not coordinates
+            "plot_area_gps",
+            "gps_area_ha",
+        ]
         data = pl.DataFrame({col: [1.5, 2.5] for col in gps + kept})
 
         types = infer_variable_types(data)
@@ -680,6 +689,33 @@ class TestRangeCompressionSkips:
         results = compute_response_patterns(data, _settings(), ENUM, None)
 
         assert results.range_compression.condition == "no_applicable_variables"
+
+    def test_numeric_override_on_text_numbers_is_checked(self):
+        # Numbers stored as text are scored, as Digit Preference scores them
+        data = _frame(
+            {
+                "A": [str(v) for v in _scaled(BASE, 0.5)] + ["n/a"],
+                "B": [str(v) for v in BASE],
+            }
+        )
+        settings = _settings(type_overrides={"x": "continuous"})
+
+        results = compute_response_patterns(data, settings, ENUM, None)
+
+        assert results.range_compression.skipped_variables == {}
+        (var,) = _range(results, "A").variables
+        assert var.n_responses == 40
+        assert var.sd_ratio == pytest.approx(0.5)
+
+    def test_numeric_override_on_text_without_numbers_is_skipped(self):
+        data = pl.DataFrame({ENUM: ["A"] * 20 + ["B"] * 20, "x": ["yes", "no"] * 20})
+        settings = _settings(type_overrides={"x": "integer"})
+
+        results = compute_response_patterns(data, settings, ENUM, None)
+
+        rc = results.range_compression
+        assert rc.condition == "no_eligible_variables"
+        assert rc.skipped_variables == {"x": "no answers are numbers"}
 
 
 class TestRangeCompressionHistogram:

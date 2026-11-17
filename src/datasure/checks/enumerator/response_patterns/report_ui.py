@@ -4,6 +4,7 @@ Renders the results model from ``compute_response_patterns``; no scoring
 happens here.
 """
 
+import math
 from collections.abc import Callable
 from itertools import pairwise
 
@@ -30,6 +31,7 @@ from datasure.checks.enumerator.response_patterns.models import (
     RangeCompressionResult,
     RangeVariable,
     ResponsePatternResults,
+    ResponsePatternSettings,
     SampleBand,
     Sensitivity,
 )
@@ -417,9 +419,30 @@ def _render_range_table(
     return enumerators[row]
 
 
+@st.cache_data(ttl=300)
+def _cached_response_patterns(
+    data: pl.DataFrame,
+    settings: ResponsePatternSettings,
+    enumerator_col: str,
+    missing_codes: pl.DataFrame | None,
+) -> ResponsePatternResults:
+    """Return ``compute_response_patterns``, cached for 5 minutes.
+
+    The section is a fragment, so row clicks and selectbox changes rerun it;
+    caching keeps those from recomputing every check. Settings and missing
+    codes are arguments, so editing them changes the cache key.
+    """
+    return compute_response_patterns(data, settings, enumerator_col, missing_codes)
+
+
 def _bucket_label(low: float, high: float, width: float) -> str:
-    """Return a histogram bucket's range, as precise as its width needs."""
-    spec = ",.0f" if width >= 1 else ",.2f"
+    """Return a histogram bucket's range, as precise as its width needs.
+
+    Edges get at least 2 decimals under a width of 1, and enough to show a
+    whole width, so neighbouring buckets never share a label.
+    """
+    decimals = 0 if width >= 1 else max(2, math.ceil(-math.log10(width)))
+    spec = f",.{decimals}f"
     return f"{low:{spec}} to {high:{spec}}"
 
 
@@ -630,7 +653,7 @@ def render_response_patterns(
     settings = response_pattern_settings(
         settings_file, data, _excluded_columns(enumerator_settings), missing_codes
     )
-    results: ResponsePatternResults = compute_response_patterns(
+    results: ResponsePatternResults = _cached_response_patterns(
         data, settings, enumerator_col, missing_codes
     )
     if results.condition is not None:

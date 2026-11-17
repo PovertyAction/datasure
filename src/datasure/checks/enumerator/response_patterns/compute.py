@@ -7,6 +7,7 @@ model returned by ``compute_response_patterns``.
 
 import re
 
+import numpy as np
 import polars as pl
 
 from datasure.checks import missing
@@ -30,11 +31,12 @@ from datasure.checks.enumerator.response_patterns.models import (
     VariableType,
 )
 
+# Only names of coordinate parts: a plain "gps" also names GPS-measured
+# survey answers, such as plot_area_gps, which these checks should keep
 _GPS_NAME_PARTS: tuple[str, ...] = (
     "latitude",
     "longitude",
     "altitude",
-    "gps",
     "geopoint",
 )
 _GPS_NAME_WORDS: frozenset[str] = frozenset({"lat", "lon", "lng"})
@@ -59,10 +61,12 @@ HISTOGRAM_QUANTILES: tuple[float, float] = (0.01, 0.99)
 def is_gps_column(name: str) -> bool:
     """Return whether a column name looks like part of a GPS reading.
 
-    Matches names containing latitude, longitude, altitude, gps or geopoint,
+    Matches names containing latitude, longitude, altitude or geopoint,
     names with a word lat, lon or lng, and SurveyCTO's ``field-Accuracy``
-    geopoint part. Coordinates vary with where an enumerator works, not
-    how they ask questions, so they don't suit these checks.
+    geopoint part. A name that only contains "gps", such as
+    ``plot_area_gps``, is a GPS-measured answer and is not matched.
+    Coordinates vary with where an enumerator works, not how they ask
+    questions, so they don't suit these checks.
     """
     lower = name.lower()
     if any(part in lower for part in _GPS_NAME_PARTS) or lower.endswith("-accuracy"):
@@ -320,10 +324,8 @@ def _bucket_shares(values: pl.Series, low: float, width: float) -> list[float]:
     Values beyond either end count in the end bucket, so shares sum to 100.
     """
     buckets = ((values - low) / width).floor().clip(0, HISTOGRAM_BUCKETS - 1)
-    counts = [0] * HISTOGRAM_BUCKETS
-    for bucket in buckets.cast(pl.Int64):
-        counts[bucket] += 1
-    return _pct(counts)
+    counts = np.bincount(buckets.cast(pl.Int64).to_numpy(), minlength=HISTOGRAM_BUCKETS)
+    return _pct(counts.tolist())
 
 
 def _histogram(
@@ -459,12 +461,11 @@ def _compute_range_compression(
             sensitivity=sensitivity, condition=CheckCondition.NO_APPLICABLE_VARIABLES
         )
 
-    skipped: dict[str, SkipReason] = {}
+    # Text columns typed as numeric are parsed as Digit Preference does,
+    # so both checks score the same variables
+    data, skipped = _as_numbers(data, variables)
     values: dict[str, pl.DataFrame] = {}
-    for var in variables:
-        if not data.schema[var].is_numeric():
-            skipped[var] = SkipReason.NOT_NUMERIC
-            continue
+    for var in (v for v in variables if v not in skipped):
         frame = (
             data.select(_ENUM, pl.col(var).cast(pl.Float64).alias(_VALUE))
             .drop_nulls(_VALUE)
