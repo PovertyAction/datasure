@@ -124,6 +124,15 @@ _BACKCHECK_SETTING_KEYS = {
 
 _KEY_LABELS = {"survey_key": "survey KEY", "survey_id": "survey ID"}
 
+# Settings nested one level down that name survey columns, by section:
+# (subsection, key, label). The Enumerator report's Response Patterns
+# section keeps its selected variables under ``response_patterns``.
+_NESTED_SURVEY_SETTING_KEYS = {
+    "enumerators": (
+        ("response_patterns", "selected_variables", "response patterns variables"),
+    ),
+}
+
 
 def find_column_references(
     project_id: str, alias: str, columns: Iterable[str]
@@ -287,6 +296,20 @@ def _settings_references(
                 yield ColumnReference(
                     column, source, f"{section_label} settings: {label}"
                 )
+        if is_survey:
+            yield from _nested_references(section, section_label, values, source)
+
+
+def _nested_references(
+    section: str, section_label: str, values: dict, source: str
+) -> Iterator[ColumnReference]:
+    """Yield survey columns named in a section's nested settings."""
+    for subsection, key, label in _NESTED_SURVEY_SETTING_KEYS.get(section, ()):
+        nested = values.get(subsection)
+        if not isinstance(nested, dict):
+            continue
+        for column in _names(nested.get(key)):
+            yield ColumnReference(column, source, f"{section_label} settings: {label}")
 
 
 def _correction_references(

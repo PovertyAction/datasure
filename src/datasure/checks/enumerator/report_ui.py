@@ -30,6 +30,9 @@ from datasure.checks.enumerator.models import (
     StatisticsOvertimeSettings,
     StatisticsSettings,
 )
+from datasure.checks.enumerator.response_patterns.report_ui import (
+    render_response_patterns,
+)
 from datasure.checks.enumerator.settings_ui import (
     enumerator_report_settings,
     load_default_enumerator_settings,
@@ -1255,6 +1258,10 @@ def enumerator_report(
         enumerator_settings.team,
         setting_file,
         missing_codes,
+    )
+
+    render_response_patterns(
+        data_enum_report, setting_file, enumerator_settings, missing_codes
     )
 
     demo_callout(
