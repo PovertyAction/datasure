@@ -24,35 +24,41 @@ LOADERS = [
         load_default_settings,
         "progress",
         ProgressSettings(survey_key="key", survey_id="id"),
+        "survey_date",
         id="progress",
     ),
     pytest.param(
         load_default_duplicates_settings,
         "duplicates",
         DuplicatesSettings(survey_key="key", survey_id="id"),
+        "enumerator",
         id="duplicates",
     ),
     pytest.param(
         load_default_gpschecks_settings,
         "gpschecks",
         GPSSettings(survey_key="key", survey_id="id"),
+        "enumerator",
         id="gps",
     ),
     pytest.param(
         load_default_enumerator_settings,
         "enumerators",
         EnumeratorSettings(survey_key="key", survey_id="id"),
+        "enumerator",
         id="enumerator",
     ),
 ]
 
 
-@pytest.mark.parametrize(("loader", "section", "defaults"), LOADERS)
-def test_loader_returns_the_latest_saved_value(tmp_path, loader, section, defaults):
+@pytest.mark.parametrize(("loader", "section", "defaults", "field"), LOADERS)
+def test_loader_returns_the_latest_saved_value(
+    tmp_path, loader, section, defaults, field
+):
     settings_file = tmp_path / "page_settings.json"
-    settings_file.write_text(json.dumps({section: {"enumerator": "enum_a"}}))
-    assert loader(str(settings_file), defaults).enumerator == "enum_a"
+    settings_file.write_text(json.dumps({section: {field: "col_a"}}))
+    assert getattr(loader(str(settings_file), defaults), field) == "col_a"
 
-    settings_file.write_text(json.dumps({section: {"enumerator": "enum_b"}}))
+    settings_file.write_text(json.dumps({section: {field: "col_b"}}))
 
-    assert loader(str(settings_file), defaults).enumerator == "enum_b"
+    assert getattr(loader(str(settings_file), defaults), field) == "col_b"

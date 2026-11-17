@@ -154,6 +154,49 @@ class TestFindColumnReferences:
 
         assert _find("age") == []
 
+    def _progress_settings(self, cache, progress: dict) -> None:
+        path = cache / PROJECT / "settings" / "page_main_checks_settings.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps({"progress": progress}))
+
+    def test_progress_tracking_settings_count_for_the_tracking_dataset(self, cache):
+        _config(tracking_data_name="master")
+        self._progress_settings(
+            cache,
+            {
+                "tracking_id": "resp_id",
+                "tracking_parents": ["district"],
+                "tracking_display": ["landmark"],
+                "survey_unit": "village",
+            },
+        )
+
+        assert _find("resp_id", "district", "landmark", "village", alias="master") == [
+            ColumnReference(
+                "resp_id", "Check page 'Main Checks'", "Progress settings: tracking id"
+            ),
+            ColumnReference(
+                "district",
+                "Check page 'Main Checks'",
+                "Progress settings: tracking parents",
+            ),
+            ColumnReference(
+                "landmark",
+                "Check page 'Main Checks'",
+                "Progress settings: tracking display",
+            ),
+        ]
+
+    def test_the_survey_unit_counts_for_the_survey_dataset(self, cache):
+        _config(tracking_data_name="master")
+        self._progress_settings(cache, {"survey_unit": "village", "tracking_id": "x"})
+
+        assert _find("village", "x") == [
+            ColumnReference(
+                "village", "Check page 'Main Checks'", "Progress settings: survey unit"
+            )
+        ]
+
     def test_correction_log_entries_are_counted(self, cache):
         _save(
             pl.DataFrame(

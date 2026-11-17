@@ -228,7 +228,16 @@ def load_check_data(project_id: str, config: PageConfig) -> CheckData:
     if config.backcheck_data_name:
         backcheck_data = load_data_with_fallback(project_id, config.backcheck_data_name)
 
-    return CheckData(page_data=page_data, backcheck_data=backcheck_data)
+    # Load the tracking file or master list if configured
+    tracking_data = None
+    if config.tracking_data_name:
+        tracking_data = load_data_with_fallback(project_id, config.tracking_data_name)
+
+    return CheckData(
+        page_data=page_data,
+        backcheck_data=backcheck_data,
+        tracking_data=tracking_data,
+    )
 
 
 def stop_if_no_survey_data(page_data: pl.DataFrame, data_name: str) -> None:

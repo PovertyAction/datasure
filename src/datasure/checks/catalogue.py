@@ -67,7 +67,11 @@ from datasure.checks.outliers.report_ui import (
     outliers_settings_section,
     outliers_status,
 )
-from datasure.checks.progress import progress_headline, progress_report
+from datasure.checks.progress import (
+    TrackingSource,
+    progress_headline,
+    progress_report,
+)
 from datasure.checks.summary import summary_report
 from datasure.utils.cache_utils import get_cache_path
 from datasure.utils.dataframe_utils import get_df_columns
@@ -239,6 +243,7 @@ def _render_progress(ctx: CheckContext) -> None:
         ctx.config.setting_file,
         progress_config(ctx),
         ctx.survey_columns,
+        TrackingSource(ctx.config.tracking_data_name, ctx.data.tracking_data_with_rows),
     )
 
 
@@ -406,7 +411,10 @@ def _backchecks_status(ctx: CheckContext) -> StatusResult:
 # Headline adapters also look the module-level functions up on each call.
 def _progress_headline(ctx: CheckContext) -> CheckHeadline | None:
     return progress_headline(
-        ctx.data.page_data, ctx.config.setting_file, progress_config(ctx)
+        ctx.data.page_data,
+        ctx.config.setting_file,
+        progress_config(ctx),
+        ctx.data.tracking_data_with_rows,
     )
 
 

@@ -1,23 +1,46 @@
-"""Progress tracking module for survey data quality checks.
+"""Progress check: completions against the target.
 
-This module provides comprehensive progress tracking functionality with:
-- Survey submission progress monitoring
-- Progress over time analysis
-- Attempted interviews tracking
-- Consent and completion tracking
-- Modular, testable architecture
+All counting lives in `compute_progress`, a pure function that returns a
+`ProgressResult`; the page and the summary headline only draw from it. The
+page has a settings expander at the top, then a header, then two sections:
+Overview (to-do cards and the completions chart) and Follow-up (who needs
+another visit, and how many tries a completion takes).
 """
 
+import math
+from dataclasses import dataclass
+from datetime import date, timedelta
 from typing import Any, Literal
 
 import plotly.graph_objects as go
 import polars as pl
-import seaborn as sns
 import streamlit as st
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, ValidationError, field_validator
 
-from datasure.checks.headline import CheckHeadline
-from datasure.utils.chart_utils import donut_chart
+from datasure.checks.check_configs import progress_config
+from datasure.checks.context import CheckContext
+from datasure.checks.headline import CheckHeadline, settings_no_longer_fit
+from datasure.checks.health_period import date_expr
+from datasure.checks.progress_tracking import (
+    ProgressMode,
+    Respondent,
+    TrackingIssue,
+    TrackingReference,
+    TrackingSettings,
+    UnitLevel,
+    assign_units,
+    detect_mode,
+    normalize_keys,
+    read_tracking,
+    respondents,
+    unit_levels,
+    untracked_unit_count,
+)
+from datasure.checks.progress_tracking_ui import (
+    display_by_unit,
+    display_issues,
+    display_respondents,
+)
 from datasure.utils.dataframe_utils import ColumnByType
 from datasure.utils.navigations_utils import demo_callout
 from datasure.utils.onboarding_utils import demo_output_onboarding
@@ -26,15 +49,39 @@ from datasure.utils.settings_utils import (
     save_check_settings,
     trigger_save,
 )
-from datasure.utils.ui_utils import ensure_styler_limit
+from datasure.utils.ui_utils import metric_row, section_header
 from datasure.utils.view_state import reset_filters_beside, view_factory
 
 TAB_NAME = "progress"
+WARNING_ICON = ":material/warning:"
+Period = Literal["Day", "Week", "Month"]
+SECTIONS_BY_MODE: dict[str, list[str]] = {
+    "fixed": ["Overview", "Follow-up"],
+    "tracking file": ["Overview", "Follow-up", "By unit"],
+    "master list": ["Overview", "Follow-up", "By unit", "Respondents"],
+}
+# Where a to-do card's link takes the reader, by section
+SECTION_ANCHORS = {
+    "Follow-up": "follow-up",
+    "By unit": "by-unit",
+    "Respondents": "respondents",
+}
+# The header's attention pill jumps here, to the to-do cards
+OVERVIEW_ANCHOR = "overview"
+# Keys older versions saved the targets under, mapped to the
+# ProgressSettings fields they belong to
+LEGACY_TARGET_KEYS = {
+    "target": "survey_target",
+    "target_per_period": "target_submissions_per_period",
+}
 
-# Saved view state scope: the check's catalogue slug. The time period and the
-# extra attempted-interview columns are personal view state; older versions
-# saved them in the check's settings and they move on first load. The other
-# progress settings (columns, targets, consent and outcome) are configuration.
+# Saved view state scope: the check's catalogue slug. The chart
+# view, the time period and the follow-up queue filters are personal view
+# state. Older versions saved the time period and the removed attempted
+# interviews table's extra columns in the check's settings; they move on
+# first load, so exports leave them out. The other progress settings
+# (columns, targets, field end date and completion condition) are
+# configuration.
 VIEW_SCOPE = "progress"
 check_view = view_factory(
     VIEW_SCOPE,
@@ -47,60 +94,65 @@ check_view = view_factory(
     ),
 )
 
-# Allow styling large dataframes (the limit is shared and only raised)
-ensure_styler_limit(1_000_000)
-
 
 # =============================================================================
 # Pydantic Models for Data Validation
 # =============================================================================
 
 
-class ProgressSummary(BaseModel):
-    """Summary statistics for progress tracking."""
-
-    total_submitted: int = Field(ge=0, description="Total number of submitted surveys")
-    target: int | None = Field(
-        None, ge=0, description="Target number of surveys to collect"
-    )
-    percentage_completed: float = Field(
-        ge=0, description="Percentage of target completed"
-    )
-
-
-class ProgressChartMetrics(BaseModel):
-    """Metrics for consent and completion progress."""
-
-    consent_percentage: float = Field(
-        ge=0, le=100, description="Percentage of valid consent"
-    )
-    completion_percentage: float = Field(
-        ge=0, le=100, description="Percentage of completed surveys"
-    )
-
-
-class AttemptedInterviewsMetrics(BaseModel):
-    """Summary metrics for attempted interviews."""
-
-    total_submitted: int = Field(ge=0, description="Total number of submissions")
-    number_of_unique_ids: int = Field(ge=0, description="Number of unique survey IDs")
-    min_attempts: int = Field(ge=0, description="Minimum number of attempts")
-    max_attempts: int = Field(ge=0, description="Maximum number of attempts")
-
-
-class ProgressSettings(BaseModel):
+class ProgressSettings(TrackingSettings):
     """Settings for progress report configuration."""
 
-    survey_key: str = Field(None, description="Survey key column")
+    survey_key: str | None = Field(None, description="Survey key column")
     survey_id: str | None = Field(..., min_length=1, description="Survey ID column")
     survey_date: str | None = Field(None, description="Survey date column")
-    enumerator: str | None = Field(None, description="Enumerator ID column")
     survey_target: int | None = Field(
-        None, ge=0, description="Target number of surveys"
+        None, ge=0, description="Target number of completed IDs"
     )
+    # Named for the key it is saved under, but it counts completions
     target_submissions_per_period: int | None = Field(
-        None, ge=0, description="Target number of submissions per time period"
+        None, ge=0, description="Target number of completions per time period"
     )
+    consent: str | None = Field(None, description="Consent column")
+    consent_vals: list[Any] | None = Field(
+        None, description="Consent values that count towards completion"
+    )
+    outcome: str | None = Field(None, description="Outcome column")
+    outcome_vals: list[Any] | None = Field(
+        None, description="Outcome values that count towards completion"
+    )
+    field_end_date: date | None = Field(
+        None, description="The day fieldwork should finish"
+    )
+    # From the page config only: not a Progress setting, so saved values of
+    # the old Enumerator setting are ignored (see load_default_settings)
+    enumerator: str | None = Field(
+        None, description="Enumerator column, for the follow-up queue"
+    )
+
+    @property
+    def has_condition(self) -> bool:
+        """Whether a completion condition is set."""
+        return bool(
+            (self.consent and self.consent_vals) or (self.outcome and self.outcome_vals)
+        )
+
+    def condition(self) -> pl.Expr:
+        """Return whether a row meets the completion condition.
+
+        Every row does when no condition is set.
+        """
+        condition = pl.lit(True)
+        for column, values in (
+            (self.consent, self.consent_vals),
+            (self.outcome, self.outcome_vals),
+        ):
+            if column and values:
+                # nulls_equal: a selected null value matches null rows
+                condition &= (
+                    pl.col(column).is_in(values, nulls_equal=True).fill_null(False)
+                )
+        return condition
 
     @field_validator("survey_target", "target_submissions_per_period")
     @classmethod
@@ -109,6 +161,850 @@ class ProgressSettings(BaseModel):
         if v is not None and v < 0:
             raise ValueError("Target must be a positive number")
         return v
+
+
+@dataclass(frozen=True)
+class TrackingSource:
+    """The page's tracking dataset, as the Progress page receives it.
+
+    Attributes
+    ----------
+    name : str | None
+        Its alias in the page config; None when the page has none.
+    data : pl.DataFrame | None
+        Its rows; None when not set, not imported yet or empty.
+    """
+
+    name: str | None = None
+    data: pl.DataFrame | None = None
+
+
+class ProgressCounts(BaseModel):
+    """The counts the header and the summary headline show."""
+
+    submissions: int = Field(ge=0, description="Every row")
+    unique: int = Field(ge=0, description="Distinct IDs")
+    completed: int = Field(
+        ge=0,
+        description="Distinct IDs with a row meeting the completion condition; "
+        "with a tracking dataset's target, only rows in its tracked units",
+    )
+    untracked_completed: int = Field(
+        0,
+        ge=0,
+        description="Completed IDs outside the tracking dataset's units or "
+        "master list, left out of Completed so they can't count toward its target",
+    )
+    target: int | None = Field(None, ge=0, description="Target number of IDs")
+    remaining: int | None = Field(
+        None, ge=0, description="Completions still needed to reach the target"
+    )
+    percentage: float | None = Field(
+        None, ge=0, description="Completed as a percentage of the target"
+    )
+
+
+class SeriesPoint(BaseModel):
+    """One period of the over-time series."""
+
+    start: date = Field(description="The first day of the period")
+    completed: int = Field(ge=0, description="IDs first completed in the period")
+    cumulative: int = Field(ge=0, description="IDs completed by the period's end")
+    partial: bool = Field(description="Whether the period is still under way")
+
+
+class CurrentPeriod(BaseModel):
+    """Completions in the period under way, against the per-period target."""
+
+    period: Period = Field(description="Day, Week or Month")
+    start: date = Field(description="The first day of the period")
+    completed: int = Field(ge=0, description="IDs first completed in the period")
+    target: int = Field(gt=0, description="Target completions per period")
+
+
+class Pace(BaseModel):
+    """How fast completions come in, and what finishing on time needs."""
+
+    per_day: float | None = Field(
+        None,
+        ge=0,
+        description="Mean completions per day over the 7 days up to the last "
+        "submission; None with fewer than 3 days of data",
+    )
+    projected_finish: date | None = Field(
+        None, description="When the target is reached at that pace"
+    )
+    days_left: int | None = Field(
+        None, ge=0, description="Days to the field end date, counting today"
+    )
+    need_per_day: float | None = Field(
+        None, ge=0, description="Completions per day needed to finish on time"
+    )
+
+
+class ProgressStatus(BaseModel):
+    """The header's one-sentence answer to "will fieldwork finish on time?"."""
+
+    level: Literal["success", "warning", "info"] = Field(
+        description="How the status box is drawn: green, amber or neutral"
+    )
+    title: str = Field(description="The status in a few words")
+    message: str = Field(description="One or two sentences of Markdown")
+
+
+class TodoItem(BaseModel):
+    """A to-do card on Overview: something to act on, linking to its section."""
+
+    label: str = Field(description="What needs action")
+    count: int = Field(gt=0, description="How many need it")
+    section: str = Field(description="The section with the detail")
+
+
+class Attempt(BaseModel):
+    """One submission of an ID, in a follow-up queue row's history."""
+
+    number: int = Field(gt=0, description="1 for the ID's first attempt")
+    day: date | None = Field(None, description="The attempt's date")
+    outcome: str = Field(description="The outcome column's value")
+    enumerator: str | None = Field(None, description="Who made the attempt")
+
+
+class QueueRow(BaseModel):
+    """An ID attempted but never completed, in the follow-up queue."""
+
+    id: str = Field(description="The survey ID")
+    attempts: int = Field(gt=0, description="Submissions of the ID")
+    last_outcome: str = Field(
+        description="The last attempt's outcome, or 'not complete' without an "
+        "outcome column"
+    )
+    last_date: date | None = Field(None, description="The last attempt's date")
+    days_since: int | None = Field(
+        None, ge=0, description="Days from the last attempt to today"
+    )
+    last_enumerator: str | None = Field(None, description="Who made the last attempt")
+    history: list[Attempt] = Field(description="Every attempt, first to last")
+
+
+class FollowUpMetrics(BaseModel):
+    """The Follow-up section's metrics.
+
+    The repeat-ID metrics always hold; the others need a completion
+    condition and are None without one.
+    """
+
+    repeat_ids: int = Field(ge=0, description="IDs submitted more than once")
+    avg_attempts: float | None = Field(
+        None, ge=0, description="Submissions per ID; None without IDs"
+    )
+    max_attempts: int = Field(ge=0, description="The most submissions of one ID")
+    need_follow_up: int | None = Field(
+        None, ge=0, description="IDs attempted but never completed"
+    )
+    first_try_rate: float | None = Field(
+        None,
+        ge=0,
+        le=100,
+        description="Completions at attempt 1, as a percentage of completions",
+    )
+    avg_attempts_per_completion: float | None = Field(
+        None, ge=1, description="The mean attempt number completions came at"
+    )
+    open_3_plus: int | None = Field(
+        None, ge=0, description="Open IDs with 3 or more attempts"
+    )
+
+
+class AttemptBucket(BaseModel):
+    """One bar group of the attempts-to-outcome chart."""
+
+    attempt: str = Field(description='The attempt number: "1", "2", "3" or "4+"')
+    completed: int = Field(ge=0, description="IDs completed at this attempt")
+    open: int = Field(
+        ge=0, description="Open IDs with exactly this many attempts (4+: or more)"
+    )
+    submitted: int = Field(ge=0, description="IDs submitted this many times")
+
+
+class ProgressResult(BaseModel):
+    """Everything the Progress page draws, from `compute_progress`."""
+
+    mode: ProgressMode = Field("fixed", description="Where the target comes from")
+    sections: list[str] = Field(description="The sections the page shows, in order")
+    counts: ProgressCounts
+    target_path: list[tuple[date, float]] = Field(
+        default_factory=list,
+        description="The cumulative target line: from 0 to the target by the "
+        "field end date, else flat at the target; empty without a target",
+    )
+    todos: list[TodoItem] = Field(
+        default_factory=list, description="To-do cards, only those above zero"
+    )
+    pace: Pace = Field(default_factory=Pace)
+    status: ProgressStatus | None = Field(
+        None, description="Whether fieldwork will finish on time; None without a target"
+    )
+    current_period: CurrentPeriod | None = Field(
+        None, description="None without a per-period target or a date column"
+    )
+    series: list[SeriesPoint] = Field(
+        default_factory=list,
+        description="Completions per period up to today; empty without dates",
+    )
+    follow_up: FollowUpMetrics = Field(
+        default_factory=lambda: FollowUpMetrics(repeat_ids=0, max_attempts=0),
+        description="The Follow-up section's metrics",
+    )
+    attempts_to_outcome: list[AttemptBucket] = Field(
+        default_factory=list,
+        description="Completed and open IDs at attempts 1, 2, 3 and 4+",
+    )
+    follow_up_queue: list[QueueRow] = Field(
+        default_factory=list,
+        description="Open IDs, most attempts first, then longest since the last "
+        "attempt; empty without a completion condition",
+    )
+    issues: list[TrackingIssue] = Field(
+        default_factory=list,
+        description="Errors and warnings about the tracking dataset",
+    )
+    unit_levels: list[UnitLevel] = Field(
+        default_factory=list,
+        description="The By unit table at each level, units first; empty in "
+        "fixed mode or when an error stops the tracking dataset being used",
+    )
+    untracked_units: int = Field(
+        0, ge=0, description="Survey units the tracking file has no target for"
+    )
+    respondents: list[Respondent] = Field(
+        default_factory=list,
+        description="Master-list respondents and unexpected IDs; empty outside "
+        "master-list mode",
+    )
+
+
+def _progress_rows(data: pl.DataFrame, settings: ProgressSettings) -> pl.DataFrame:
+    """Return each row's ID, date and whether it meets the completion condition.
+
+    Without an ID column each row is its own ID. Without a date column, or
+    one the data no longer has, every date is null: the counts stand, but
+    there is no series or pace.
+    """
+    id_expr = (
+        pl.col(settings.survey_id) if settings.survey_id else pl.int_range(pl.len())
+    )
+    date_col = settings.survey_date
+    day = (
+        date_expr(date_col, data.schema[date_col])
+        if date_col in data.columns
+        else pl.lit(None, dtype=pl.Date)
+    )
+    return data.select(
+        id_expr.alias("id"),
+        day.alias("date"),
+        settings.condition().alias("qualifies"),
+    )
+
+
+NOT_COMPLETE = "not complete"
+MISSING_OUTCOME = "missing"
+
+
+def _attempts(
+    data: pl.DataFrame, rows: pl.DataFrame, settings: ProgressSettings
+) -> pl.DataFrame:
+    """Return every attempt of every ID, numbered from 1 in date order.
+
+    Attempts on the same day keep their order in the data; undated attempts
+    come last. Rows without an ID are left out. Without an outcome column,
+    an attempt's outcome is "not complete" unless it meets the completion
+    condition.
+    """
+
+    def text(column: str | None) -> pl.Series:
+        if column and column in data.columns:
+            return data[column].cast(pl.String)
+        return pl.Series(values=[None] * data.height, dtype=pl.String)
+
+    if settings.outcome and settings.outcome in data.columns:
+        outcome = text(settings.outcome).fill_null(MISSING_OUTCOME)
+    else:
+        outcome = rows["qualifies"].replace_strict(
+            {True: "complete", False: NOT_COMPLETE}, return_dtype=pl.String
+        )
+    return (
+        rows.with_columns(
+            outcome.alias("outcome"), text(settings.enumerator).alias("enumerator")
+        )
+        .with_row_index("row")
+        .filter(pl.col("id").is_not_null())
+        .with_columns(pl.col("id").cast(pl.String))
+        .sort(["id", "date", "row"], nulls_last=True)
+        .with_columns(pl.int_range(1, pl.len() + 1).over("id").alias("number"))
+    )
+
+
+def _per_id(attempts: pl.DataFrame) -> pl.DataFrame:
+    """Sum up each ID's attempts: how many, when it completed and the last one."""
+    return attempts.group_by("id").agg(
+        pl.len().alias("attempts"),
+        pl.col("number").filter(pl.col("qualifies")).min().alias("completed_at"),
+        pl.col("date").last().alias("last_date"),
+        pl.col("outcome").last().alias("last_outcome"),
+        pl.col("enumerator").last().alias("last_enumerator"),
+        pl.struct(
+            pl.col("number"),
+            pl.col("date").alias("day"),
+            pl.col("outcome"),
+            pl.col("enumerator"),
+        ).alias("history"),
+    )
+
+
+FOLLOW_UP_AFTER = 3
+ATTEMPT_BUCKETS = ["1", "2", "3", "4+"]
+OPEN_AFTER_3_LABEL = "Respondents open after 3+ attempts"
+
+
+def _follow_up_metrics(
+    per_id: pl.DataFrame, settings: ProgressSettings
+) -> FollowUpMetrics:
+    """Count the repeat IDs and, with a completion condition, the follow-ups."""
+    attempts = per_id["attempts"]
+    repeat = FollowUpMetrics(
+        repeat_ids=attempts.filter(attempts > 1).len(),
+        avg_attempts=attempts.mean(),
+        max_attempts=attempts.max() or 0,
+    )
+    if not settings.has_condition:
+        return repeat
+    completed_at = per_id["completed_at"].drop_nulls()
+    open_attempts = per_id.filter(pl.col("completed_at").is_null())["attempts"]
+    return repeat.model_copy(
+        update={
+            "need_follow_up": open_attempts.len(),
+            "first_try_rate": (
+                (completed_at == 1).sum() / completed_at.len() * 100
+                if completed_at.len()
+                else None
+            ),
+            "avg_attempts_per_completion": completed_at.mean(),
+            "open_3_plus": (open_attempts >= FOLLOW_UP_AFTER).sum(),
+        }
+    )
+
+
+def _attempts_to_outcome(
+    per_id: pl.DataFrame, settings: ProgressSettings
+) -> list[AttemptBucket]:
+    """Count IDs completed at, open after and submitted at attempts 1, 2, 3, 4+.
+
+    Without a completion condition no ID is completed or open; only the
+    submissions per ID are counted.
+    """
+    top = len(ATTEMPT_BUCKETS)
+
+    def bucket(column: str) -> pl.Expr:
+        return pl.col(column).clip(upper_bound=top).cast(pl.Int64)
+
+    has_condition = settings.has_condition
+    counts = per_id.select(
+        pl.when(has_condition).then(bucket("completed_at")).alias("completed"),
+        pl.when(pl.col("completed_at").is_null() & has_condition)
+        .then(bucket("attempts"))
+        .alias("open"),
+        bucket("attempts").alias("submitted"),
+    )
+    return [
+        AttemptBucket(
+            attempt=label,
+            **{
+                column: (counts[column] == number).sum()
+                for column in ("completed", "open", "submitted")
+            },
+        )
+        for number, label in enumerate(ATTEMPT_BUCKETS, start=1)
+    ]
+
+
+BEHIND_LABEL = "Units below 50% of target"
+UNTRACKED_LABEL = "Untracked units"
+UNEXPECTED_LABEL = "Unexpected IDs"
+
+
+def _todos(result: "ProgressResult") -> list[TodoItem]:
+    """List the to-do cards whose count is above zero."""
+    finest = result.unit_levels[0].rows if result.unit_levels else []
+    counts = [
+        (
+            UNEXPECTED_LABEL,
+            sum(r.status == "Unexpected" for r in result.respondents),
+            "Respondents",
+        ),
+        (BEHIND_LABEL, sum(r.status == "behind" for r in finest), "By unit"),
+        (UNTRACKED_LABEL, result.untracked_units, "By unit"),
+        (OPEN_AFTER_3_LABEL, result.follow_up.open_3_plus or 0, "Follow-up"),
+    ]
+    return [
+        TodoItem(label=label, count=count, section=section)
+        for label, count, section in counts
+        if count
+    ]
+
+
+def _follow_up_queue(
+    per_id: pl.DataFrame, settings: ProgressSettings, as_of: date
+) -> list[QueueRow]:
+    """List the open IDs, most attempts first, then longest since the last one."""
+    if not settings.has_condition:
+        return []
+    open_ids = per_id.filter(pl.col("completed_at").is_null()).sort(
+        ["attempts", "last_date", "id"],
+        descending=[True, False, False],
+        nulls_last=True,
+    )
+    return [
+        QueueRow(
+            **row,
+            days_since=(
+                max((as_of - row["last_date"]).days, 0) if row["last_date"] else None
+            ),
+        )
+        for row in open_ids.drop("completed_at").iter_rows(named=True)
+    ]
+
+
+PERIOD_EVERY = {"Day": "1d", "Week": "1w", "Month": "1mo"}
+
+
+def period_start(day: date, period: Period) -> date:
+    """Return the first day of the period containing `day`.
+
+    Weeks start on Monday.
+    """
+    return pl.select(pl.lit(day).dt.truncate(PERIOD_EVERY[period])).item()
+
+
+def _first_completions(rows: pl.DataFrame) -> pl.DataFrame:
+    """Return the date each ID first met the completion condition, if dated."""
+    return (
+        rows.filter(pl.col("qualifies") & pl.col("id").is_not_null())
+        .group_by("id")
+        .agg(pl.col("date").min())
+        .drop_nulls("date")
+    )
+
+
+def _series(
+    rows: pl.DataFrame, firsts: pl.DataFrame, as_of: date, period: Period
+) -> list[SeriesPoint]:
+    """Count first completions per period, from the first one to the last submission.
+
+    Periods with no completions between them count 0; periods after the
+    last submission, such as the ones since data collection stopped, are
+    left out. Submissions dated after today are ignored, so the series never
+    runs past the current period. `firsts` holds no dates after today.
+    """
+    dates = rows["date"]
+    last_submission = dates.filter(dates <= as_of).max()
+    if firsts.is_empty() or last_submission is None:
+        return []
+    every = PERIOD_EVERY[period]
+    counts = (
+        firsts.select(pl.col("date").dt.truncate(every).alias("start"))
+        .group_by("start")
+        .agg(pl.len().alias("completed"))
+    )
+    current = period_start(as_of, period)
+    last = period_start(last_submission, period)
+    starts = pl.date_range(counts["start"].min(), last, every, eager=True)
+    filled = (
+        pl.DataFrame({"start": starts})
+        .join(counts, on="start", how="left")
+        .with_columns(pl.col("completed").fill_null(0))
+        .with_columns(pl.col("completed").cum_sum().alias("cumulative"))
+    )
+    return [
+        SeriesPoint(**row, partial=row["start"] == current)
+        for row in filled.iter_rows(named=True)
+    ]
+
+
+def _current_period(
+    firsts: pl.DataFrame, settings: ProgressSettings, as_of: date, period: Period
+) -> CurrentPeriod | None:
+    """Count the first completions in the period containing today."""
+    target = settings.target_submissions_per_period
+    if not target or not settings.survey_date:
+        return None
+    start = period_start(as_of, period)
+    in_period = pl.col("date").dt.truncate(PERIOD_EVERY[period]) == start
+    return CurrentPeriod(
+        period=period,
+        start=start,
+        completed=firsts.filter(in_period).height,
+        target=target,
+    )
+
+
+PACE_WINDOW_DAYS = 7
+MIN_PACE_DAYS = 3
+
+
+def _pace(
+    rows: pl.DataFrame,
+    firsts: pl.DataFrame,
+    settings: ProgressSettings,
+    remaining: int | None,
+    as_of: date,
+) -> Pace:
+    """Work out the pace, the projected finish and the completions needed per day.
+
+    The pace is the mean completions per day over the 7 days up to the last
+    submission, or over the days since the first submission when fieldwork
+    is shorter, so a pause in the data does not drop it to 0. It is left out
+    with fewer than 3 days of submissions. The projected finish counts today
+    as a day of fieldwork, as the days left do.
+    """
+    days_left = need_per_day = None
+    if settings.field_end_date:
+        days_left = max((settings.field_end_date - as_of).days + 1, 0)
+        if remaining and days_left:
+            need_per_day = remaining / days_left
+
+    dated = rows["date"].drop_nulls()
+    days = dated.filter(dated <= as_of)
+    if days.n_unique() < MIN_PACE_DAYS:
+        return Pace(days_left=days_left, need_per_day=need_per_day)
+    last = days.max()
+    window_start = max(last - timedelta(days=PACE_WINDOW_DAYS - 1), days.min())
+    in_window = firsts.filter(pl.col("date").is_between(window_start, last)).height
+    per_day = in_window / ((last - window_start).days + 1)
+
+    projected_finish = None
+    if remaining and per_day:
+        days_needed = math.ceil(remaining / per_day)
+        try:
+            projected_finish = as_of + timedelta(days=days_needed - 1)
+        except OverflowError:
+            # A huge target at a slow pace passes year 9999: no projection
+            projected_finish = None
+    return Pace(
+        per_day=per_day,
+        projected_finish=projected_finish,
+        days_left=days_left,
+        need_per_day=need_per_day,
+    )
+
+
+def short_date(day: date, as_of: date) -> str:
+    """Format a date as "Mon 16 Nov", adding the year when it isn't as_of's."""
+    text = f"{day:%a} {day.day} {day:%b}"
+    return text if day.year == as_of.year else f"{text} {day.year}"
+
+
+def per_day_text(rate: float) -> str:
+    """Format a daily rate, with two decimals below 1 so a slow pace isn't 0.0."""
+    return f"{rate:,.{1 if rate >= 1 else 2}f}"
+
+
+def _days(n: int) -> str:
+    return f"{n:,} day" if n == 1 else f"{n:,} days"
+
+
+def _status(
+    counts: ProgressCounts, pace: Pace, end: date | None, as_of: date
+) -> ProgressStatus | None:
+    """Say in a sentence whether fieldwork will finish by the field end date.
+
+    None without a target: the header asks for one instead.
+    """
+    if not counts.target:
+        return None
+    if not counts.remaining:
+        return ProgressStatus(
+            level="success",
+            title="Target reached",
+            message=f"All **{counts.target:,}** completions are in.",
+        )
+    need = (
+        f" Finishing by {short_date(end, as_of)} needs "
+        f"**{per_day_text(pace.need_per_day)} a day**."
+        if pace.need_per_day is not None
+        else ""
+    )
+    finish = pace.projected_finish
+    at_pace = (
+        f"At **{per_day_text(pace.per_day)} completions a day**, the target is "
+        f"reached on **{short_date(finish, as_of)}**"
+        if finish is not None
+        else ""
+    )
+    if end is not None and pace.days_left == 0:
+        return ProgressStatus(
+            level="warning",
+            title="Field end date passed",
+            message=f"The field end date ({short_date(end, as_of)}) has passed "
+            f"with **{counts.remaining:,}** completions to go."
+            + (f" {at_pace}." if at_pace else ""),
+        )
+    if pace.per_day is None:
+        return ProgressStatus(
+            level="info",
+            title="Not enough data for a projected finish",
+            message="A projected finish needs at least 3 days of submissions." + need,
+        )
+    if finish is None:
+        return ProgressStatus(
+            level="warning",
+            title="No completions in the last 7 days",
+            message="Nothing was completed in the 7 days up to the last "
+            "submission, so there is no projected finish." + need,
+        )
+    if end is None:
+        return ProgressStatus(
+            level="info",
+            title=f"Projected finish: {short_date(finish, as_of)}",
+            message=f"{at_pace}. Set a field end date in the :material/settings: "
+            "settings section above to see whether this is on time.",
+        )
+    gap = (end - finish).days
+    end_text = f"the field end date ({short_date(end, as_of)})"
+    if gap >= 0:
+        when = f"on {end_text}" if gap == 0 else f"{_days(gap)} before {end_text}"
+        return ProgressStatus(
+            level="success",
+            title="On track to finish on time",
+            message=f"{at_pace}, {when}.",
+        )
+    return ProgressStatus(
+        level="warning",
+        title="Behind schedule",
+        message=f"{at_pace}, {_days(-gap)} after {end_text}.{need}",
+    )
+
+
+def _target_path(
+    series: list[SeriesPoint], target: int | None, end: date | None
+) -> list[tuple[date, float]]:
+    """Return the cumulative target line from the first period.
+
+    It rises from 0 to the target by the field end date. Without an end date,
+    or with one no later than the first period, it stays flat at the target.
+    """
+    if not target or not series:
+        return []
+    first = series[0].start
+    if end and end > first:
+        return [(first, 0), (end, target)]
+    return [(first, target), (series[-1].start, target)]
+
+
+def filter_queue(
+    queue: list[QueueRow], outcomes: list[str], min_attempts: int
+) -> list[QueueRow]:
+    """Keep rows with `min_attempts` or more and one of `outcomes` (any if empty)."""
+    return [
+        row
+        for row in queue
+        if row.attempts >= min_attempts
+        and (not outcomes or row.last_outcome in outcomes)
+    ]
+
+
+QUEUE_COLUMNS = {
+    "id": ("ID", pl.String),
+    "attempts": ("Attempts", pl.Int64),
+    "last_outcome": ("Last outcome", pl.String),
+    "last_date": ("Last attempt", pl.Date),
+    "days_since": ("Days since", pl.Int64),
+    "last_enumerator": ("Last enumerator", pl.String),
+}
+
+
+def queue_frame(queue: list[QueueRow]) -> pl.DataFrame:
+    """Return the queue as a table, one row per open ID, for display and export."""
+    return pl.DataFrame(
+        [[getattr(row, field) for field in QUEUE_COLUMNS] for row in queue],
+        schema={label: dtype for label, dtype in QUEUE_COLUMNS.values()},
+        orient="row",
+    )
+
+
+def compute_progress(
+    data: pl.DataFrame,
+    settings: ProgressSettings,
+    as_of: date,
+    period: Period = "Day",
+    tracking: pl.DataFrame | None = None,
+) -> ProgressResult:
+    """Count progress towards the target as of a date.
+
+    Parameters
+    ----------
+    data : pl.DataFrame
+        The survey data.
+    settings : ProgressSettings
+        The progress settings: columns, targets and completion condition.
+    as_of : date
+        Today: the date the current period, the pace and the days left to
+        the field end date are worked out from.
+    period : {"Day", "Week", "Month"}
+        The period of the over-time series and of the current-period count.
+    tracking : pl.DataFrame | None
+        The tracking dataset: a tracking file or a master list. None for a
+        fixed target.
+
+    Returns
+    -------
+    ProgressResult
+        The counts, series and pace the page draws.
+    """
+    TimePeriodConfig(time_period=period)
+    mode = detect_mode(tracking is not None, settings)
+    rows, reference = _rows_and_reference(data, settings, tracking)
+    tagged = _tagged_rows(rows, data, settings, reference)
+    counts = _counts(rows, _target(settings, reference), tagged)
+    # A completion dated after today, such as one from a device with a wrong
+    # clock, counts in Completed but not in the chart, period or pace
+    firsts = _first_completions(_counted_rows(rows, counts.target, tagged)).filter(
+        pl.col("date") <= as_of
+    )
+
+    series = _series(rows, firsts, as_of, period)
+    pace = _pace(rows, firsts, settings, counts.remaining, as_of)
+    result = ProgressResult(
+        mode=mode,
+        sections=SECTIONS_BY_MODE[mode],
+        counts=counts,
+        pace=pace,
+        status=_status(counts, pace, settings.field_end_date, as_of),
+        current_period=_current_period(firsts, settings, as_of, period),
+        series=series,
+        target_path=_target_path(series, counts.target, settings.field_end_date),
+        issues=reference.issues if reference else [],
+    )
+    if tagged is not None:
+        result = result.model_copy(
+            update={
+                "unit_levels": unit_levels(tagged, reference),
+                "untracked_units": untracked_unit_count(tagged, reference),
+            }
+        )
+    # Without an ID column each row is its own ID, which the headline counts
+    # accept but which would make every follow-up number up
+    if not settings.survey_id:
+        return result.model_copy(update={"todos": _todos(result)})
+    per_id = _per_id(_attempts(data, rows, settings))
+    result = result.model_copy(
+        update={
+            "follow_up": _follow_up_metrics(per_id, settings),
+            "attempts_to_outcome": _attempts_to_outcome(per_id, settings),
+            "follow_up_queue": _follow_up_queue(per_id, settings, as_of),
+        }
+    )
+    if tagged is not None and reference.ids is not None:
+        result = result.model_copy(
+            update={
+                "respondents": respondents(per_id, reference, settings.tracking_display)
+            }
+        )
+    return result.model_copy(update={"todos": _todos(result)})
+
+
+def _rows_and_reference(
+    data: pl.DataFrame, settings: ProgressSettings, tracking: pl.DataFrame | None
+) -> tuple[pl.DataFrame, TrackingReference | None]:
+    """Return the progress rows and the checked tracking dataset, if any.
+
+    With a usable master list, the survey IDs are normalized the way the
+    master list's are, so every count matches IDs the same way.
+    """
+    rows = _progress_rows(data, settings)
+    if tracking is None:
+        return rows, None
+    reference = read_tracking(tracking, settings, settings.survey_id, data.columns)
+    if reference.usable and reference.ids is not None:
+        rows = rows.with_columns(
+            normalize_keys(rows["id"], settings.strip_leading_zeros).alias("id")
+        )
+    return rows, reference
+
+
+def _target(
+    settings: ProgressSettings, reference: TrackingReference | None
+) -> int | None:
+    """The fixed target, or the tracking dataset's total in the file modes."""
+    if reference is None:
+        return settings.survey_target or None
+    return reference.target or None
+
+
+def _tagged_rows(
+    rows: pl.DataFrame,
+    data: pl.DataFrame,
+    settings: ProgressSettings,
+    reference: TrackingReference | None,
+) -> pl.DataFrame | None:
+    """The rows with their unit and tracked flag; None without a usable dataset."""
+    if reference is None or not reference.usable:
+        return None
+    return assign_units(rows, data, reference, settings)
+
+
+def _counted_rows(
+    rows: pl.DataFrame, target: int | None, tagged: pl.DataFrame | None
+) -> pl.DataFrame:
+    """The rows whose completions count toward the target.
+
+    With a tracking dataset's target, only rows in its tracked units: a
+    master list's unexpected IDs and a tracking file's untracked units have
+    no share of that target, so counting them would let Completed reach it
+    while listed respondents are still pending.
+    """
+    if tagged is None or target is None:
+        return rows
+    return tagged.filter(pl.col("tracked"))
+
+
+def _completed_ids(rows: pl.DataFrame) -> int:
+    return rows.filter(pl.col("qualifies"))["id"].drop_nulls().n_unique()
+
+
+def _counts(
+    rows: pl.DataFrame, target: int | None, tagged: pl.DataFrame | None = None
+) -> ProgressCounts:
+    """Count submissions, unique and completed IDs against the target.
+
+    Submissions and Unique cover every row; Completed covers the rows
+    `_counted_rows` gives, and the other completed IDs are counted apart.
+    """
+    counted = _counted_rows(rows, target, tagged)
+    completed = _completed_ids(counted)
+    return ProgressCounts(
+        submissions=rows.height,
+        unique=rows["id"].drop_nulls().n_unique(),
+        completed=completed,
+        untracked_completed=_completed_ids(rows) - completed,
+        target=target,
+        remaining=max(target - completed, 0) if target else None,
+        percentage=completed / target * 100 if target else None,
+    )
+
+
+def compute_counts(
+    data: pl.DataFrame,
+    settings: ProgressSettings,
+    tracking: pl.DataFrame | None = None,
+) -> ProgressCounts:
+    """Count progress without the series and pace, for Summary's Progress row.
+
+    The same counts `compute_progress` returns. Leaving out the series keeps
+    Summary quick when a mis-keyed date stretches it over decades.
+    """
+    rows, reference = _rows_and_reference(data, settings, tracking)
+    tagged = _tagged_rows(rows, data, settings, reference)
+    return _counts(rows, _target(settings, reference), tagged)
 
 
 class TimePeriodConfig(BaseModel):
@@ -128,23 +1024,6 @@ class TimePeriodConfig(BaseModel):
                 f"Invalid time period '{v}'. Must be one of: {', '.join(valid_periods)}"
             )
         return v
-
-
-class AttemptedInterviewsResult(BaseModel):
-    """Result model for attempted interviews computation."""
-
-    attempted_interviews: Any = Field(
-        description="DataFrame with attempted interviews data"
-    )
-    total_submitted: int = Field(ge=0, description="Total number of submissions")
-    number_of_unique_ids: int = Field(ge=0, description="Number of unique survey IDs")
-    min_attempts: int = Field(ge=0, description="Minimum number of attempts")
-    max_attempts: int = Field(ge=0, description="Maximum number of attempts")
-
-    class Config:
-        """Pydantic config."""
-
-        arbitrary_types_allowed = True
 
 
 # =============================================================================
@@ -178,6 +1057,18 @@ def load_default_settings(
     """
     # Load saved settings
     saved_settings = load_check_settings(settings_file, TAB_NAME)
+    # The old Enumerator setting is no longer a Progress setting: the
+    # follow-up queue uses the page config's enumerator column
+    saved_settings.pop("enumerator", None)
+
+    # Targets used to be saved under other keys, where they never took
+    # effect. Load them only when the page config has no target of its own,
+    # which may have been set after them. The config form saves a blank
+    # target as 0, so 0 counts as no target.
+    for old_key, key in LEGACY_TARGET_KEYS.items():
+        old_value = saved_settings.pop(old_key, None)
+        if old_value is not None and not getattr(config, key):
+            saved_settings.setdefault(key, old_value)
 
     default_settings: dict = dict(config)
     default_settings.update(saved_settings)
@@ -186,573 +1077,108 @@ def load_default_settings(
     return ProgressSettings(**default_settings)
 
 
-@demo_output_onboarding(TAB_NAME)
-def progress_report_settings(
+def _setting_selectbox(
     settings_file: str,
-    config: ProgressSettings,
-    categorical_columns: list[str],
-    datetime_columns: list[str],
-) -> ProgressSettings:
-    """Create and render the settings UI for progress report configuration.
+    setting: str,
+    label: str,
+    options: list[str],
+    default: str | None,
+    help_text: str,
+    *,
+    optional: bool = False,
+) -> str | None:
+    """Render a column picker for one progress setting and save the choice.
 
-    This function creates a comprehensive Streamlit UI for configuring
-    progress report settings. It includes:
-    - Survey identifiers (key and ID columns)
-    - Survey date column selection
-    - Enumerator ID column
-    - Submission targets (total and per period)
+    An optional picker starts with a "None" choice, so a column chosen by
+    mistake can be cleared: Streamlit's selectbox has no clear button.
+    """
+    choices: list[str | None] = [None, *options] if optional else list(options)
+    selected = st.selectbox(
+        label,
+        options=choices,
+        format_func=lambda column: "None" if column is None else str(column),
+        help=help_text,
+        key=f"{setting}_progress",
+        index=choices.index(default) if default in options else None,
+        on_change=trigger_save,
+        kwargs={"state_name": f"{TAB_NAME}_{setting}"},
+    )
+    save_check_settings(settings_file, TAB_NAME, {setting: selected})
+    return selected
 
-    Settings are automatically saved to the settings file when changed
-    and loaded from previous sessions if available.
 
-    Parameters
-    ----------
-    settings_file : str
-        Path to settings file for saving/loading configurations.
-    config : ProgressSettings
-        Default configuration used as fallback values.
-    categorical_columns : list[str]
-        Available categorical columns for selection (survey key, ID, enumerator).
-    datetime_columns : list[str]
-        Available datetime columns for date selection.
+def condition_columns(data: pl.DataFrame) -> list[str]:
+    """Return the columns a completion condition can use.
+
+    Codes: integer, text, category and true/false columns, and decimal
+    columns whose values are all whole numbers, as Stata's ``gen`` stores
+    0/1 codes. A column with fractions holds measures, not codes. Dates are
+    left out because their values can't be saved as JSON.
+    """
+    columns = []
+    for column, dtype in data.schema.items():
+        if dtype.is_float():
+            values = data[column].drop_nulls()
+            if not (values.is_finite() & (values == values.round(0))).all():
+                continue
+        elif not (
+            dtype.is_integer()
+            or dtype in (pl.String, pl.Boolean)
+            or isinstance(dtype, pl.Categorical | pl.Enum)
+        ):
+            continue
+        columns.append(column)
+    return columns
+
+
+def _fit_value(value: Any, dtype: pl.DataType) -> tuple[bool, Any]:
+    """Convert a saved condition value to a column's type, if it fits.
+
+    A refresh can change a column's type, say from integer to text, and
+    comparing values of another type fails. A value fits when it converts
+    and converts back unchanged: ``1`` becomes ``"1"`` for a text column,
+    but ``1.5`` never becomes an integer. Null always fits.
 
     Returns
     -------
-    ProgressSettings
-        User-configured settings from the UI.
+    tuple[bool, Any]
+        Whether the value fits, and the value in the column's type.
     """
-    with st.expander("settings", icon=":material/settings:"):
-        st.markdown("## Configure settings for progress report")
-        st.write("---")
-
-        # Load default settings
-        default_settings = load_default_settings(settings_file, config)
-
-        # Survey Identifiers
-        with st.container(border=True):
-            st.subheader("Survey Identifiers")
-            si1, si2, _ = st.columns(3)
-
-            with si1:
-                default_survey_key = default_settings.survey_key
-                default_survey_key_index = (
-                    categorical_columns.index(default_survey_key)
-                    if default_survey_key and default_survey_key in categorical_columns
-                    else None
-                )
-                survey_key = st.selectbox(
-                    "Survey Key",
-                    options=categorical_columns,
-                    key="survey_key_progress",
-                    help="Select the column that contains the survey key",
-                    index=default_survey_key_index,
-                    on_change=trigger_save,
-                    kwargs={"state_name": TAB_NAME + "_survey_key"},
-                )
-                save_check_settings(settings_file, TAB_NAME, {"survey_key": survey_key})
-
-            with si2:
-                default_survey_id = default_settings.survey_id
-                default_survey_id_index = (
-                    categorical_columns.index(default_survey_id)
-                    if default_survey_id and default_survey_id in categorical_columns
-                    else None
-                )
-                survey_id = st.selectbox(
-                    "Survey ID",
-                    options=categorical_columns,
-                    help="Select the column that contains the survey ID",
-                    key="survey_id_progress",
-                    index=default_survey_id_index,
-                    on_change=trigger_save,
-                    kwargs={"state_name": TAB_NAME + "_survey_id"},
-                )
-                save_check_settings(settings_file, TAB_NAME, {"survey_id": survey_id})
-
-        with st.container(border=True):
-            st.subheader("Survey Date")
-
-            sd1, _, _ = st.columns(3)
-
-            with sd1:
-                default_survey_date = default_settings.survey_date
-                default_survey_date_index = (
-                    datetime_columns.index(default_survey_date)
-                    if default_survey_date and default_survey_date in datetime_columns
-                    else None
-                )
-
-                survey_date = st.selectbox(
-                    "Survey Date",
-                    options=datetime_columns,
-                    help="Select the column that contains the survey date",
-                    key="survey_date_progress",
-                    index=default_survey_date_index,
-                    on_change=trigger_save,
-                    kwargs={"state_name": TAB_NAME + "_survey_date"},
-                )
-                save_check_settings(
-                    settings_file, TAB_NAME, {"survey_date": survey_date}
-                )
-
-        with st.container(border=True):
-            st.subheader("Enumerator")
-            ec1, _, _ = st.columns(3)
-            with ec1:
-                default_enumerator = default_settings.enumerator
-                default_enumerator_index = (
-                    categorical_columns.index(default_enumerator)
-                    if default_enumerator and default_enumerator in categorical_columns
-                    else None
-                )
-                enumerator = st.selectbox(
-                    "Enumerator ID",
-                    options=categorical_columns,
-                    key="enumerator_progress",
-                    help="Select the column that contains the enumerator ID",
-                    index=default_enumerator_index,
-                    on_change=trigger_save,
-                    kwargs={"state_name": TAB_NAME + "_enumerator"},
-                )
-                save_check_settings(settings_file, TAB_NAME, {"enumerator": enumerator})
-
-        with st.container(border=True):
-            st.subheader("Submission Targets")
-            tc1, tc2, _ = st.columns(spec=3)
-            default_target = default_settings.survey_target
-            default_target_per_period = default_settings.target_submissions_per_period
-
-            # Total target selection
-            with tc1:
-                target = st.number_input(
-                    label="Total Expected Interviews",
-                    min_value=0,
-                    value=default_target,
-                    help="Total number of interviews expected",
-                    key="total_goal_progress",
-                    on_change=trigger_save,
-                    kwargs={"state_name": TAB_NAME + "_target"},
-                )
-                save_check_settings(settings_file, TAB_NAME, {"target": target})
-
-            # Target per period selection
-            with tc2:
-                target_per_period = st.number_input(
-                    label="Target Submissions Per Period",
-                    min_value=0,
-                    value=default_target_per_period if default_target_per_period else 0,
-                    help="Target number of submissions per time period (Day/Week/Month)",
-                    key="target_per_period_progress",
-                    on_change=trigger_save,
-                    kwargs={"state_name": TAB_NAME + "_target_per_period"},
-                )
-                save_check_settings(
-                    settings_file, TAB_NAME, {"target_per_period": target_per_period}
-                )
-
-    return ProgressSettings(
-        survey_key=survey_key,
-        survey_id=survey_id,
-        survey_date=survey_date,
-        enumerator=enumerator,
-        survey_target=target,
-        target_submissions_per_period=target_per_period
-        if target_per_period > 0
-        else None,
-    )
+    if value is None:
+        return True, None
+    if isinstance(dtype, pl.Categorical | pl.Enum):
+        dtype = pl.String
+    original = pl.Series([value])
+    try:
+        converted = original.cast(dtype, strict=True)
+        back = converted.cast(original.dtype, strict=True)
+    except (pl.exceptions.PolarsError, TypeError, ValueError):
+        return False, None
+    if converted[0] is None or back[0] != value:
+        return False, None
+    return True, converted[0]
 
 
-# =============================================================================
-# Progress Summary - Computation and Display
-# =============================================================================
-
-
-@st.cache_data
-def compute_progress_summary(data: pl.DataFrame, target: int | None) -> ProgressSummary:
-    """Compute summary statistics for progress report.
-
-    Calculates the total number of submitted surveys and the percentage
-    of the target completed. If no target is provided, percentage is 0.
-
-    Parameters
-    ----------
-    data : pl.DataFrame
-        Survey data containing all submitted interviews.
-    target : int | None
-        Target number of surveys to collect. If None, percentage is set to 0.
+def fit_condition_values(
+    data: pl.DataFrame, column: str, values: list[Any]
+) -> tuple[list[Any], list[Any]]:
+    """Split saved condition values into those that fit the column and not.
 
     Returns
     -------
-    ProgressSummary
-        Pydantic model containing total_submitted, target, and percentage_completed.
+    tuple[list[Any], list[Any]]
+        The fitting values in the column's type, and the values that don't fit.
     """
-    total_submitted = data.height
-
-    if target and target > 0:
-        percentage_completed = (total_submitted / target) * 100
-    else:
-        percentage_completed = 0.0
-
-    return ProgressSummary(
-        total_submitted=total_submitted,
-        target=target,
-        percentage_completed=percentage_completed,
-    )
-
-
-@demo_output_onboarding(TAB_NAME)
-def display_progress_summary(data: pl.DataFrame, target: int | None) -> None:
-    """Display summary statistics and progress metrics in Streamlit UI.
-
-    Renders three columns showing:
-    - Progress bar with percentage completion (if target is set)
-    - Target interviews metric
-    - Total submitted interviews metric
-
-    If no target is set, displays informational messages guiding users
-    to configure settings.
-
-    Parameters
-    ----------
-    data : pl.DataFrame
-        Survey data containing all submitted interviews.
-    target : int | None
-        Target number of surveys to collect. If None, shows info messages.
-    """
-    progress_summary = compute_progress_summary(data, target)
-
-    mc1, mc2, mc3 = st.columns([0.5, 0.25, 0.25], border=True)
-
-    with mc1:
-        st.write("Submission progress")
-        sp1, sp2 = st.columns([0.8, 0.2])
-
-        if not target:
-            sp1.info(
-                "Target number of interviews is not set. Go to :material/settings: "
-                "settings to set it."
-            )
+    dtype = data.schema[column]
+    kept, misfits = [], []
+    for value in values:
+        fits, converted = _fit_value(value, dtype)
+        if fits:
+            if converted not in kept:
+                kept.append(converted)
         else:
-            progress_val = min(progress_summary.percentage_completed / 100, 1.0)
-            sp1.progress(value=progress_val)
-            sp2.write(f"{progress_summary.percentage_completed:.2f}%")
-
-    if not target:
-        with mc2:
-            st.write("Target Interviews")
-            st.info(
-                "Target number of interviews is not set. Go to :material/settings: "
-                "settings to set it."
-            )
-    else:
-        formatted_target = f"{target:,}" if target > 0 else "Invalid Target"
-        mc2.metric(
-            label="Target Interviews",
-            value=formatted_target,
-        )
-
-    formatted_submitted = f"{progress_summary.total_submitted:,}"
-    mc3.metric(label="Total Submitted Interviews", value=formatted_submitted)
-
-
-# =============================================================================
-# Progress Over Time - Computation and Display
-# =============================================================================
-
-
-@st.cache_data
-def compute_progress_overtime(
-    data: pl.DataFrame,
-    date: str,
-    time_period: Literal["Day", "Week", "Month"],
-) -> pl.DataFrame:
-    """Compute progress over time statistics.
-
-    Parameters
-    ----------
-    data : pl.DataFrame
-        Dataset
-    date : str
-        Column name for date
-    time_period : Literal["Day", "Week", "Month"]
-        Time period aggregation (Day, Week, or Month)
-
-    Returns
-    -------
-    pl.DataFrame
-        DataFrame with time_period and num_interviews columns
-
-    Raises
-    ------
-    ValueError
-        If time_period is not one of: Day, Week, Month
-    """
-    # Validate time period using Pydantic model
-    validated_config = TimePeriodConfig(time_period=time_period)
-    validated_period = validated_config.time_period
-
-    # Create time period column based on selection
-    if validated_period == "Day":
-        period_stats = (
-            data.select(pl.col(date).cast(pl.Date).alias("time_period"))
-            .group_by("time_period")
-            .agg(pl.len().alias("num_interviews"))
-            .sort("time_period")
-        )
-    elif validated_period == "Week":
-        period_stats = (
-            data.select(
-                pl.col(date).cast(pl.Date).dt.truncate("1w").alias("time_period")
-            )
-            .group_by("time_period")
-            .agg(pl.len().alias("num_interviews"))
-            .sort("time_period")
-        )
-    elif validated_period == "Month":
-        period_stats = (
-            data.select(
-                pl.col(date).cast(pl.Date).dt.truncate("1mo").alias("time_period")
-            )
-            .group_by("time_period")
-            .agg(pl.len().alias("num_interviews"))
-            .sort("time_period")
-        )
-
-    return period_stats
-
-
-@st.cache_data
-def compute_average_interviews(period_stats: pl.DataFrame) -> float:
-    """Compute average number of interviews across time periods.
-
-    Parameters
-    ----------
-    period_stats : pl.DataFrame
-        DataFrame with num_interviews column
-
-    Returns
-    -------
-    float
-        Average number of interviews per period
-    """
-    average = period_stats["num_interviews"].mean()
-    return 0.0 if average is None else average
-
-
-def render_time_period_selector(
-    settings_file: str, tab_name: str
-) -> Literal["Day", "Week", "Month"]:
-    """Render time period selector UI using Streamlit pills component.
-
-    Creates a pills selector allowing users to choose the aggregation period
-    for progress over time visualization (Daily, Weekly, or Monthly).
-    The selected value is saved to settings and persisted across sessions.
-
-    Parameters
-    ----------
-    settings_file : str
-        Path to settings file for saving/loading the selected time period.
-    tab_name : str
-        Name of the tab for namespacing saved settings.
-
-    Returns
-    -------
-    Literal["Day", "Week", "Month"]
-        Selected time period for aggregation.
-    """
-    with st.container(horizontal_alignment="left"):
-        options_map = {
-            "Day": ":material/event: Daily",
-            "Week": ":material/date_range: Weekly",
-            "Month": ":material/calendar_month: Monthly",
-        }
-
-        time_period = st.pills(
-            label="Time Period",
-            options=options_map.keys(),
-            format_func=lambda x: options_map[x],
-            help="Select time period for aggregating progress data",
-            selection_mode="single",
-            **check_view(settings_file).bind(
-                "time_period_progress_overtime",
-                options=list(options_map),
-                default="Day",
-            ),
-        )
-
-    return time_period
-
-
-@demo_output_onboarding(TAB_NAME)
-@st.fragment
-def display_progress_overtime(
-    data: pl.DataFrame,
-    date: str | None,
-    setting_file: str,
-    target_per_period: int | None = None,
-) -> None:
-    """Display progress over time.
-
-    Parameters
-    ----------
-    data : pl.DataFrame
-        Dataset
-    date : str | None
-        Column name for date
-    setting_file : str
-        Path to settings file
-    target_per_period : int | None
-        Target number of submissions per period
-    """
-    if not date:
-        st.info(
-            "Progress over time report requires a date column to be selected. "
-            "To add a date column, go to the :material/settings: settings section above."
-        )
-        return
-
-    time_period = render_time_period_selector(setting_file, TAB_NAME)
-
-    period_stats = compute_progress_overtime(
-        data=data,
-        date=date,
-        time_period=time_period,
-    )
-
-    average_interviews = compute_average_interviews(period_stats)
-
-    # Convert time_period and num_interviews to lists for plotting
-    time_periods = period_stats["time_period"].to_list()
-    num_interviews = period_stats["num_interviews"].to_list()
-
-    # Determine threshold for coloring bars (target or average)
-    threshold = target_per_period if target_per_period else average_interviews
-
-    # Create color list based on threshold
-    bar_colors = [
-        "#2ECC71" if count >= threshold else "#f87171" for count in num_interviews
-    ]
-
-    # Create the figure
-    fig = go.Figure()
-
-    # Add bar plot for interviews per time period with conditional coloring
-    fig.add_trace(
-        go.Bar(
-            x=time_periods,
-            y=num_interviews,
-            name="Interviews",
-            marker_color=bar_colors,
-            hovertemplate="<b>%{x}</b><br>" + "Interviews: %{y}<br>",
-        )
-    )
-
-    # Add threshold line (target or average)
-    threshold_label = (
-        f"Target: {threshold}"
-        if target_per_period
-        else f"Avg Interviews: {threshold:.2f}"
-    )
-    fig.add_trace(
-        go.Scatter(
-            x=[time_periods[0], time_periods[-1]],
-            y=[threshold, threshold],
-            mode="lines",
-            name=threshold_label,
-            line={"color": "#4D5E90", "width": 2, "dash": "dash"},
-        )
-    )
-
-    # Update layout with transparent background
-    fig.update_layout(
-        title=f"Interview Progress by {time_period}",
-        title_x=0,
-        plot_bgcolor="rgba(0,0,0,0)",
-        paper_bgcolor="rgba(0,0,0,0)",
-        height=400,
-        margin={"t": 50, "b": 50, "l": 50, "r": 50},
-        showlegend=True,
-        legend={
-            "orientation": "h",
-            "yanchor": "bottom",
-            "y": 1.02,
-            "xanchor": "right",
-            "x": 1,
-        },
-        xaxis={
-            "title": time_period,
-            "showgrid": False,
-            "gridcolor": "lightgrey",
-            "tickangle": -45,
-            "type": "category",
-        },
-        yaxis={
-            "title_text": "Number of Interviews",
-            "showgrid": False,
-            "gridcolor": "lightgrey",
-            "zeroline": False,
-        },
-    )
-
-    st.plotly_chart(fig, theme=None, width="stretch")
-
-
-# =============================================================================
-# Progress Chart - Consent and Completion
-# =============================================================================
-
-
-@st.cache_data
-def compute_progress_chart(
-    data: pl.DataFrame,
-    consent_col: str | None,
-    consent_vals: list[Any] | None,
-    outcome_col: str | None,
-    outcome_vals: list[Any] | None,
-) -> tuple[float, float]:
-    """Compute progress chart statistics using Polars for performance.
-
-    Parameters
-    ----------
-    data : pl.DataFrame
-        Dataset (using Polars for better performance)
-    consent_col : str | None
-        Column name for consent
-    consent_vals : list | None
-        List of consent values indicating valid consent
-    outcome_col : str | None
-        Column name for outcome
-    outcome_vals : list | None
-        List of outcome values indicating survey completion
-
-    Returns
-    -------
-    tuple[float, float]
-        (consent_percentage, completion_percentage)
-    """
-    total_submitted = data.height
-
-    # Calculate consent percentage using Polars
-    if consent_col and consent_vals:
-        valid_consent_count = data.filter(
-            pl.col(consent_col).is_in(consent_vals)
-        ).height
-        consent_percentage = (
-            (valid_consent_count / total_submitted) * 100 if total_submitted > 0 else 0
-        )
-    else:
-        consent_percentage = 0.0
-
-    # Calculate completion percentage using Polars
-    if outcome_col and outcome_vals:
-        completed_count = data.filter(pl.col(outcome_col).is_in(outcome_vals)).height
-        completion_percentage = (
-            (completed_count / total_submitted) * 100 if total_submitted > 0 else 0
-        )
-    else:
-        completion_percentage = 0.0
-
-    return consent_percentage, completion_percentage
+            misfits.append(value)
+    return kept, misfits
 
 
 @st.cache_data
@@ -769,597 +1195,1130 @@ def _get_unique_values(data: pl.DataFrame, column: str) -> list[Any]:
     Returns
     -------
     list[Any]
-        List of unique values
+        List of unique values, in the order they first appear
     """
-    return data[column].unique().to_list()
+    return data[column].unique(maintain_order=True).to_list()
 
 
-def _render_column_value_selection(
+def _render_condition_part(
     data: pl.DataFrame,
-    setting_file: str,
-    survey_cols: list[str],
+    settings_file: str,
+    setting: str,
+    label: str,
+    columns: list[str],
     default_column: str | None,
     default_values: list[Any] | None,
-    column_label: str,
-    column_key: str,
-    values_key: str,
-    column_help: str,
     values_help: str,
-    info_message: str,
 ) -> tuple[str | None, list[Any] | None]:
-    """Render column and value selection UI with consistent behavior.
+    """Render one part of the completion condition: a column and its values.
+
+    The saved values always match the ones the page applies, so Summary's
+    Progress row counts the same condition. When the column changes, the
+    saved values the new column has are saved again. With the same column,
+    saved values missing from the current data stay selected and saved.
 
     Parameters
     ----------
     data : pl.DataFrame
-        Survey data containing columns.
-    setting_file : str
+        Survey data, for the column's values.
+    settings_file : str
         Path to settings file for saving configurations.
-    survey_cols : list[str]
-        Available column options.
+    setting : str
+        The column's setting, ``consent`` or ``outcome``; its values are
+        saved under ``<setting>_vals``.
+    label : str
+        The column picker's label.
+    columns : list[str]
+        The columns offered; see `condition_columns`.
     default_column : str | None
-        Default selected column.
+        The saved column.
     default_values : list[Any] | None
-        Default selected values.
-    column_label : str
-        Label for column selection.
-    column_key : str
-        Streamlit key for column selectbox.
-    values_key : str
-        Streamlit key for values multiselect.
-    column_help : str
-        Help text for column selection.
+        The saved values.
     values_help : str
-        Help text for values selection.
-    info_message : str
-        Message to display when no column is selected.
+        Help text for the values picker.
 
     Returns
     -------
     tuple[str | None, list[Any] | None]
         Selected column and values.
     """
-    # Column selection
-    column_index = (
-        survey_cols.index(default_column)
-        if default_column and default_column in survey_cols
-        else None
+    column = _setting_selectbox(
+        settings_file,
+        setting,
+        label,
+        columns,
+        default_column,
+        f"Leave empty to set no {setting} condition.",
     )
-    selected_column = st.selectbox(
-        label=column_label,
-        options=survey_cols,
-        help=column_help,
-        key=column_key,
-        index=column_index,
-        on_change=trigger_save,
-        kwargs={"state_name": TAB_NAME + f"_{column_key.split('_')[-1]}"},
-    )
-    save_check_settings(
-        setting_file, TAB_NAME, {column_key.split("_")[-1]: selected_column}
-    )
+    if not column:
+        return None, None
 
-    # Value selection (only if column is selected)
-    if not selected_column:
-        st.info(info_message)
-        return selected_column, None
-
-    value_options = _get_unique_values(data, selected_column)
-    default_vals = (
-        default_values if default_values and default_values in value_options else None
-    )
-    selected_values = st.multiselect(
-        label=f"Select {column_label.lower()} values",
+    value_options = _get_unique_values(data, column)
+    # A refresh can change the column's type, and values of another type
+    # break the comparison: convert them, and drop those that don't fit
+    original = list(default_values or [])
+    saved, misfits = fit_condition_values(data, column, original)
+    values_key = f"{setting}_vals_progress"
+    save_flag = f"{TAB_NAME}_{setting}_vals"
+    if column == default_column:
+        if misfits:
+            st.warning(
+                f"The saved {setting} values "
+                + ", ".join(f"**{value}**" for value in misfits)
+                + f" don't fit the **{column}** column, which now holds "
+                f"{data.schema[column]} values, so they were dropped. Check "
+                f"the {setting} values below.",
+                icon=WARNING_ICON,
+            )
+        if [(type(v), v) for v in saved] != [(type(v), v) for v in original]:
+            # The picker may still hold the values before the conversion
+            st.session_state.pop(values_key, None)
+            st.session_state[save_flag] = True
+        # Keep saved values the current data lacks: a refresh with no
+        # "complete" rows must not drop "complete" from the condition
+        value_options = value_options + [
+            value for value in saved if value not in value_options
+        ]
+        defaults = saved
+    else:
+        # The picker still holds the old column's values: start from the
+        # saved values the new column has, and save them
+        defaults = [value for value in saved if value in value_options]
+        st.session_state.pop(values_key, None)
+        st.session_state[save_flag] = True
+    values = st.multiselect(
+        label=f"{label} values",
         options=value_options,
         help=values_help,
         key=values_key,
-        default=default_vals,
+        default=defaults or None,
         on_change=trigger_save,
-        kwargs={"state_name": TAB_NAME + f"_{values_key.split('_')[0]}_vals"},
+        kwargs={"state_name": save_flag},
     )
-    save_check_settings(
-        setting_file, TAB_NAME, {f"{values_key.split('_')[0]}_vals": selected_values}
-    )
-
-    return selected_column, selected_values
-
-
-def _display_chart_if_configured(
-    column: str | None,
-    values: list[Any] | None,
-    percentage: float,
-    chart_title: str,
-) -> None:
-    """Display donut chart if column and values are configured.
-
-    Parameters
-    ----------
-    column : str | None
-        Selected column name.
-    values : list[Any] | None
-        Selected values for the column.
-    percentage : float
-        Percentage value to display in chart.
-    chart_title : str
-        Title to display above the chart.
-    """
-    if column and values:
-        chart = donut_chart(actual_value=int(percentage))
-        st.markdown(f"**{chart_title}**")
-        st.pyplot(chart, width="stretch")
+    save_check_settings(settings_file, TAB_NAME, {f"{setting}_vals": values})
+    return column, values
 
 
 @demo_output_onboarding(TAB_NAME)
-def display_progress_chart(data: pl.DataFrame, setting_file: str) -> None:
-    """Display consent and completion progress charts with interactive configuration.
+def progress_report_settings(
+    data: pl.DataFrame,
+    settings_file: str,
+    config: ProgressSettings,
+    categorical_columns: list[str],
+    datetime_columns: list[str],
+    tracking: TrackingSource | None = None,
+) -> ProgressSettings:
+    """Render the settings expander at the top of the page; return the settings.
 
-    Renders two donut charts showing:
-    - Percentage of valid consent (left chart)
-    - Percentage of survey completion (right chart)
-
-    Users can select consent and outcome columns via dropdowns, then
-    specify which values indicate valid consent or completion. Settings
-    are automatically saved and loaded across sessions.
+    The expander holds the survey columns, the target source, the targets,
+    the field end date and the completion condition. Each setting is saved
+    to the settings file when the user changes it, and loads back on the
+    next visit.
 
     Parameters
     ----------
     data : pl.DataFrame
-        Survey data containing consent and outcome columns (Polars for performance).
-    setting_file : str
+        Survey data, for the completion condition's values.
+    settings_file : str
         Path to settings file for saving/loading configurations.
-    """
-    survey_cols = data.columns
-    _, cc1, _, cc2, _ = st.columns([0.1, 0.35, 0.1, 0.35, 0.1])
+    config : ProgressSettings
+        Default configuration used as fallback values.
+    categorical_columns : list[str]
+        Available categorical columns for selection (survey key and ID).
+    datetime_columns : list[str]
+        Available datetime columns for date selection.
+    tracking : TrackingSource | None
+        The page's tracking dataset; None when the page config has none.
 
-    # Load default settings
-    default_settings = (
-        load_check_settings(settings_file=setting_file, check_name="progress") or {}
+    Returns
+    -------
+    ProgressSettings
+        User-configured settings from the UI.
+    """
+    with st.expander("settings", icon=":material/settings:"):
+        st.markdown("## Configure settings for progress report")
+        st.divider()
+        return _settings_sections(
+            data,
+            settings_file,
+            config,
+            categorical_columns,
+            datetime_columns,
+            tracking,
+        )
+
+
+def _settings_sections(
+    data: pl.DataFrame,
+    settings_file: str,
+    config: ProgressSettings,
+    categorical_columns: list[str],
+    datetime_columns: list[str],
+    tracking: TrackingSource | None = None,
+) -> ProgressSettings:
+    """Render the settings sections; see `progress_report_settings`."""
+    tracking = tracking or TrackingSource()
+    default_settings = load_default_settings(settings_file, config)
+
+    with st.container(border=True):
+        section_header("Survey columns", icon=":material/table_chart:")
+        sc1, sc2, sc3 = st.columns(3)
+        with sc1:
+            survey_key = _setting_selectbox(
+                settings_file,
+                "survey_key",
+                "Survey Key",
+                categorical_columns,
+                default_settings.survey_key,
+                "Select the column that contains the survey key",
+            )
+        with sc2:
+            survey_id = _setting_selectbox(
+                settings_file,
+                "survey_id",
+                "Survey ID",
+                categorical_columns,
+                default_settings.survey_id,
+                "Select the column that contains the survey ID. Unique and "
+                "Completed count distinct IDs.",
+            )
+        with sc3:
+            survey_date = _setting_selectbox(
+                settings_file,
+                "survey_date",
+                "Survey Date",
+                datetime_columns,
+                default_settings.survey_date,
+                "Select the column that contains the survey date. The chart, "
+                "the current period and the projected finish need it.",
+            )
+
+    tracking_settings = _tracking_settings_section(
+        settings_file, default_settings, tracking, categorical_columns
     )
 
-    # Consent column and value selection
-    with cc1, st.container(border=True):
-        consent, consent_vals = _render_column_value_selection(
-            data=data,
-            setting_file=setting_file,
-            survey_cols=survey_cols,
-            default_column=default_settings.get("consent"),
-            default_values=default_settings.get("consent_vals"),
-            column_label="Select consent column",
-            column_key="progress_consent_pie_chart",
-            values_key="consent_vals_progress_chart",
-            column_help="Column containing consent information",
-            values_help="Values to consider as valid consent",
-            info_message="Select consent column first and then select consent values to display the chart",
-        )
+    with st.container(border=True):
+        section_header("Targets", icon=":material/flag:")
+        tc1, tc2, tc3 = st.columns(3)
+        default_target_per_period = default_settings.target_submissions_per_period
+        with tc1:
+            if tracking.data is None:
+                target = st.number_input(
+                    label="Total Expected Interviews",
+                    min_value=0,
+                    value=default_settings.survey_target,
+                    help="Total number of completed interviews expected",
+                    key="total_goal_progress",
+                    on_change=trigger_save,
+                    kwargs={"state_name": TAB_NAME + "_survey_target"},
+                )
+                save_check_settings(settings_file, TAB_NAME, {"survey_target": target})
+            else:
+                # The tracking dataset sets the target. The saved fixed
+                # target is kept, for when the tracking dataset is removed.
+                target = default_settings.survey_target
+                file_total = read_tracking(
+                    tracking.data, tracking_settings, survey_id, data.columns
+                ).target
+                st.number_input(
+                    label="Total Expected Interviews",
+                    min_value=0,
+                    value=file_total,
+                    disabled=True,
+                    help="Set by the tracking dataset: the sum of the unit "
+                    "targets. To set a fixed target, remove the tracking "
+                    "dataset in the page configuration.",
+                    key="total_goal_progress_tracking",
+                )
+        with tc2:
+            target_per_period = st.number_input(
+                label="Target Completions Per Period",
+                min_value=0,
+                value=default_target_per_period if default_target_per_period else 0,
+                help="Target number of completions per day, week or month, "
+                "following the period chosen on Overview. 0 sets no target.",
+                key="target_per_period_progress",
+                on_change=trigger_save,
+                kwargs={"state_name": TAB_NAME + "_target_submissions_per_period"},
+            )
+            save_check_settings(
+                settings_file,
+                TAB_NAME,
+                {"target_submissions_per_period": target_per_period},
+            )
+        with tc3:
+            field_end_date = st.date_input(
+                label="Field End Date",
+                value=default_settings.field_end_date,
+                help="The day fieldwork should finish. Overview then shows the "
+                "completions needed per day to finish on time.",
+                key="field_end_date_progress",
+                on_change=trigger_save,
+                kwargs={"state_name": TAB_NAME + "_field_end_date"},
+            )
+            save_check_settings(
+                settings_file,
+                TAB_NAME,
+                {
+                    "field_end_date": field_end_date.isoformat()
+                    if field_end_date
+                    else None
+                },
+            )
 
-    # Outcome column and value selection
-    with cc2, st.container(border=True):
-        outcome, outcome_vals = _render_column_value_selection(
-            data=data,
-            setting_file=setting_file,
-            survey_cols=survey_cols,
-            default_column=default_settings.get("outcome"),
-            default_values=default_settings.get("outcome_vals"),
-            column_label="Select outcome column",
-            column_key="outcome_progress_chart",
-            values_key="outcome_vals_progress_chart",
-            column_help="Column containing outcome information",
-            values_help="Values to consider as completed surveys",
-            info_message="Select outcome column first and then select outcome values to display the chart",
+    with st.container(border=True):
+        section_header("Completion condition", icon=":material/task_alt:")
+        st.caption(
+            "An ID is completed when at least one of its submissions has one of "
+            "the consent values and one of the outcome values. With no "
+            "condition, every ID counts as completed."
         )
+        cc1, cc2 = st.columns(2)
+        code_columns = condition_columns(data)
+        with cc1:
+            consent, consent_vals = _render_condition_part(
+                data,
+                settings_file,
+                "consent",
+                "Consent column",
+                code_columns,
+                default_settings.consent,
+                default_settings.consent_vals,
+                "Values that mean the respondent consented",
+            )
+        with cc2:
+            outcome, outcome_vals = _render_condition_part(
+                data,
+                settings_file,
+                "outcome",
+                "Outcome column",
+                code_columns,
+                default_settings.outcome,
+                default_settings.outcome_vals,
+                "Values that mean the interview was completed",
+            )
 
-    # Compute percentages
-    consent_percentage, completion_percentage = compute_progress_chart(
-        data=data,
-        consent_col=consent,
+    return ProgressSettings(
+        survey_key=survey_key,
+        survey_id=survey_id,
+        survey_date=survey_date,
+        survey_target=target,
+        target_submissions_per_period=target_per_period or None,
+        consent=consent,
         consent_vals=consent_vals,
-        outcome_col=outcome,
+        outcome=outcome,
         outcome_vals=outcome_vals,
+        field_end_date=field_end_date,
+        enumerator=default_settings.enumerator,
+        **tracking_settings.model_dump(),
     )
 
-    # Display charts
-    with cc1:
-        _display_chart_if_configured(
-            consent, consent_vals, consent_percentage, "% consent"
-        )
 
-    with cc2:
-        _display_chart_if_configured(
-            outcome, outcome_vals, completion_percentage, "% completion"
-        )
+def _setting_multiselect(
+    settings_file: str,
+    setting: str,
+    label: str,
+    options: list[str],
+    default: list[str],
+    help_text: str,
+) -> list[str]:
+    """Render a multi-column picker for one progress setting and save the choice."""
+    selected = st.multiselect(
+        label,
+        options=options,
+        default=[column for column in default if column in options] or None,
+        help=help_text,
+        key=f"{setting}_progress",
+        on_change=trigger_save,
+        kwargs={"state_name": f"{TAB_NAME}_{setting}"},
+    )
+    save_check_settings(settings_file, TAB_NAME, {setting: selected})
+    return selected
 
 
-# =============================================================================
-# Attempted Interviews - Computation and Display
-# =============================================================================
+def _saved_tracking(saved: ProgressSettings) -> TrackingSettings:
+    return TrackingSettings(
+        **saved.model_dump(include=set(TrackingSettings.model_fields))
+    )
 
 
-def _aggregate_attempts_by_survey_id(
-    data: pl.DataFrame, survey_id: str, date: str
-) -> pl.DataFrame:
-    """Aggregate interview attempts by survey ID.
+def _tracking_settings_section(
+    settings_file: str,
+    saved: ProgressSettings,
+    tracking: TrackingSource,
+    categorical_columns: list[str],
+) -> TrackingSettings:
+    """Render the target source settings; return the tracking settings.
 
-    Parameters
-    ----------
-    data : pl.DataFrame
-        Dataset
-    survey_id : str
-        Column name for survey ID
-    date : str
-        Column name for date
-
-    Returns
-    -------
-    pl.DataFrame
-        Aggregated attempts with num_interviews, last_attempt_date, and attempt_dates
+    Without a tracking dataset this only says how to add one. The mode
+    follows from the target column: chosen for a tracking file, empty for a
+    master list.
     """
+    with st.container(border=True):
+        section_header("Target source", icon=":material/table_view:")
+        if not tracking.name:
+            st.caption(
+                "The target is a fixed number. To set targets per unit from a "
+                "tracking file, or per respondent from a master list, add a "
+                "**Tracking Dataset** in the page configuration. That turns "
+                "on the **By unit** section, and **Respondents** for a master "
+                "list."
+            )
+            return _saved_tracking(saved)
+        if tracking.data is None:
+            st.warning(
+                f"The tracking dataset **{tracking.name}** has no rows or is "
+                "not imported yet. Import it on the Import Data page. Until "
+                "then the target is the fixed number.",
+                icon=":material/warning:",
+            )
+            return _saved_tracking(saved)
+        columns = tracking.data.columns
+        st.caption(
+            f"Targets come from **{tracking.name}**. Choose a target column for "
+            "a tracking file (one row per unit), or choose None for a "
+            "master list (one row per expected respondent)."
+        )
+        c1, c2, c3 = st.columns(3)
+        with c1:
+            target_column = _setting_selectbox(
+                settings_file,
+                "tracking_target",
+                "Target column",
+                columns,
+                saved.tracking_target,
+                "Each unit's target. Choose None for a master list.",
+                optional=True,
+            )
+        with c2:
+            unit = _setting_selectbox(
+                settings_file,
+                "tracking_unit",
+                "Unit column (tracking dataset)",
+                columns,
+                saved.tracking_unit,
+                "The unit each row belongs to, such as a village. Optional for "
+                "a master list.",
+                optional=True,
+            )
+        survey_unit, tracking_id = saved.survey_unit, saved.tracking_id
+        display = saved.tracking_display
+        with c3:
+            if target_column:
+                survey_unit = _setting_selectbox(
+                    settings_file,
+                    "survey_unit",
+                    "Unit column (survey)",
+                    categorical_columns,
+                    saved.survey_unit,
+                    "The survey column holding the same units",
+                    optional=True,
+                )
+            else:
+                tracking_id = _setting_selectbox(
+                    settings_file,
+                    "tracking_id",
+                    "ID column (master list)",
+                    columns,
+                    saved.tracking_id,
+                    "Matched to the Survey ID column above",
+                )
+        used = {target_column, unit, tracking_id}
+        parents = _setting_multiselect(
+            settings_file,
+            "tracking_parents",
+            "Parent columns, finest first",
+            [column for column in columns if column not in used],
+            saved.tracking_parents,
+            "Higher levels the units roll up to, such as district then region. "
+            "A parent's target is the sum of its units' targets.",
+        )
+        if not target_column:
+            display = _setting_multiselect(
+                settings_file,
+                "tracking_display",
+                "Extra columns for respondent lists",
+                [column for column in columns if column != tracking_id],
+                saved.tracking_display,
+                "Master-list columns shown and exported with each respondent "
+                "list, such as a landmark",
+            )
+        strip = st.toggle(
+            "Ignore leading zeros in IDs and units",
+            value=saved.strip_leading_zeros,
+            help="Match 0123 to 123. IDs and units are always matched as text "
+            "with spaces trimmed, and case matters.",
+            key="strip_leading_zeros_progress",
+            on_change=trigger_save,
+            kwargs={"state_name": f"{TAB_NAME}_strip_leading_zeros"},
+        )
+        save_check_settings(settings_file, TAB_NAME, {"strip_leading_zeros": strip})
+    return TrackingSettings(
+        tracking_target=target_column,
+        tracking_unit=unit,
+        survey_unit=survey_unit,
+        tracking_id=tracking_id,
+        tracking_parents=parents,
+        strip_leading_zeros=strip,
+        tracking_display=display,
+    )
+
+
+# =============================================================================
+# Header - above both sections
+# =============================================================================
+
+PERIOD_LABELS = {"Day": "Today", "Week": "This week", "Month": "This month"}
+
+
+def describe_condition(settings: ProgressSettings) -> str:
+    """Describe the completion condition, such as "consent in [yes]"."""
+    parts = [
+        f"{column} in {values}"
+        for column, values in (
+            (settings.consent, settings.consent_vals),
+            (settings.outcome, settings.outcome_vals),
+        )
+        if column and values
+    ]
+    return " and ".join(parts) if parts else "none (every ID counts)"
+
+
+def describe_target(result: ProgressResult, tracking_name: str | None) -> str:
+    """Name the target's source and size for the header strip."""
+    target = result.counts.target
+    if result.mode == "fixed":
+        return f"fixed number, {target:,}" if target else "fixed number, not set"
+    if not result.unit_levels:
+        return f"{result.mode} **{tracking_name}**, not usable yet"
+    if not target:
+        return f"{result.mode} **{tracking_name}**, every target is 0"
+    if result.mode == "tracking file":
+        units = sum(r.target is not None for r in result.unit_levels[0].rows)
+        return f"tracking file **{tracking_name}**, {target:,} across {units:,} units"
+    return f"master list **{tracking_name}**, {target:,} respondents"
+
+
+def attention_text(result: ProgressResult) -> str | None:
+    """The header's pill linking to the to-do cards; None when there are none."""
+    count = len(result.todos)
+    if not count:
+        return None
+    things = "thing needs" if count == 1 else "things need"
     return (
-        data.group_by(survey_id)
-        .agg(
-            [
-                pl.len().alias("num_interviews"),
-                pl.col(date).max().alias("last_attempt_date"),
-                pl.col(date).alias("attempt_dates"),
-            ]
-        )
-        .sort(survey_id)
-    )
-
-
-def _expand_attempt_dates(attempts_df: pl.DataFrame) -> pl.DataFrame:
-    """Expand attempt dates list into separate columns.
-
-    Parameters
-    ----------
-    attempts_df : pl.DataFrame
-        DataFrame with attempt_dates column containing lists
-
-    Returns
-    -------
-    pl.DataFrame
-        DataFrame with expanded attempt date columns
-    """
-    # Get the maximum number of attempts to determine how many columns we need
-    # No survey IDs (zero-row data) means no attempt date columns.
-    max_attempts = (
-        attempts_df.select(pl.col("attempt_dates").list.len().max()).item() or 0
-    )
-
-    # Explode attempt dates into separate columns
-    # Use list.get with default=None to handle lists shorter than max_attempts
-    for i in range(max_attempts):
-        attempts_df = attempts_df.with_columns(
-            pl.col("attempt_dates")
-            .list.get(i, null_on_oob=True)
-            .alias(f"Attempt Date {i + 1}")
-        )
-
-    return attempts_df.drop("attempt_dates")
-
-
-def _prepare_display_columns(
-    data: pl.DataFrame, survey_id: str, date: str, display_cols: list[str]
-) -> pl.DataFrame:
-    """Prepare display columns with forward and backward fill.
-
-    Parameters
-    ----------
-    data : pl.DataFrame
-        Dataset
-    survey_id : str
-        Column name for survey ID
-    date : str
-        Column name for date
-    display_cols : list[str]
-        List of columns to display
-
-    Returns
-    -------
-    pl.DataFrame
-        DataFrame with filled display columns, one row per survey ID
-    """
-    if not display_cols:
-        return pl.DataFrame({survey_id: data[survey_id].unique()})
-
-    # Sort and select relevant columns
-    cols_to_select = [survey_id, date] + display_cols
-    sorted_data = data.select(cols_to_select).sort([survey_id, date])
-
-    # Forward fill and backward fill within each group
-    filled_data = sorted_data.with_columns(
-        [
-            pl.col(col).forward_fill().backward_fill().over(survey_id)
-            for col in display_cols
-        ]
-    )
-
-    # Keep only one row per survey ID (the first one after sorting)
-    return filled_data.unique(subset=[survey_id], keep="first")
-
-
-def _compute_summary_stats(attempts_df: pl.DataFrame) -> tuple[int, int, int]:
-    """Compute summary statistics for attempted interviews.
-
-    Parameters
-    ----------
-    attempts_df : pl.DataFrame
-        DataFrame with attempted interviews data
-
-    Returns
-    -------
-    tuple
-        (number_of_unique_ids, min_attempts, max_attempts)
-    """
-    num_unique = attempts_df.height
-    if num_unique == 0:
-        return 0, 0, 0
-    min_attempts = attempts_df["num_interviews"].min()
-    max_attempts = attempts_df["num_interviews"].max()
-
-    return num_unique, min_attempts, max_attempts
-
-
-@st.cache_data
-def compute_attempted_interviews(
-    data: pl.DataFrame, survey_id: str, date: str, display_cols: list[str]
-) -> AttemptedInterviewsResult:
-    """Compute attempted interviews statistics.
-
-    Parameters
-    ----------
-    data : pl.DataFrame
-        Dataset
-    survey_id : str
-        Column name for survey ID
-    date : str
-        Column name for date
-    display_cols : list[str]
-        List of columns to display
-
-    Returns
-    -------
-    AttemptedInterviewsResult
-        Pydantic model containing attempted interviews data and summary statistics
-    """
-    total_submitted = data.height
-
-    # Step 1: Aggregate attempts by survey ID
-    attempted_interviews = _aggregate_attempts_by_survey_id(data, survey_id, date)
-
-    # Step 2: Expand attempt dates into separate columns
-    attempted_interviews = _expand_attempt_dates(attempted_interviews)
-
-    # Step 3: Prepare display columns if any
-    if display_cols:
-        display_data = _prepare_display_columns(data, survey_id, date, display_cols)
-
-        # Merge display columns with attempted interviews
-        attempted_interviews = attempted_interviews.join(
-            display_data.drop([date]), on=survey_id, how="left"
-        )
-
-        # Reorder columns: survey_id, num_interviews, last_attempt_date,
-        # display_cols, attempt dates
-        attempt_date_cols = [
-            col
-            for col in attempted_interviews.columns
-            if col.startswith("Attempt Date")
-        ]
-        ordered_cols = (
-            [survey_id, "num_interviews", "last_attempt_date"]
-            + display_cols
-            + attempt_date_cols
-        )
-        attempted_interviews = attempted_interviews.select(ordered_cols)
-
-    # Step 4: Calculate summary statistics
-    num_unique, min_attempts, max_attempts = _compute_summary_stats(
-        attempted_interviews
-    )
-
-    return AttemptedInterviewsResult(
-        attempted_interviews=attempted_interviews,
-        total_submitted=total_submitted,
-        number_of_unique_ids=num_unique,
-        min_attempts=min_attempts,
-        max_attempts=max_attempts,
+        f"[:orange-badge[:material/warning: {count} {things} attention]]"
+        f"(#{OVERVIEW_ANCHOR})"
     )
 
 
 @demo_output_onboarding(TAB_NAME)
-@st.fragment
-def display_attempted_interviews(
-    data: pl.DataFrame, survey_id: str | None, date: str | None, setting_file: str
+def display_progress_header(
+    result: ProgressResult,
+    settings: ProgressSettings,
+    tracking_name: str | None = None,
 ) -> None:
-    """Display attempted interviews report.
+    """Draw the header at the top of the Progress page.
 
     Parameters
     ----------
-    data : pl.DataFrame
-        Dataset
-    survey_id : str | None
-        Column name for survey ID
-    date : str | None
-        Column name for date
-    setting_file : str
-        Path to settings file
+    result : ProgressResult
+        The computed progress.
+    settings : ProgressSettings
+        The settings the progress was computed with.
+    tracking_name : str | None
+        The tracking dataset's alias, named in the target-source strip.
     """
-    if not (all([survey_id, date])):
+    display_issues(result.issues)
+    counts = result.counts
+    st.caption(
+        f"**Target:** {describe_target(result, tracking_name)} · "
+        f"**Completion condition:** {describe_condition(settings)}"
+    )
+    pill = attention_text(result)
+    if pill:
+        st.markdown(pill)
+    completed_help = (
+        "Distinct IDs with a submission that meets the completion condition"
+    )
+    metrics = [
+        ("Submissions", f"{counts.submissions:,}", "Every submission"),
+        ("Unique", f"{counts.unique:,}", "Distinct IDs"),
+    ]
+    if counts.percentage is None:
         st.info(
-            "Attempted interviews report requires survey ID and date columns to be selected. "
-            "To add these columns, go to the :material/settings: settings section above."
+            "Target number of interviews is not set. Set it in the "
+            ":material/settings: settings section above."
+            if result.mode == "fixed"
+            else "There is no target until the tracking dataset can be used. "
+            "Finish the target source in the :material/settings: settings "
+            "section above."
         )
-        return
+        metrics.append(("Completed", f"{counts.completed:,}", completed_help))
+    else:
+        _display_headline(result)
+    if counts.untracked_completed and counts.target is not None:
+        st.caption(untracked_completed_text(result))
 
-    with st.expander(":material/clarify: Show more columns in report", expanded=False):
-        st.info(
-            "Select additional columns to include in the table displaying attempted interviews. "
+    current = result.current_period
+    if current is not None:
+        metrics.append(
+            (
+                PERIOD_LABELS[current.period],
+                f"{current.completed:,} / {current.target:,}",
+                "IDs first completed in the current period, against the "
+                "per-period target",
+            )
         )
-        display_cols = st.multiselect(
-            label="Additional columns",
-            label_visibility="collapsed",
-            options=data.columns,
-            help="Columns to display in the attempted interviews report",
-            **check_view(setting_file).bind(
-                "attempted_interviews_display_cols",
-                options=data.columns,
-                multi=True,
-                default=None,
+    pace = result.pace
+    metrics.append(
+        (
+            "Pace",
+            "—" if pace.per_day is None else f"{per_day_text(pace.per_day)}/day",
+            "Mean completions per day over the 7 days up to the last submission; "
+            "needs at least 3 days of submissions",
+        )
+    )
+    if pace.days_left is not None:
+        metrics.append(
+            (
+                "Days left",
+                f"{pace.days_left:,}",
+                f"Days to the field end date ({settings.field_end_date:%d %b %Y}), "
+                "counting today",
+            )
+        )
+    metric_row(metrics)
+
+
+STATUS_ICONS = {
+    "success": ":material/check_circle:",
+    "warning": WARNING_ICON,
+    "info": ":material/info:",
+}
+
+
+def progress_fraction(percentage: float) -> float:
+    """Return the percentage as the 0-1 fraction `st.progress` accepts.
+
+    Completions can pass the target, and `st.progress` raises on a value
+    above 1, so the bar stops full at 100%; the text keeps the real figure.
+    """
+    return min(max(percentage / 100, 0.0), 1.0)
+
+
+def untracked_completed_text(result: ProgressResult) -> str:
+    """Say how many completions the target leaves out, and where to find them."""
+    n = result.counts.untracked_completed
+    ids = f"{n:,} completed {'ID' if n == 1 else 'IDs'}"
+    if result.mode == "master list":
+        where = "not on the master list (see Unexpected in **Respondents**)"
+    else:
+        where = "in units the tracking file has no target for (see Untracked in **By unit**)"
+    return f"{ids} {where} {'is' if n == 1 else 'are'} not counted toward the target."
+
+
+def _display_headline(result: ProgressResult) -> None:
+    """Draw the percentage and counts above a progress bar, with the status beside."""
+    counts = result.counts
+    headline, status_col = st.columns([2, 3], vertical_alignment="center")
+    to_go = f"{counts.remaining:,} to go" if counts.remaining else "target reached"
+    with headline:
+        st.markdown(
+            f"### {counts.percentage:.1f}% complete\n"
+            f"**{counts.completed:,}** of {counts.target:,} completed · {to_go}"
+        )
+        st.progress(progress_fraction(counts.percentage))
+    status = result.status
+    if status is not None:
+        draw = getattr(status_col, status.level)
+        draw(f"**{status.title}**  \n{status.message}", icon=STATUS_ICONS[status.level])
+
+
+# =============================================================================
+# Overview - completions against the target
+# =============================================================================
+
+CHART_VIEWS = ["Cumulative", "Per period"]
+MET_COLOR = "#2ECC71"
+MISSED_COLOR = "#f87171"
+LINE_COLOR = "#4D5E90"
+TARGET_COLOR = "#E67E22"
+TRANSPARENT = "rgba(0,0,0,0)"
+
+
+def render_time_period_selector(settings_file: str) -> Period:
+    """Render the Day/Week/Month pills and return the chosen period.
+
+    The choice is saved view state, and sets both the chart's periods and the
+    header's current-period count.
+
+    Parameters
+    ----------
+    settings_file : str
+        Path to settings file for saving/loading the selected time period.
+
+    Returns
+    -------
+    Literal["Day", "Week", "Month"]
+        Selected time period for aggregation.
+    """
+    options_map = {
+        "Day": ":material/event: Daily",
+        "Week": ":material/date_range: Weekly",
+        "Month": ":material/calendar_month: Monthly",
+    }
+    return st.pills(
+        label="Time Period",
+        options=options_map.keys(),
+        format_func=lambda x: options_map[x],
+        help="Select time period for aggregating progress data",
+        selection_mode="single",
+        required=True,
+        **check_view(settings_file).bind(
+            PERIOD_KEY, options=PERIODS, default=PERIODS[0]
+        ),
+    )
+
+
+PERIODS: list[Period] = ["Day", "Week", "Month"]
+PERIOD_KEY = "time_period_progress_overtime"
+
+
+FOLLOW_UP_ANCHOR = SECTION_ANCHORS["Follow-up"]
+
+
+def follow_up_title(result: ProgressResult) -> str:
+    """Return the Follow-up title; it has a count badge when the queue has rows."""
+    queued = len(result.follow_up_queue)
+    return f"Follow-up :orange-badge[{queued:,}]" if queued else "Follow-up"
+
+
+def render_chart_controls(settings_file: str) -> tuple[str, Period]:
+    """Render the chart view toggle and the period pills; return both choices."""
+    with st.container(horizontal=True):
+        chart_view = st.segmented_control(
+            "Chart",
+            options=CHART_VIEWS,
+            required=True,
+            help="Cumulative completions against the target path, or "
+            "completions per period against the per-period target",
+            **check_view(settings_file).bind(
+                "progress_chart_view", options=CHART_VIEWS, default=CHART_VIEWS[0]
             ),
         )
+        period = render_time_period_selector(settings_file)
+    return chart_view, period
 
-    # Compute attempted interviews using Polars
-    result = compute_attempted_interviews(
-        data=data,
-        survey_id=survey_id,
-        date=date,
-        display_cols=display_cols,
+
+def _add_target_line(fig: go.Figure, path: list[tuple[date, float]]) -> None:
+    """Draw the cumulative target line on the Overview chart.
+
+    With one period and no end date, the path's two points are the same and
+    a line between them draws nothing, so the target spans the chart instead.
+    """
+    if not path:
+        return
+    line = {"color": TARGET_COLOR, "width": 2, "dash": "dash"}
+    if path[0][0] == path[-1][0]:
+        fig.add_hline(y=path[0][1], line=line, annotation_text="Target")
+        return
+    fig.add_trace(
+        go.Scatter(
+            x=[day for day, _ in path],
+            y=[value for _, value in path],
+            mode="lines",
+            name="Target",
+            line=line,
+        )
     )
 
-    # Display metrics
-    _display_metrics(result)
 
-    # Display chart and table
-    _display_chart_and_table(result.attempted_interviews, survey_id)
+def progress_figure(
+    result: ProgressResult, chart_view: str, target_per_period: int | None
+) -> go.Figure:
+    """Build the Overview chart from the computed progress.
+
+    The current period is drawn as unfinished: a dotted line to its point on
+    the cumulative chart, or a faded bar on the per-period chart.
+    """
+    points = result.series
+    starts = [point.start for point in points]
+    finished = [point for point in points if not point.partial]
+    fig = go.Figure()
+    if chart_view == "Cumulative":
+        fig.add_trace(
+            go.Scatter(
+                x=[point.start for point in finished],
+                y=[point.cumulative for point in finished],
+                mode="lines+markers",
+                name="Completed",
+                line={"color": LINE_COLOR, "width": 2},
+            )
+        )
+        if points[-1].partial:
+            tail = points[-2:]
+            fig.add_trace(
+                go.Scatter(
+                    x=[point.start for point in tail],
+                    y=[point.cumulative for point in tail],
+                    mode="lines+markers",
+                    name="So far (unfinished)",
+                    line={"color": LINE_COLOR, "width": 2, "dash": "dot"},
+                )
+            )
+        _add_target_line(fig, result.target_path)
+        y_title = "Completed (cumulative)"
+    else:
+        completed = [point.completed for point in points]
+        colors = [
+            LINE_COLOR
+            if not target_per_period
+            else MET_COLOR
+            if point.completed >= target_per_period
+            else MISSED_COLOR
+            for point in points
+        ]
+        fig.add_trace(
+            go.Bar(
+                x=starts,
+                y=completed,
+                name="Completed",
+                marker={
+                    "color": colors,
+                    "opacity": [0.4 if point.partial else 1.0 for point in points],
+                },
+                customdata=[
+                    " (unfinished)" if point.partial else "" for point in points
+                ],
+                hovertemplate="<b>%{x}</b>%{customdata}<br>Completed: %{y}"
+                "<extra></extra>",
+            )
+        )
+        if target_per_period:
+            # Spans the chart, so it shows with a single period too
+            fig.add_hline(
+                y=target_per_period,
+                line={"color": TARGET_COLOR, "width": 2, "dash": "dash"},
+                annotation_text=f"Target: {target_per_period:,}",
+            )
+        y_title = "Completed"
+
+    fig.update_layout(
+        plot_bgcolor=TRANSPARENT,
+        paper_bgcolor=TRANSPARENT,
+        height=400,
+        margin={"t": 30, "b": 50, "l": 50, "r": 30},
+        legend={
+            "orientation": "h",
+            "yanchor": "bottom",
+            "y": 1.02,
+            "xanchor": "right",
+            "x": 1,
+        },
+        xaxis={"showgrid": False},
+        yaxis={"title_text": y_title, "showgrid": False, "rangemode": "tozero"},
+    )
+    return fig
+
+
+@demo_output_onboarding(TAB_NAME)
+def display_overview(
+    result: ProgressResult, settings: ProgressSettings, chart_view: str
+) -> None:
+    """Draw the Overview section's to-do cards and completions chart.
+
+    Parameters
+    ----------
+    result : ProgressResult
+        The computed progress.
+    settings : ProgressSettings
+        The settings the progress was computed with.
+    chart_view : str
+        "Cumulative" or "Per period".
+    """
+    for todo in result.todos:
+        with st.container(border=True):
+            st.markdown(
+                f":material/warning: **{todo.label}**: {todo.count:,} · "
+                f"[See {todo.section} :material/arrow_downward:]"
+                f"(#{SECTION_ANCHORS[todo.section]})"
+            )
+
+    if not result.series:
+        st.info(
+            "The chart needs a date column and at least one dated completion. "
+            "To choose the date column, go to the :material/settings: "
+            "settings section above."
+        )
+    else:
+        st.plotly_chart(
+            progress_figure(result, chart_view, settings.target_submissions_per_period),
+            theme=None,
+            width="stretch",
+        )
+
+
+# =============================================================================
+# Follow-up - who needs another visit, and how many tries a completion takes
+# =============================================================================
+
+
+def attempts_figure(buckets: list[AttemptBucket], has_condition: bool) -> go.Figure:
+    """Build the attempts-to-outcome chart.
+
+    With a completion condition: for each attempt number, the IDs completed
+    at that attempt and those still open after that many. Without one: the
+    IDs submitted that many times.
+    """
+    labels = [bucket.attempt for bucket in buckets]
+    fig = go.Figure()
+    if has_condition:
+        for name, values, color in (
+            ("Completed at this attempt", [b.completed for b in buckets], MET_COLOR),
+            ("Still open after this many", [b.open for b in buckets], MISSED_COLOR),
+        ):
+            fig.add_trace(go.Bar(x=labels, y=values, name=name, marker_color=color))
+        y_title = "IDs"
+    else:
+        fig.add_trace(
+            go.Bar(
+                x=labels,
+                y=[b.submitted for b in buckets],
+                name="IDs",
+                marker_color=LINE_COLOR,
+            )
+        )
+        y_title = "IDs submitted this many times"
+    fig.update_layout(
+        barmode="group",
+        plot_bgcolor=TRANSPARENT,
+        paper_bgcolor=TRANSPARENT,
+        height=350,
+        margin={"t": 30, "b": 50, "l": 50, "r": 30},
+        legend={
+            "orientation": "h",
+            "yanchor": "bottom",
+            "y": 1.02,
+            "xanchor": "right",
+            "x": 1,
+        },
+        xaxis={"title_text": "Attempt", "type": "category", "showgrid": False},
+        yaxis={"title_text": y_title, "showgrid": False, "rangemode": "tozero"},
+    )
+    return fig
+
+
+def _rate(value: float | None, suffix: str = "") -> str:
+    return "—" if value is None else f"{value:,.1f}{suffix}"
+
+
+def _display_follow_up_metrics(metrics: FollowUpMetrics) -> None:
+    if metrics.need_follow_up is None:
+        metric_row(
+            [
+                (
+                    "Repeat IDs",
+                    f"{metrics.repeat_ids:,}",
+                    "IDs submitted more than once",
+                ),
+                (
+                    "Submissions per ID",
+                    _rate(metrics.avg_attempts),
+                    "Mean submissions of each ID",
+                ),
+                ("Most submissions", f"{metrics.max_attempts:,}", "Of any one ID"),
+            ]
+        )
+        return
+    metric_row(
+        [
+            (
+                "Need follow-up",
+                f"{metrics.need_follow_up:,}",
+                "IDs attempted but never completed",
+            ),
+            (
+                "Done on 1st try",
+                _rate(metrics.first_try_rate, "%"),
+                "Completions at the first attempt, as a share of all completions",
+            ),
+            (
+                "Avg attempts per completion",
+                _rate(metrics.avg_attempts_per_completion),
+                "The mean attempt number completions came at",
+            ),
+            (
+                "3+ attempts, still open",
+                f"{metrics.open_3_plus:,}",
+                "IDs still open after 3 or more attempts",
+            ),
+        ]
+    )
+
+
+QUEUE_OUTCOME_KEY = "follow_up_outcomes"
+QUEUE_MIN_ATTEMPTS_KEY = "follow_up_min_attempts"
+
+
+def _display_queue(queue: list[QueueRow], settings_file: str) -> None:
+    """Draw the follow-up queue: filters, export, table and attempt history."""
+    section_header("Follow-up queue", icon=":material/assignment_return:")
+    if not queue:
+        st.success("No IDs need a follow-up visit.", icon=":material/check_circle:")
+        return
+    view = check_view(settings_file)
+    outcomes = sorted({row.last_outcome for row in queue})
+    fc1, fc2, fc3 = st.columns([0.5, 0.25, 0.25], vertical_alignment="bottom")
+    with fc1:
+        chosen = st.multiselect(
+            "Last outcome",
+            options=outcomes,
+            placeholder="Any outcome",
+            **view.bind(QUEUE_OUTCOME_KEY, options=outcomes, multi=True, default=None),
+        )
+    with fc2:
+        min_attempts = st.number_input(
+            "Minimum attempts",
+            min_value=1,
+            step=1,
+            **view.bind(QUEUE_MIN_ATTEMPTS_KEY, value=1),
+        )
+    shown = filter_queue(queue, chosen or [], int(min_attempts or 1))
+    table = queue_frame(shown)
+    with fc3:
+        st.download_button(
+            "Download queue (CSV)",
+            data=table.write_csv().encode("utf-8"),
+            file_name="follow_up_queue.csv",
+            mime="text/csv",
+            icon=":material/download:",
+            width="stretch",
+            help="The IDs in the queue below, with the filters applied.",
+        )
+    if not shown:
+        st.info("No IDs match the filters.")
+        return
+    st.caption(
+        f"{len(shown):,} of {len(queue):,} IDs. Select a row to see its attempts."
+    )
+    selection = st.dataframe(
+        table,
+        hide_index=True,
+        width="stretch",
+        on_select="rerun",
+        selection_mode="single-row",
+        # A new key per filter, so a selected row can't point at another ID
+        key=f"follow_up_queue_{chosen}_{min_attempts}",
+        column_config={"ID": st.column_config.Column(pinned=True)},
+    )
+    rows = selection.selection.rows if selection else []
+    if rows and rows[0] < len(shown):
+        row = shown[rows[0]]
+        st.markdown(f"**Attempts for {row.id}**")
+        st.dataframe(
+            pl.DataFrame(
+                [[a.number, a.day, a.outcome, a.enumerator] for a in row.history],
+                schema={
+                    "Attempt": pl.Int64,
+                    "Date": pl.Date,
+                    "Outcome": pl.String,
+                    "Enumerator": pl.String,
+                },
+                orient="row",
+            ),
+            hide_index=True,
+            width="stretch",
+        )
+
+
+@demo_output_onboarding(TAB_NAME)
+def display_follow_up(
+    result: ProgressResult, settings: ProgressSettings, settings_file: str
+) -> None:
+    """Draw the Follow-up section: metrics, attempts-to-outcome chart and queue.
+
+    Without a completion condition there is no queue: the section shows the
+    repeat-ID metrics and chart, and says how to turn the queue on.
+
+    Parameters
+    ----------
+    result : ProgressResult
+        The computed progress.
+    settings : ProgressSettings
+        The settings the progress was computed with.
+    settings_file : str
+        The page's settings file, for the queue filters' view state.
+    """
+    if not settings.survey_id:
+        st.info(
+            "Follow-up needs the survey ID column. To choose it, go to the "
+            ":material/settings: settings section above."
+        )
+        return
+    _display_follow_up_metrics(result.follow_up)
+    if not settings.has_condition:
+        st.info(
+            "Set a completion condition in the :material/settings: settings "
+            "section above to see who needs a follow-up visit and how many "
+            "tries a completion takes."
+        )
+    st.plotly_chart(
+        attempts_figure(result.attempts_to_outcome, settings.has_condition),
+        theme=None,
+        width="stretch",
+    )
+    if settings.has_condition:
+        _display_queue(result.follow_up_queue, settings_file)
 
     demo_callout(
         "**Next**: :material/arrow_upward: Scroll up and select **Data integrity → Missing Values**."
     )
 
 
-def _display_metrics(result: AttemptedInterviewsResult) -> None:
-    """Display summary metrics for attempted interviews.
-
-    Parameters
-    ----------
-    result : AttemptedInterviewsResult
-        Result containing attempted interviews data and statistics
-    """
-    cm1, cm2, cm3, cm4 = st.columns(4, border=True)
-    total_submissions_formatted = f"{result.total_submitted:,}"
-    cm1.metric(label="Total Submitted Interviews", value=total_submissions_formatted)
-    number_of_unique_ids_formatted = f"{result.number_of_unique_ids:,}"
-    cm2.metric(label="Number of Unique IDs", value=number_of_unique_ids_formatted)
-    min_attempts_formatted = f"{result.min_attempts:,}"
-    cm3.metric(label="Min Attempts", value=min_attempts_formatted)
-    max_attempts_formatted = f"{result.max_attempts:,}"
-    cm4.metric(label="Max Attempts", value=max_attempts_formatted)
-
-
-def _display_chart_and_table(
-    attempted_interviews: pl.DataFrame, survey_id: str
-) -> None:
-    """Display frequency chart and detailed table.
-
-    Parameters
-    ----------
-    attempted_interviews : pl.DataFrame
-        DataFrame with attempted interviews data
-    survey_id : str
-        Column name for survey ID
-    """
-    ai1, ai2 = st.columns([0.4, 0.6])
-
-    with ai1:
-        # Aggregate attempted interviews into frequency counts
-        attempted_frequency = (
-            attempted_interviews.group_by("num_interviews")
-            .agg(pl.len().alias("frequency"))
-            .sort("num_interviews")
-        )
-
-        # Calculate total and percentage
-        total_surveys = attempted_frequency["frequency"].sum()
-        attempted_frequency = attempted_frequency.with_columns(
-            (pl.col("frequency") / total_surveys * 100).alias("percentage")
-        )
-
-        # Convert to list for plotting
-        num_interviews_list = attempted_frequency["num_interviews"].to_list()
-        percentage_list = attempted_frequency["percentage"].to_list()
-        frequency_list = attempted_frequency["frequency"].to_list()
-
-        # Convert attempts to strings for categorical axis
-        num_interviews_str = [str(int(x)) for x in num_interviews_list]
-
-        # Create custom hover text
-        hover_text = [
-            f"<b>{attempts} Attempts</b><br>Percentage: {pct:.1f}%<br>Frequency: {freq}"
-            for attempts, pct, freq in zip(
-                num_interviews_list, percentage_list, frequency_list, strict=False
-            )
-        ]
-
-        # Create figure using go.Bar for better control
-        fig = go.Figure()
-
-        fig.add_trace(
-            go.Bar(
-                x=percentage_list,
-                y=num_interviews_str,
-                orientation="h",
-                marker_color="#f87171",
-                hovertemplate="%{customdata}<extra></extra>",
-                customdata=hover_text,
-            )
-        )
-
-        fig.update_layout(
-            title="Attempted Interviews Distribution",
-            title_x=0.5,
-            plot_bgcolor="rgba(0,0,0,0)",
-            paper_bgcolor="rgba(0,0,0,0)",
-            height=400,
-            margin={"t": 50, "b": 50, "l": 50, "r": 50},
-            hovermode="closest",
-            xaxis={
-                "title": "Percentage (%)",
-                "showgrid": False,
-                "gridcolor": "lightgrey",
-            },
-            yaxis={
-                "title": "Number of Attempts",
-                "type": "category",
-                "showgrid": False,
-                "gridcolor": "lightgrey",
-                "autorange": "reversed",
-            },
-        )
-        st.plotly_chart(fig, width="stretch")
-
-    with ai2:
-        # Convert to pandas for styling (Streamlit doesn't support Polars styling yet)
-        attempts_pd = attempted_interviews.to_pandas()
-        # Make sure the Styler limit fits this DataFrame
-        ensure_styler_limit(attempts_pd.size + 1)
-
-        cmap = sns.light_palette("pink", as_cmap=True)
-        vmin = attempts_pd["num_interviews"].min()
-        vmax = attempts_pd["num_interviews"].max()
-
-        st.dataframe(
-            data=attempts_pd.style.background_gradient(
-                subset=["num_interviews"],
-                cmap=cmap,
-                vmin=vmin,
-                vmax=vmax,
-            ),
-            width="stretch",
-            column_config={
-                survey_id: st.column_config.Column(pinned=True),
-                "num_interviews": st.column_config.Column(
-                    pinned=True, label="Number of Interviews"
-                ),
-                "last_attempt_date": st.column_config.DateColumn(
-                    pinned=True, label="Last Attempt Date"
-                ),
-            },
-            hide_index=True,
-        )
-
-
 # =============================================================================
 # Main Report Function
 # =============================================================================
+
+
+def stale_condition_columns(saved: ProgressSettings, columns: list[str]) -> list[str]:
+    """Return the saved consent and outcome columns the pickers no longer offer.
+
+    A prep step can drop or rename a column. Its picker then starts empty
+    without saving, so the page counts without that part of the condition
+    while Summary still reads the missing column. The page warns instead.
+    """
+    return [
+        column
+        for column in (saved.consent, saved.outcome)
+        if column and column not in columns
+    ]
+
+
+def stale_tracking_columns(
+    saved: ProgressSettings, tracking_columns: list[str], survey_unit_columns: list[str]
+) -> list[str]:
+    """Return the saved Target source columns the pickers no longer offer.
+
+    As with `stale_condition_columns`: a re-imported tracking dataset can drop
+    or rename a column, and its picker then starts empty without saving, so
+    the page and Summary would read different settings. Only the columns the
+    saved mode uses are checked: a tracking file's target, unit, parents and
+    survey unit, or a master list's ID, unit, parents and display columns.
+    """
+    if saved.tracking_target:
+        named = [saved.tracking_target, saved.tracking_unit, *saved.tracking_parents]
+        survey = [saved.survey_unit]
+    else:
+        named = [
+            saved.tracking_id,
+            saved.tracking_unit,
+            *saved.tracking_parents,
+            *saved.tracking_display,
+        ]
+        survey = []
+    return [c for c in named if c and c not in tracking_columns] + [
+        c for c in survey if c and c not in survey_unit_columns
+    ]
 
 
 @demo_output_onboarding(TAB_NAME)
@@ -1368,25 +2327,18 @@ def progress_report(
     setting_file: str,
     config: dict,
     survey_columns: ColumnByType,
+    tracking: TrackingSource | None = None,
 ) -> None:
-    """Display comprehensive progress tracking report with multiple sections.
+    """Display the Progress page: settings, header, then the sections.
 
-    Main entry point for the progress report module. Renders a complete
-    progress tracking dashboard including:
-    - Settings configuration UI
-    - Progress summary with target tracking
-    - Progress over time visualization
-    - Attempted interviews analysis
-
-    The report supports both Pandas and Polars DataFrames, converts column
-    information, and orchestrates all sub-components.
+    The settings expander sits at the top, as on Summary, with "Reset
+    filters" beside it. `compute_progress` then counts the progress once and
+    the header and the sections draw from its result: Overview and
+    Follow-up, then By unit with a tracking dataset and Respondents with a
+    master list.
 
     Parameters
     ----------
-    project_id : str
-        Unique identifier for the current project.
-    page_name_id : str
-        Identifier for the current page/tab.
     data : pl.DataFrame
         Survey data to analyze and display.
     setting_file : str
@@ -1395,50 +2347,160 @@ def progress_report(
         Default configuration dictionary to initialize ProgressSettings.
     survey_columns : ColumnByType
         Column names categorized by data type.
+    tracking : TrackingSource | None
+        The page's tracking dataset; None when the page config has none.
     """
-    # get column info
-    datetime_columns = survey_columns.datetime_columns
-    categorical_columns = survey_columns.categorical_columns
-
+    tracking = tracking or TrackingSource()
     st.title("Progress Tracking")
-
-    # Load settings
-    config_settings = ProgressSettings(**config)
-    with reset_filters_beside(check_view(setting_file)):
-        progress_settings = progress_report_settings(
-            setting_file, config_settings, categorical_columns, datetime_columns
+    saved_view = check_view(setting_file)
+    with reset_filters_beside(saved_view):
+        settings = progress_report_settings(
+            data,
+            setting_file,
+            ProgressSettings(**config),
+            survey_columns.categorical_columns,
+            survey_columns.datetime_columns,
+            tracking,
         )
 
-    st.write("---")
-    st.subheader("Progress Summary")
-    display_progress_summary(data, progress_settings.survey_target)
+    saved = load_default_settings(setting_file, ProgressSettings(**config))
+    for column in stale_condition_columns(saved, condition_columns(data)):
+        st.warning(
+            f"The saved completion condition uses **{column}**, which is no "
+            "longer in the data or now holds values a condition can't use, "
+            "such as dates or fractions. This page counts without it, so "
+            "Summary's Progress row won't match. Pick another column in the "
+            ":material/settings: settings section above.",
+            icon=WARNING_ICON,
+        )
+    if tracking.data is not None:
+        stale = stale_tracking_columns(
+            saved, tracking.data.columns, survey_columns.categorical_columns
+        )
+        if stale:
+            st.warning(
+                "The saved target source uses "
+                f"{', '.join(f'**{c}**' for c in stale)}, which "
+                f"{'is' if len(stale) == 1 else 'are'} no longer in the "
+                "tracking dataset or the survey data. This page counts "
+                "without it, so Summary's Progress row won't match. Pick "
+                "the columns again in the :material/settings: settings "
+                "section above.",
+                icon=WARNING_ICON,
+            )
 
-    st.write("---")
-    st.subheader("Progress Over Time")
-    display_progress_overtime(
-        data,
-        progress_settings.survey_date,
-        setting_file,
-        progress_settings.target_submissions_per_period,
+    # The header sits above the chart controls but needs the period they hold
+    header = st.container()
+    section_header("Overview", icon=":material/insights:", anchor=OVERVIEW_ANCHOR)
+    chart_view, period = render_chart_controls(setting_file)
+
+    try:
+        result = compute_progress(
+            data, settings, date.today(), period, tracking=tracking.data
+        )
+    except (pl.exceptions.PolarsError, TypeError) as exc:
+        # The settings no longer fit the data, for example a condition's
+        # values against a column whose type changed
+        with header:
+            st.warning(
+                "The progress settings no longer fit the data, so progress "
+                "can't be counted. Check the columns and the completion "
+                f"condition in the :material/settings: settings section above. "
+                f"Details: {exc}",
+                icon=WARNING_ICON,
+            )
+        return
+
+    with header:
+        display_progress_header(result, settings, tracking.name)
+    display_overview(result, settings, chart_view)
+
+    st.divider()
+    section_header(
+        follow_up_title(result),
+        icon=":material/assignment_return:",
+        anchor=FOLLOW_UP_ANCHOR,
+    )
+    display_follow_up(result, settings, setting_file)
+
+    if "By unit" in result.sections:
+        st.divider()
+        section_header(
+            "By unit",
+            icon=":material/holiday_village:",
+            anchor=SECTION_ANCHORS["By unit"],
+        )
+        display_by_unit(result.unit_levels, saved_view)
+    if "Respondents" in result.sections:
+        st.divider()
+        section_header(
+            "Respondents",
+            icon=":material/groups:",
+            anchor=SECTION_ANCHORS["Respondents"],
+        )
+        display_respondents(
+            result.respondents, result.unit_levels, settings.tracking_display
+        )
+
+
+class ProgressResolution(BaseModel):
+    """Progress as other pages read it, through `resolve_progress`."""
+
+    mode: ProgressMode = Field(description="Where the target comes from")
+    target: int | None = Field(None, ge=0, description="None when not set")
+    achieved: int = Field(
+        ge=0, description="Completed IDs; every ID without a completion condition"
+    )
+    basis: Literal["completed interviews", "unique IDs"] = Field(
+        description="What `achieved` counts"
+    )
+    unit_levels: list[UnitLevel] = Field(
+        default_factory=list,
+        description="Unit and parent targets and counts, as on By unit",
     )
 
-    st.write("---")
-    st.subheader("Attempted Interviews")
-    display_attempted_interviews(
-        data,
-        progress_settings.survey_id,
-        progress_settings.survey_date,
-        setting_file,
+
+def resolve_progress(ctx: CheckContext) -> ProgressResolution:
+    """Return the target and the count against it, as the Progress check has them.
+
+    The contract for other pages, such as Project Overview: the target from
+    the fixed setting or the tracking dataset, the Completed count (Unique
+    when no completion condition is set) and the unit and parent targets.
+    A tracking dataset with no rows, or not yet imported, counts as none.
+
+    Parameters
+    ----------
+    ctx : CheckContext
+        The check page's configuration and data.
+    """
+    data = ctx.data.page_data
+    tracking = ctx.data.tracking_data_with_rows
+    settings = load_default_settings(
+        ctx.config.setting_file, ProgressSettings(**progress_config(ctx))
+    )
+    rows, reference = _rows_and_reference(data, settings, tracking)
+    tagged = _tagged_rows(rows, data, settings, reference)
+    counts = _counts(rows, _target(settings, reference), tagged)
+    levels = [] if tagged is None else unit_levels(tagged, reference)
+    return ProgressResolution(
+        mode=detect_mode(tracking is not None, settings),
+        target=counts.target,
+        achieved=counts.completed,
+        basis="completed interviews" if settings.has_condition else "unique IDs",
+        unit_levels=levels,
     )
 
 
 def progress_headline(
-    data: pl.DataFrame, setting_file: str, config: dict
+    data: pl.DataFrame,
+    setting_file: str,
+    config: dict,
+    tracking: pl.DataFrame | None = None,
 ) -> CheckHeadline:
     """Return the progress headline for Summary's check health row.
 
-    The submissions out of the target, with the share of the target as the
-    Progress Summary shows it, or only the submissions when no target is
+    The completed IDs out of the target, with the share of the target as the
+    Progress header shows it, or only the completed IDs when no target is
     set. Informational: progress is never an issue to resolve.
 
     Parameters
@@ -1449,21 +2511,24 @@ def progress_headline(
         Path to the page's settings file.
     config : dict
         The page configuration the check starts from.
+    tracking : pl.DataFrame | None
+        The tracking dataset, when it has rows; its total is the target.
     """
-    target = load_default_settings(
-        setting_file, ProgressSettings(**config)
-    ).survey_target
-    summary = compute_progress_summary(data, target)
-    if not target or target <= 0:
+    try:
+        settings = load_default_settings(setting_file, ProgressSettings(**config))
+        counts = compute_counts(data, settings, tracking)
+    except (pl.exceptions.PolarsError, ValidationError, TypeError) as exc:
+        raise settings_no_longer_fit("Progress", exc) from exc
+    if counts.target is None:
         return CheckHeadline(
-            f"{summary.total_submitted:,}",
-            "submitted interviews",
+            f"{counts.completed:,}",
+            "completed",
             informational=True,
-            count=summary.total_submitted,
+            count=counts.completed,
         )
     return CheckHeadline(
-        f"{summary.total_submitted:,} / {target:,}",
-        f"{summary.percentage_completed:.2f}% of target",
+        f"{counts.completed:,} / {counts.target:,}",
+        f"{counts.percentage:.2f}% of target",
         informational=True,
-        count=summary.total_submitted,
+        count=counts.completed,
     )
