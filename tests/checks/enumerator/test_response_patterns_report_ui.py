@@ -1,10 +1,16 @@
 """AppTest tests for the Response Patterns section (seam B)."""
 
 import json
+from itertools import pairwise
 
 import polars as pl
 import pytest
 from streamlit.testing.v1 import AppTest
+
+from datasure.checks.enumerator.response_patterns.report_ui import (
+    LOW_SAMPLE_WARNING,
+    _bucket_label,
+)
 
 ENUM = "enum"
 
@@ -105,6 +111,18 @@ class TestMessages:
 
         assert "fewer than 50 responses" in _texts(at.info)
 
+    def test_high_sensitivity_raises_the_minimum(self, team_data, settings_file):
+        _save(
+            settings_file,
+            selected_variables=["age"],
+            digit_preference_sensitivity="high",
+        )
+
+        at = _run(team_data, settings_file)
+
+        assert "fewer than 100 responses" in _texts(at.info)
+        assert "with at least 100 responses" in _texts(at.caption)
+
     def test_skipped_variable_note(self, team_data, settings_file):
         data = team_data.with_columns(pl.lit(3).alias("kids"))
         _save(settings_file, selected_variables=["age", "kids"])
@@ -125,7 +143,7 @@ class TestMessages:
 
 
 class TestEnumeratorTable:
-    def test_lists_enumerators_by_score_with_interviews_and_rates(
+    def test_lists_enumerators_by_ratio_with_interviews_and_rates(
         self, team_data, settings_file
     ):
         _save(settings_file, selected_variables=["age"])
@@ -137,13 +155,18 @@ class TestEnumeratorTable:
         assert table["Interviews"].tolist() == [40, 40, 40]
         assert table["Ending in 0 or 5 (%)"].tolist()[0] == pytest.approx(60)
         assert table["Rest of team (%)"].tolist()[0] == pytest.approx(20)
+        assert table["Ratio"].tolist()[0] == pytest.approx(3)
+        assert "Score" not in table.columns
         assert table["Flag"].tolist() == ["High", "Low", "Low"]
 
-    def test_highest_score_is_selected_by_default(self, team_data, settings_file):
+    def test_highest_ratio_is_selected_by_default(self, team_data, settings_file):
         _save(settings_file, selected_variables=["age"])
 
         at = _run(team_data, settings_file)
 
+        assert "rounder: terminal digits · **3\N{MULTIPLICATION SIGN}** the rest" in (
+            _texts(at.markdown)
+        )
         assert "rounder's responses end in 0 or 5 notably more often" in _texts(
             at.warning
         )
@@ -181,6 +204,21 @@ class TestEnumeratorTable:
 
         assert not at.exception
         assert "steady's digit distribution is consistent" in _texts(at.success)
+
+    def test_moderate_enumerator_gets_a_caution_not_an_all_clear(self, settings_file):
+        # 1.5x the team: High at Medium, Moderate at Low
+        _save(
+            settings_file,
+            selected_variables=["age"],
+            digit_preference_sensitivity="low",
+        )
+        data = _frame({"mid": _values(40, 12), "base": _values(40, 8)})
+
+        at = _run(data, settings_file)
+
+        assert "Moderate" in _texts(at.markdown)
+        assert "mid's responses end in 0 or 5 somewhat more often" in _texts(at.info)
+        assert "mid's digit distribution is consistent" not in _texts(at.success)
 
 
 class TestVariableEditor:
@@ -297,47 +335,48 @@ class TestSettingsPersistence:
 
         at.number_input(key="rp_min_sample").set_value(10).run()
         at.number_input(key="rp_warn_sample").set_value(20).run()
-        at.segmented_control(key="rp_dp_threshold").set_value(65).run()
+        at.segmented_control(key="rp_dp_sensitivity").set_value("low").run()
         assert not at.exception
 
         new_session = _run(team_data, settings_file)
 
         assert new_session.number_input(key="rp_min_sample").value == 10
         assert new_session.number_input(key="rp_warn_sample").value == 20
-        assert new_session.segmented_control(key="rp_dp_threshold").value == 65
+        assert new_session.segmented_control(key="rp_dp_sensitivity").value == "low"
         with open(settings_file) as f:
             saved = json.load(f)["enumerators"]["response_patterns"]
         assert saved["selected_variables"] == ["age"]
 
 
-class TestFlagThresholds:
-    def test_five_fixed_levels_default_to_medium(self, team_data, settings_file):
+class TestFlagSensitivity:
+    def test_three_levels_default_to_medium(self, team_data, settings_file):
         at = _run(team_data, settings_file)
 
-        control = at.segmented_control(key="rp_dp_threshold")
-        assert control.options == [
-            "Very high",
-            "High",
-            "Medium",
-            "Low",
-            "Very low",
-        ]
-        assert control.value == 50
+        control = at.segmented_control(key="rp_dp_sensitivity")
+        assert control.options == ["High", "Medium", "Low"]
+        assert control.value == "medium"
 
     def test_description_follows_the_level(self, team_data, settings_file):
         at = _run(team_data, settings_file)
 
-        at.segmented_control(key="rp_dp_threshold").set_value(80).run()
+        x = "\N{MULTIPLICATION SIGN}"
+        assert f"at least 1.5{x} as often" in _texts(at.caption)
+        at.segmented_control(key="rp_dp_sensitivity").set_value("low").run()
+        assert f"at least 2{x} as often" in _texts(at.caption)
+        at.segmented_control(key="rp_dp_sensitivity").set_value("high").run()
+        assert f"at least 1.25{x} as often" in _texts(at.caption)
+        assert "at least 100 responses" in _texts(at.caption)
 
-        assert "1.8 times" in _texts(at.caption)
-
-    def test_level_changes_the_flags(self, team_data, settings_file):
-        # rounder's 25% against careful's 20% scores 25
-        data = _frame({"rounder": _values(40, 10), "careful": _values(40, 8)})
+    def test_level_changes_the_flags(self, settings_file):
+        # rounder ends 40 of 100 answers in 0 or 5, careful 30: 1.33x
+        data = _frame({"rounder": _values(100, 40), "careful": _values(100, 30)})
         _save(settings_file, selected_variables=["age"])
-        at = _run(data, settings_file)  # rounder scores 25: Low at Medium
+        at = _run(data, settings_file)
+        assert at.dataframe(key="rp_dp_enumerators").value["Flag"].tolist()[0] == (
+            "Moderate"
+        )
 
-        at.segmented_control(key="rp_dp_threshold").set_value(20).run()
+        at.segmented_control(key="rp_dp_sensitivity").set_value("high").run()
 
         table = at.dataframe(key="rp_dp_enumerators").value
         assert table["Flag"].tolist()[0] == "High"
@@ -374,7 +413,7 @@ def _range_tab(at: AppTest):
 
 
 class TestRangeCompressionTab:
-    def test_lists_enumerators_by_score_with_flags(self, range_data, settings_file):
+    def test_lists_enumerators_by_sd_ratio_with_flags(self, range_data, settings_file):
         _save(settings_file, selected_variables=["age"])
 
         at = _run(range_data, settings_file)
@@ -383,9 +422,10 @@ class TestRangeCompressionTab:
         assert table["Enumerator"].tolist()[0] == "anchor"
         assert table["Flag"].tolist()[0] == "High"
         assert table["SD ratio"].tolist()[0] == pytest.approx(0.4, abs=0.01)
-        assert table["Signal"].tolist()[0] == "Compression"
+        assert "Score" not in table.columns
+        assert "Signal" not in table.columns
 
-    def test_highest_score_shows_tiles_and_compression_verdict(
+    def test_lowest_sd_ratio_shows_tiles_and_compression_verdict(
         self, range_data, settings_file
     ):
         _save(settings_file, selected_variables=["age"])
@@ -393,9 +433,8 @@ class TestRangeCompressionTab:
         at = _run(range_data, settings_file)
 
         tab = _range_tab(at)
-        assert "anchor: spread and level" in _texts(tab.markdown)
+        assert "anchor: spread · SD ratio **0.40** on **age**" in _texts(tab.markdown)
         assert "spread much less widely" in _texts(tab.warning)
-        assert "Score set by compression on **age**" in _texts(tab.markdown)
         mean, sd, ratio = tab.metric
         assert [m.label for m in tab.metric] == [
             "Mean",
@@ -423,26 +462,7 @@ class TestRangeCompressionTab:
         assert len(enum_bars["x"]) == 10
         assert set(enum_bars["marker"]["color"]) == {"#f5cb57"}
 
-    def test_both_verdicts_show_compression_first(self, settings_file):
-        data = _range_frame(
-            {
-                "drifter": _narrowed(SPREAD, 0.4, shift=30),
-                "steady": SPREAD,
-                "careful": SPREAD,
-            }
-        )
-        _save(settings_file, selected_variables=["age"])
-
-        at = _run(data, settings_file)
-
-        warnings = [w.value for w in _range_tab(at).warning]
-        assert "spread much less widely" in warnings[0]
-        assert "above the rest of the team's" in warnings[1]
-        # Compressed as well as shifted, so the bars are amber
-        spec = json.loads(at.get("plotly_chart")[1].proto.spec)
-        assert set(spec["data"][0]["marker"]["color"]) == {"#f5cb57"}
-
-    def test_shift_only_keeps_the_usual_bar_colour(self, settings_file):
+    def test_shifted_mean_alone_is_not_flagged(self, settings_file):
         data = _range_frame(
             {
                 "high": _narrowed(SPREAD, 1, shift=30),
@@ -453,12 +473,35 @@ class TestRangeCompressionTab:
         _save(settings_file, selected_variables=["age"])
 
         at = _run(data, settings_file)
+        # high widens the others' rest of team, so it doesn't sort first
+        names = at.dataframe(key="rp_rc_enumerators").value["Enumerator"].tolist()
+        at.session_state["rp_rc_enumerators"] = {
+            "selection": {"rows": [names.index("high")], "columns": [], "cells": []}
+        }
+        at.run()
 
-        warnings = [w.value for w in _range_tab(at).warning]
-        assert len(warnings) == 1
-        assert "above the rest of the team's" in warnings[0]
+        tab = _range_tab(at)
+        assert "high: spread · SD ratio **1.0" in _texts(tab.markdown)
+        assert not tab.warning
+        assert "high's answers are spread like the rest" in _texts(tab.success)
         spec = json.loads(at.get("plotly_chart")[1].proto.spec)
         assert set(spec["data"][0]["marker"]["color"]) == {"#155240"}
+
+    def test_moderate_enumerator_gets_a_caution(self, settings_file):
+        # SD ratio 0.6: flagged at High, Moderate at Medium
+        data = _range_frame(
+            {"mid": _narrowed(SPREAD, 0.6), "steady": SPREAD, "careful": SPREAD}
+        )
+        _save(settings_file, selected_variables=["age"])
+
+        at = _run(data, settings_file)
+
+        tab = _range_tab(at)
+        assert "Moderate" in _texts(tab.markdown)
+        assert "mid's answers on **age** spread somewhat less widely" in _texts(
+            tab.info
+        )
+        assert not tab.success
 
     def test_switching_the_variable_redraws_the_histogram(
         self, range_data, settings_file
@@ -474,6 +517,25 @@ class TestRangeCompressionTab:
         spec = json.loads(at.get("plotly_chart")[1].proto.spec)
         assert "income" in spec["layout"]["xaxis"]["title"]["text"]
 
+    def test_low_sample_warning_follows_the_scoring_variable(self, settings_file):
+        # anchor answers age only 20 times (low sample) but income 40 times;
+        # age still sets the flag, so its caution stays on income too
+        data = _range_frame(
+            {"anchor": SPREAD, "steady": SPREAD, "careful": SPREAD}
+        ).with_columns(
+            age=pl.Series(_narrowed(SPREAD, 0.4)[:20] + [None] * 20 + SPREAD * 2)
+        )
+        _save(settings_file, selected_variables=["age", "income"])
+        at = _run(data, settings_file)
+        assert LOW_SAMPLE_WARNING in _texts(_range_tab(at).warning)
+
+        _range_tab(at).selectbox[0].set_value("income").run()
+
+        assert not at.exception
+        tab = _range_tab(at)
+        assert "on **age**" in _texts(tab.markdown)
+        assert LOW_SAMPLE_WARNING in _texts(tab.warning)
+
     def test_selecting_a_row_shows_that_enumerator(self, range_data, settings_file):
         _save(settings_file, selected_variables=["age"])
         at = _run(range_data, settings_file)
@@ -484,9 +546,7 @@ class TestRangeCompressionTab:
         at.run()
 
         assert not at.exception
-        assert "spread and centred like the rest of the team's" in _texts(
-            _range_tab(at).success
-        )
+        assert "spread like the rest of the team's" in _texts(_range_tab(at).success)
 
     def test_team_without_variation_is_noted(self, settings_file):
         # varied's rest of team is flat, which always answers 50
@@ -511,17 +571,27 @@ class TestRangeCompressionTab:
 
         assert "Range Compression has nothing to check" in _texts(_range_tab(at).info)
 
-    def test_threshold_survives_a_new_session(self, range_data, settings_file):
+    def test_sensitivity_defaults_to_medium_with_three_levels(
+        self, range_data, settings_file
+    ):
+        at = _run(range_data, settings_file)
+
+        control = at.segmented_control(key="rp_rc_sensitivity")
+        assert control.options == ["High", "Medium", "Low"]
+        assert control.value == "medium"
+        assert "at most 0.5 times as widely" in _texts(at.caption)
+
+    def test_sensitivity_survives_a_new_session(self, range_data, settings_file):
         _save(settings_file, selected_variables=["age"])
         at = _run(range_data, settings_file)
 
-        at.segmented_control(key="rp_rc_threshold").set_value(65).run()
+        at.segmented_control(key="rp_rc_sensitivity").set_value("low").run()
         assert not at.exception
         assert "0.35 times as widely" in _texts(at.caption)
 
         new_session = _run(range_data, settings_file)
 
-        assert new_session.segmented_control(key="rp_rc_threshold").value == 65
+        assert new_session.segmented_control(key="rp_rc_sensitivity").value == "low"
         table = new_session.dataframe(key="rp_rc_enumerators").value
         assert table["Flag"].tolist()[0] == "Moderate"
 
@@ -674,3 +744,57 @@ class TestCategoricalTab:
         with open(settings_file) as f:
             saved = json.load(f)["enumerators"]["response_patterns"]
         assert saved["categorical_threshold"] == 20
+
+
+class TestBucketLabel:
+    @pytest.mark.parametrize(
+        ("width", "expected"),
+        [
+            (2, "1 to <3"),
+            (9.8, "1.00 to <10.80"),
+            (0.25, "1.00 to <1.25"),
+            (0.005, "1.000 to <1.005"),
+        ],
+    )
+    def test_precision_follows_the_width(self, width, expected):
+        assert _bucket_label(1, 1 + width, width) == expected
+
+    def test_continuous_neighbours_share_no_value(self):
+        edges = [1 + 2 * i for i in range(11)]
+
+        labels = [_bucket_label(lo, hi, 2) for lo, hi in pairwise(edges)]
+
+        assert labels[:2] == ["1 to <3", "3 to <5"]
+
+    def test_float_error_does_not_add_decimals(self):
+        width = 0.1 * 30  # 3.0000000000000004
+
+        assert _bucket_label(0, width, width) == "0 to <3"
+
+    def test_narrow_buckets_get_unique_labels(self):
+        width = 0.005
+        edges = [i * width for i in range(11)]
+
+        labels = [_bucket_label(lo, hi, width) for lo, hi in pairwise(edges)]
+
+        assert len(set(labels)) == 10
+
+    @pytest.mark.parametrize(
+        ("low", "high", "expected"),
+        [
+            (10, 20, "10 to 19"),
+            (7, 8, "7"),
+            (-5, -2, "-5 to -3"),
+            (1000, 2000, "1,000 to 1,999"),
+        ],
+    )
+    def test_whole_number_buckets_show_the_values_they_hold(self, low, high, expected):
+        assert _bucket_label(low, high, high - low, whole=True) == expected
+
+    def test_whole_number_neighbours_share_no_value(self):
+        edges = [1 + 10 * i for i in range(11)]
+
+        labels = [_bucket_label(lo, hi, 10, whole=True) for lo, hi in pairwise(edges)]
+
+        assert labels[:2] == ["1 to 10", "11 to 20"]
+        assert len(set(labels)) == 10

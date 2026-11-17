@@ -10,15 +10,17 @@ from datasure.checks import missing
 from datasure.checks.enumerator.models import TAB_NAME
 from datasure.checks.enumerator.response_patterns.compute import (
     CATEGORICAL_POINTS_PER_PP,
-    SHIFT_POINTS_PER_SD,
     infer_variable_types,
 )
 from datasure.checks.enumerator.response_patterns.models import (
+    DIGIT_PREFERENCE_LEVELS,
     MODERATE_MARGIN,
+    RANGE_COMPRESSION_LEVELS,
     SETTINGS_KEY,
     THRESHOLD_LEVELS,
     VARIABLE_TYPES,
     ResponsePatternSettings,
+    Sensitivity,
 )
 from datasure.utils.settings_utils import (
     load_check_settings,
@@ -30,8 +32,8 @@ logger = logging.getLogger(__name__)
 
 # Session state flag save_check_settings checks before writing the settings
 SAVE_STATE: str = f"{TAB_NAME}_{SETTINGS_KEY}"
-DP_THRESHOLD_KEY = "rp_dp_threshold"
-RC_THRESHOLD_KEY = "rp_rc_threshold"
+DP_SENSITIVITY_KEY = "rp_dp_sensitivity"
+RC_SENSITIVITY_KEY = "rp_rc_sensitivity"
 CAT_THRESHOLD_KEY = "rp_cat_threshold"
 _EDITOR_KEY = "rp_variable_editor"
 _EDITOR_BASE_KEY = "rp_variable_editor_base"
@@ -152,26 +154,42 @@ def _render_variable_editor(
     return selected, overrides
 
 
-def digit_preference_description(threshold: int) -> str:
-    """Explain what flagging Digit Preference at ``threshold`` means."""
-    ratio = f"{1 + threshold / 100:.2f}".rstrip("0").rstrip(".")
-    return (
+# The "x" in a ratio such as 1.5x
+TIMES = "\N{MULTIPLICATION SIGN}"
+
+
+def format_ratio(ratio: float) -> str:
+    """Return ``ratio`` as a multiplier, such as 1.5x or 1.25x."""
+    return f"{ratio:.2f}".rstrip("0").rstrip(".") + TIMES
+
+
+def digit_preference_description(sensitivity: Sensitivity) -> str:
+    """Explain what flagging Digit Preference at ``sensitivity`` means."""
+    level = DIGIT_PREFERENCE_LEVELS[sensitivity]
+    text = (
         f"Flags an enumerator when their answers end in 0 or 5 at least "
-        f"{ratio} times as often as the rest of the team's (score "
-        f"{threshold} or more)."
+        f"{format_ratio(level.ratio)} as often as the rest of the team's."
     )
+    if level.min_responses:
+        text += (
+            f" Small differences need more evidence, so each enumerator needs "
+            f"at least {level.min_responses:,} responses."
+        )
+    return text
 
 
-def range_compression_description(threshold: int) -> str:
-    """Explain what flagging Range Compression at ``threshold`` means."""
-    ratio = f"{1 - threshold / 100:.2f}".rstrip("0").rstrip(".")
-    shift = f"{threshold / SHIFT_POINTS_PER_SD:.1f}"
+def format_sd_ratio(ratio: float) -> str:
+    """Return an SD ratio without trailing zeros, such as 0.5 or 0.65."""
+    return f"{ratio:.2f}".rstrip("0").rstrip(".")
+
+
+def range_compression_description(sensitivity: Sensitivity) -> str:
+    """Explain what flagging Range Compression at ``sensitivity`` means."""
+    ratio = format_sd_ratio(RANGE_COMPRESSION_LEVELS[sensitivity].max_sd_ratio)
     return (
         f"Flags an enumerator when, on any checked variable, their answers "
         f"spread at most {ratio} times as widely as the rest of the team's "
-        f"(SD ratio {ratio} or less), or their average sits about {shift} or "
-        f"more of the team's standard deviations away from the team's (score "
-        f"{threshold} or more)."
+        f"(SD ratio {ratio} or less)."
     )
 
 
@@ -196,6 +214,24 @@ def _render_threshold_level(label: str, key: str, default: int) -> int:
         key=key,
         help="Higher sensitivity flags enumerators at a lower score. "
         f"Enumerators within {MODERATE_MARGIN} points below the threshold "
+        "are marked Moderate.",
+        on_change=mark_settings_changed,
+    )
+
+
+def _render_sensitivity(
+    label: str, key: str, default: Sensitivity, levels: dict
+) -> Sensitivity:
+    """Render a check's sensitivity ``levels`` and return the chosen one."""
+    return st.segmented_control(
+        label,
+        options=list(levels),
+        format_func=lambda s: levels[s].label,
+        default=default,
+        required=True,
+        key=key,
+        help="Higher sensitivity flags smaller differences from the rest of "
+        "the team. Enumerators who would be flagged one level more sensitive "
         "are marked Moderate.",
         on_change=mark_settings_changed,
     )
@@ -252,7 +288,9 @@ def response_pattern_settings(
                 value=saved.min_sample,
                 key="rp_min_sample",
                 help="Enumerators with fewer non-missing responses than this "
-                "get no result (N/A).",
+                "get no result (N/A). Digit Preference's High sensitivity "
+                "raises this to "
+                f"{DIGIT_PREFERENCE_LEVELS[Sensitivity.HIGH].min_responses:,}.",
                 on_change=mark_settings_changed,
             )
         with c2:
@@ -267,19 +305,21 @@ def response_pattern_settings(
                 on_change=mark_settings_changed,
             )
 
-        st.markdown("**Flag thresholds**")
-        dp_threshold = _render_threshold_level(
+        st.markdown("**Flag sensitivity**")
+        dp_sensitivity = _render_sensitivity(
             "Digit Preference sensitivity",
-            DP_THRESHOLD_KEY,
-            saved.digit_preference_threshold,
+            DP_SENSITIVITY_KEY,
+            saved.digit_preference_sensitivity,
+            DIGIT_PREFERENCE_LEVELS,
         )
-        st.caption(digit_preference_description(dp_threshold))
-        rc_threshold = _render_threshold_level(
+        st.caption(digit_preference_description(dp_sensitivity))
+        rc_sensitivity = _render_sensitivity(
             "Range Compression sensitivity",
-            RC_THRESHOLD_KEY,
-            saved.range_compression_threshold,
+            RC_SENSITIVITY_KEY,
+            saved.range_compression_sensitivity,
+            RANGE_COMPRESSION_LEVELS,
         )
-        st.caption(range_compression_description(rc_threshold))
+        st.caption(range_compression_description(rc_sensitivity))
         cat_threshold = _render_threshold_level(
             "Categorical Response Patterns sensitivity",
             CAT_THRESHOLD_KEY,
@@ -293,8 +333,8 @@ def response_pattern_settings(
             "type_overrides": overrides,
             "min_sample": int(min_sample),
             "warn_sample": int(warn_sample),
-            "digit_preference_threshold": dp_threshold,
-            "range_compression_threshold": rc_threshold,
+            "digit_preference_sensitivity": dp_sensitivity,
+            "range_compression_sensitivity": rc_sensitivity,
             "categorical_threshold": cat_threshold,
         }
     )
