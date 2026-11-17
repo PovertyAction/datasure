@@ -441,15 +441,25 @@ def _bucket_label(low: float, high: float, width: float, whole: bool = False) ->
     A bucket holds values from ``low`` up to, but not including, ``high``.
     With ``whole`` (whole-number edges and answers) it shows the whole
     numbers it holds, "10 to 19" or just "7", so neighbouring labels never
-    share a value. Otherwise edges get at least 2 decimals under a width of
-    1, and enough to show a whole width, so labels stay unique.
+    share a value. Otherwise it reads "1.50 to <3.50": the upper edge is
+    marked as excluded, and edges keep their decimals unless both are whole
+    numbers and the width is at least 1. Under a width of 1 they get at
+    least 2 decimals, and enough to show a whole width, so labels stay unique.
     """
     if whole:
         first, last = round(low), round(high) - 1
         return f"{first:,}" if first == last else f"{first:,} to {last:,}"
-    decimals = 0 if width >= 1 else max(2, math.ceil(-math.log10(width)))
+    if width >= 1:
+        decimals = 0 if _is_whole_number(low) and _is_whole_number(high) else 2
+    else:
+        decimals = max(2, math.ceil(-math.log10(width)))
     spec = f",.{decimals}f"
-    return f"{low:{spec}} to {high:{spec}}"
+    return f"{low:{spec}} to <{high:{spec}}"
+
+
+def _is_whole_number(value: float) -> bool:
+    """Return whether ``value`` is a whole number, allowing float error."""
+    return math.isclose(value, round(value), abs_tol=1e-9)
 
 
 def _range_histogram(v: RangeVariable, enumerator: str, compressed: bool) -> go.Figure:

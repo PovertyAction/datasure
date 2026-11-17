@@ -578,13 +578,26 @@ class TestBucketLabel:
     @pytest.mark.parametrize(
         ("width", "expected"),
         [
-            (9.8, "1 to 11"),
-            (0.25, "1.00 to 1.25"),
-            (0.005, "1.000 to 1.005"),
+            (2, "1 to <3"),
+            (9.8, "1.00 to <10.80"),
+            (0.25, "1.00 to <1.25"),
+            (0.005, "1.000 to <1.005"),
         ],
     )
     def test_precision_follows_the_width(self, width, expected):
         assert _bucket_label(1, 1 + width, width) == expected
+
+    def test_continuous_neighbours_share_no_value(self):
+        edges = [1 + 2 * i for i in range(11)]
+
+        labels = [_bucket_label(lo, hi, 2) for lo, hi in pairwise(edges)]
+
+        assert labels[:2] == ["1 to <3", "3 to <5"]
+
+    def test_float_error_does_not_add_decimals(self):
+        width = 0.1 * 30  # 3.0000000000000004
+
+        assert _bucket_label(0, width, width) == "0 to <3"
 
     def test_narrow_buckets_get_unique_labels(self):
         width = 0.005
