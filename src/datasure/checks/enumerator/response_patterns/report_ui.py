@@ -4,6 +4,10 @@ Renders the results model from ``compute_response_patterns``; no scoring
 happens here.
 """
 
+import math
+from collections.abc import Callable
+from itertools import pairwise
+
 import pandas as pd
 import plotly.graph_objects as go
 import polars as pl
@@ -17,25 +21,37 @@ from datasure.checks.enumerator.response_patterns.compute import (
 )
 from datasure.checks.enumerator.response_patterns.models import (
     DIGIT_PREFERENCE_LEVELS,
+    RANGE_COMPRESSION_LEVELS,
     Badge,
     CheckCondition,
     DigitPreferenceEnumerator,
     DigitPreferenceResult,
     PageCondition,
+    RangeCompressionEnumerator,
+    RangeCompressionResult,
+    RangeVariable,
     ResponsePatternResults,
+    ResponsePatternSettings,
     SampleBand,
+    Sensitivity,
 )
 from datasure.checks.enumerator.response_patterns.settings_ui import (
     format_ratio,
+    format_sd_ratio,
     response_pattern_settings,
 )
 from datasure.utils.ui_utils import metric_row, section_header, styled_dataframe
 
 DP_TABLE_KEY = "rp_dp_enumerators"
+RC_TABLE_KEY = "rp_rc_enumerators"
+# Prefix of each enumerator's Range Compression variable selector
+RC_VARIABLE_KEY = "rp_rc_variable"
 
 # Digit Preference table column names
 _ROUND_PCT_COL = "Ending in 0 or 5 (%)"
 _TEAM_PCT_COL = "Rest of team (%)"
+# Range Compression table column and detail metric name
+_SD_RATIO_LABEL = "SD ratio"
 
 BADGE_COLORS: dict[Badge, str] = {
     Badge.NA: "gray",
@@ -45,13 +61,16 @@ BADGE_COLORS: dict[Badge, str] = {
 }
 
 # IPA brand colors: the emphasis palette (Dark Green against Dark Gray) for
-# enumerator against team, Red-Orange for flagged rounding
+# enumerator against team, Red-Orange for flagged rounding and Yellow (amber)
+# for flagged compression
 IPA_DARK_GREEN = "#155240"
 IPA_DARK_GRAY = "#c9c9c8"
 IPA_RED_ORANGE = "#f26529"
+IPA_YELLOW = "#f5cb57"
 _ENUM_COLOR = IPA_DARK_GREEN
 _TEAM_COLOR = IPA_DARK_GRAY
 _FLAG_COLOR = IPA_RED_ORANGE
+_COMPRESSED_COLOR = IPA_YELLOW
 
 # Flag cells in the enumerator table look like the st.badge pills on the
 # Summary page's check health table: Streamlit's light-theme badge text
@@ -64,6 +83,10 @@ _PILL_STYLES: dict[str, tuple[str, str]] = {
 }
 
 INFO_ICON = ":material/info:"
+_CAPPED_NOTE = (
+    "Each side's values are capped at its own 5th and 95th percentiles "
+    "first, so one extreme answer can't dominate."
+)
 LOW_SAMPLE_WARNING = "Low sample size — treat results with caution."
 
 # Enumerators shown before the table scrolls
@@ -109,42 +132,20 @@ def _flag_style(flag: str) -> str:
     return f"color: {text}; background-color: {fill}; font-weight: 600"
 
 
-# =============================================================================
-# Digit Preference
-# =============================================================================
+def _render_enumerator_table(
+    table: pd.DataFrame,
+    formats: dict[str, str | Callable[[float], str]],
+    column_help: dict[str, str],
+    key: str,
+) -> int:
+    """Render a check's enumerator table and return the selected row.
 
-
-def _render_digit_table(
-    enumerators: list[DigitPreferenceEnumerator], key: str
-) -> DigitPreferenceEnumerator:
-    """Render the enumerator table and return the selected enumerator.
-
-    Rows are sorted highest ratio first and the first row is selected by
-    default, so the detail shows the enumerator most in need of attention.
-    Clearing the selection falls back to that enumerator.
+    Rows come sorted most notable ratio first and the first row is
+    selected by default, so the detail shows the enumerator most in need of
+    attention. Clearing the selection falls back to that enumerator.
     """
-    table = pd.DataFrame(
-        {
-            "Enumerator": [e.enumerator for e in enumerators],
-            "Interviews": [e.interviews for e in enumerators],
-            "Responses": [e.n_responses for e in enumerators],
-            _ROUND_PCT_COL: [e.enum_pct for e in enumerators],
-            _TEAM_PCT_COL: [e.team_pct for e in enumerators],
-            "Ratio": [e.ratio for e in enumerators],
-            "Flag": [e.badge.value for e in enumerators],
-        }
-    )
-    styler = table.style.map(_flag_style, subset=["Flag"]).format(
-        {
-            "Interviews": "{:,}",
-            "Responses": "{:,}",
-            _ROUND_PCT_COL: "{:.1f}",
-            _TEAM_PCT_COL: "{:.1f}",
-            "Ratio": format_ratio,
-        },
-        na_rep="—",
-    )
-    visible_rows = min(len(enumerators), _TABLE_ROWS)
+    styler = table.style.map(_flag_style, subset=["Flag"]).format(formats, na_rep="—")
+    visible_rows = min(len(table), _TABLE_ROWS)
     event = styled_dataframe(
         styler,
         key=key,
@@ -156,24 +157,104 @@ def _render_digit_table(
         height=_ROW_HEIGHT * (visible_rows + 1) + 3,
         column_config={
             "Enumerator": st.column_config.TextColumn(pinned=True),
-            "Responses": st.column_config.Column(
-                help="Non-missing responses pooled across the checked variables"
-            ),
-            _ROUND_PCT_COL: st.column_config.Column(
-                help="Share of the enumerator's responses ending in 0 or 5"
-            ),
-            _TEAM_PCT_COL: st.column_config.Column(
-                help="The same share for every other enumerator"
-            ),
-            "Ratio": st.column_config.Column(
-                help="How many times as often the enumerator's answers end in "
-                f"0 or 5 as the rest of the team's. {format_ratio(1)} is the same "
-                "rate."
-            ),
+            **{
+                col: st.column_config.Column(help=text)
+                for col, text in column_help.items()
+            },
         },
     )
     rows = event.selection.rows
-    return enumerators[rows[0] if rows else 0]
+    return rows[0] if rows else 0
+
+
+def _render_check_conditions(
+    result: DigitPreferenceResult | RangeCompressionResult,
+    check: str,
+    min_responses: int,
+    to_lower: str = "the minimum",
+) -> bool:
+    """Show why a check can't list enumerators; return True if it can't.
+
+    ``to_lower`` names the settings that would let more enumerators reach
+    ``min_responses``.
+    """
+    if result.condition == CheckCondition.NO_APPLICABLE_VARIABLES:
+        st.info(
+            "None of the selected variables are numeric (integer or "
+            f"continuous), so {check} has nothing to check. Select numeric "
+            "variables or change their type in the settings above.",
+            icon=INFO_ICON,
+        )
+        return True
+    _render_skipped(result.skipped_variables)
+    if result.condition == CheckCondition.NO_ELIGIBLE_VARIABLES:
+        st.info(
+            f"None of the selected numeric variables can be checked for "
+            f"{check}. See the notes above.",
+            icon=INFO_ICON,
+        )
+        return True
+    if result.condition == CheckCondition.ALL_BELOW_MINIMUM:
+        st.info(
+            f"Every enumerator has fewer than {min_responses:,} responses on "
+            f"the selected variables, so {check} can't run yet. Lower "
+            f"{to_lower} in the settings above, or wait for more data.",
+            icon=INFO_ICON,
+        )
+        return True
+    return False
+
+
+def _render_range_sensitivity(sensitivity: Sensitivity) -> None:
+    """Note Range Compression's sensitivity and where to change it."""
+    level = RANGE_COMPRESSION_LEVELS[sensitivity]
+    st.caption(
+        f"Sensitivity: **{level.label}** (flagged at an SD ratio of "
+        f"{format_sd_ratio(level.max_sd_ratio)} or less). Change it in the "
+        "settings above."
+    )
+
+
+# =============================================================================
+# Digit Preference
+# =============================================================================
+
+
+def _render_digit_table(
+    enumerators: list[DigitPreferenceEnumerator], key: str
+) -> DigitPreferenceEnumerator:
+    """Render the enumerator table and return the selected enumerator."""
+    table = pd.DataFrame(
+        {
+            "Enumerator": [e.enumerator for e in enumerators],
+            "Interviews": [e.interviews for e in enumerators],
+            "Responses": [e.n_responses for e in enumerators],
+            _ROUND_PCT_COL: [e.enum_pct for e in enumerators],
+            _TEAM_PCT_COL: [e.team_pct for e in enumerators],
+            "Ratio": [e.ratio for e in enumerators],
+            "Flag": [e.badge.value for e in enumerators],
+        }
+    )
+    row = _render_enumerator_table(
+        table,
+        {
+            "Interviews": "{:,}",
+            "Responses": "{:,}",
+            _ROUND_PCT_COL: "{:.1f}",
+            _TEAM_PCT_COL: "{:.1f}",
+            "Ratio": format_ratio,
+        },
+        {
+            "Responses": "Non-missing responses pooled across the checked variables",
+            _ROUND_PCT_COL: "Share of the enumerator's responses ending in 0 or 5",
+            _TEAM_PCT_COL: "The same share for every other enumerator",
+            "Ratio": "How many times as often the enumerator's answers end in "
+            f"0 or 5 as the rest of the team's. {format_ratio(1)} is the same "
+            "rate.",
+        },
+        key,
+    )
+    return enumerators[row]
 
 
 def _digit_chart(e: DigitPreferenceEnumerator, flagged: bool) -> go.Figure:
@@ -241,8 +322,12 @@ def _render_digit_detail(e: DigitPreferenceEnumerator, min_responses: int) -> No
     )
     metric_row(
         [
-            (f"Ending in 0 or 5: {e.enumerator}", f"{e.enum_pct:.1f}%"),
-            ("Ending in 0 or 5: rest of team", f"{e.team_pct:.1f}%"),
+            (
+                "Ending in 0 or 5",
+                f"{e.enum_pct:.1f}%",
+                f"Share of {e.enumerator}'s responses ending in 0 or 5",
+                f"Rest of team: {e.team_pct:.1f}%",
+            ),
             (
                 "Responses",
                 f"{e.n_responses:,}",
@@ -287,36 +372,252 @@ def _render_digit_preference(result: DigitPreferenceResult) -> None:
         f"the rest of the team's rate or more, with at least "
         f"{result.min_responses:,} responses). Change it in the settings above."
     )
-
-    if result.condition == CheckCondition.NO_APPLICABLE_VARIABLES:
-        st.info(
-            "None of the selected variables are numeric (integer or "
-            "continuous), so Digit Preference has nothing to check. Select "
-            "numeric variables or change their type in the settings above.",
-            icon=INFO_ICON,
-        )
-        return
-    _render_skipped(result.skipped_variables)
-    if result.condition == CheckCondition.NO_ELIGIBLE_VARIABLES:
-        st.info(
-            "None of the selected numeric variables can be checked for digit "
-            "preference. See the notes above.",
-            icon=INFO_ICON,
-        )
-        return
-    if result.condition == CheckCondition.ALL_BELOW_MINIMUM:
-        st.info(
-            f"Every enumerator has fewer than {result.min_responses:,} "
-            "responses on the selected variables, so Digit Preference can't "
-            "run yet. Lower the minimum or the sensitivity in the settings "
-            "above, or wait for more data.",
-            icon=INFO_ICON,
-        )
+    if _render_check_conditions(
+        result,
+        "Digit Preference",
+        result.min_responses,
+        "the minimum or the sensitivity",
+    ):
         return
 
     st.caption("Select an enumerator to see their terminal digits.")
     selected = _render_digit_table(result.enumerators, DP_TABLE_KEY)
     _render_digit_detail(selected, result.min_responses)
+
+
+# =============================================================================
+# Range Compression
+# =============================================================================
+
+
+def _num(value: float) -> str:
+    """Format a mean or standard deviation for a tile."""
+    return f"{value:,.2f}"
+
+
+def _render_range_table(
+    enumerators: list[RangeCompressionEnumerator], key: str
+) -> RangeCompressionEnumerator:
+    """Render the enumerator table and return the selected enumerator."""
+    top = [e.variables[0] if e.variables else None for e in enumerators]
+    table = pd.DataFrame(
+        {
+            "Enumerator": [e.enumerator for e in enumerators],
+            "Interviews": [e.interviews for e in enumerators],
+            "Top variable": [v.variable if v else None for v in top],
+            _SD_RATIO_LABEL: [e.sd_ratio for e in enumerators],
+            "Flag": [e.badge.value for e in enumerators],
+        }
+    )
+    row = _render_enumerator_table(
+        table,
+        {"Interviews": "{:,}", _SD_RATIO_LABEL: "{:.2f}"},
+        {
+            "Top variable": "The variable where the enumerator's spread is "
+            "narrowest compared with the rest of the team's",
+            _SD_RATIO_LABEL: "The enumerator's standard deviation on the top "
+            "variable over the rest of the team's. Under 1 means a narrower "
+            "spread.",
+        },
+        key,
+    )
+    return enumerators[row]
+
+
+@st.cache_data(ttl=300)
+def _cached_response_patterns(
+    data: pl.DataFrame,
+    settings: ResponsePatternSettings,
+    enumerator_col: str,
+    missing_codes: pl.DataFrame | None,
+) -> ResponsePatternResults:
+    """Return ``compute_response_patterns``, cached for 5 minutes.
+
+    The section is a fragment, so row clicks and selectbox changes rerun it;
+    caching keeps those from recomputing every check. Settings and missing
+    codes are arguments, so editing them changes the cache key.
+    """
+    return compute_response_patterns(data, settings, enumerator_col, missing_codes)
+
+
+def _bucket_label(low: float, high: float, width: float, whole: bool = False) -> str:
+    """Return a histogram bucket's range, as precise as its width needs.
+
+    A bucket holds values from ``low`` up to, but not including, ``high``.
+    With ``whole`` (whole-number edges and answers) it shows the whole
+    numbers it holds, "10 to 19" or just "7", so neighbouring labels never
+    share a value. Otherwise it reads "1.50 to <3.50": the upper edge is
+    marked as excluded, and edges keep their decimals unless both are whole
+    numbers and the width is at least 1. Under a width of 1 they get at
+    least 2 decimals, and enough to show a whole width, so labels stay unique.
+    """
+    if whole:
+        first, last = round(low), round(high) - 1
+        return f"{first:,}" if first == last else f"{first:,} to {last:,}"
+    if width >= 1:
+        decimals = 0 if _is_whole_number(low) and _is_whole_number(high) else 2
+    else:
+        decimals = max(2, math.ceil(-math.log10(width)))
+    spec = f",.{decimals}f"
+    return f"{low:{spec}} to <{high:{spec}}"
+
+
+def _is_whole_number(value: float) -> bool:
+    """Return whether ``value`` is a whole number, allowing float error."""
+    return math.isclose(value, round(value), abs_tol=1e-9)
+
+
+def _range_histogram(v: RangeVariable, enumerator: str, compressed: bool) -> go.Figure:
+    """Return the histogram of one variable, enumerator against the team.
+
+    Both series share the buckets; the enumerator's bars are amber when they
+    are flagged for compression on this variable.
+    """
+    edges = v.bucket_edges
+    width = edges[1] - edges[0]
+    buckets = [
+        _bucket_label(lo, hi, width, v.whole_numbers) for lo, hi in pairwise(edges)
+    ]
+    hover = "%{x}: %{y:.1f}%<extra></extra>"
+    fig = go.Figure(
+        [
+            go.Bar(
+                x=buckets,
+                y=v.enum_bucket_pct,
+                name=enumerator,
+                marker_color=[_COMPRESSED_COLOR if compressed else _ENUM_COLOR]
+                * len(buckets),
+                hovertemplate=hover,
+            ),
+            go.Bar(
+                x=buckets,
+                y=v.team_bucket_pct,
+                name="Rest of team",
+                marker_color=_TEAM_COLOR,
+                hovertemplate=hover,
+            ),
+        ]
+    )
+    fig.update_layout(
+        barmode="group",
+        xaxis_title=f"{v.variable} (the end buckets include values beyond "
+        "the rest of the team's 1st and 99th percentiles)",
+        yaxis_title="Share of responses (%)",
+        yaxis={"range": [0, 100], "fixedrange": True, "ticksuffix": "%"},
+        legend={"orientation": "h", "y": 1.12},
+        margin={"t": 30, "b": 40, "l": 40, "r": 10},
+        height=340,
+    )
+    return fig
+
+
+def _variables_text(names: list[str]) -> str:
+    """Return bold variable names joined for a sentence."""
+    bold = [f"**{n}**" for n in names]
+    return bold[0] if len(bold) == 1 else ", ".join(bold[:-1]) + " and " + bold[-1]
+
+
+def _render_range_verdict(e: RangeCompressionEnumerator) -> None:
+    """Show whether the enumerator's answers are compressed."""
+    if e.flagged_variables:
+        st.warning(
+            f"{e.enumerator}'s answers on "
+            f"{_variables_text(e.flagged_variables)} spread much less "
+            "widely than the rest of the team's. They may be anchoring on a "
+            "typical value; consider reviewing their interviews.",
+            icon=":material/flag:",
+        )
+    elif e.badge == Badge.MODERATE:
+        st.info(
+            f"{e.enumerator}'s answers on **{e.variables[0].variable}** spread "
+            "somewhat less widely than the rest of the team's: one level "
+            "higher sensitivity would flag them. Keep an eye on their next "
+            "interviews.",
+            icon=":material/visibility:",
+        )
+    else:
+        st.success(
+            f"{e.enumerator}'s answers are spread like the rest of the team's.",
+            icon=":material/check_circle:",
+        )
+
+
+def _render_range_detail(e: RangeCompressionEnumerator, min_sample: int) -> None:
+    """Render one enumerator's Range Compression detail panel."""
+    if e.sample_band == SampleBand.INSUFFICIENT:
+        st.info(
+            f"Not enough responses to run this check for {e.enumerator}: "
+            f"every checked variable has fewer than the {min_sample:,} needed.",
+            icon=INFO_ICON,
+        )
+        return
+    if e.sd_ratio is None:
+        st.info(
+            f"None of the checked variables could be compared for {e.enumerator}.",
+            icon=INFO_ICON,
+        )
+        _render_skipped(e.skipped_variables)
+        return
+
+    st.markdown(
+        f"##### {e.enumerator}: spread · SD ratio **{e.sd_ratio:.2f}** on "
+        f"**{e.variables[0].variable}** {_badge(e.badge)}"
+    )
+    _render_range_verdict(e)
+    variable = st.selectbox(
+        "Variable",
+        options=[v.variable for v in e.variables],
+        key=f"{RC_VARIABLE_KEY}_{e.enumerator}",
+        help="Variables are listed lowest SD ratio first.",
+    )
+    v = next(v for v in e.variables if v.variable == variable)
+    metric_row(
+        [
+            (
+                "Mean",
+                _num(v.enum_mean),
+                f"{e.enumerator}'s mean on {v.variable}. {_CAPPED_NOTE}",
+                f"Rest of team: {_num(v.team_mean)}",
+            ),
+            (
+                "Standard deviation",
+                _num(v.enum_sd),
+                f"{e.enumerator}'s standard deviation on {v.variable}. {_CAPPED_NOTE}",
+                f"Rest of team: {_num(v.team_sd)}",
+            ),
+            (
+                _SD_RATIO_LABEL,
+                f"{v.sd_ratio:.2f}",
+                "Under 1 means a narrower spread than the rest of the team's",
+            ),
+        ]
+    )
+    # The heading and verdict describe the scoring variable, so keep its
+    # caution even when the selected variable has enough responses
+    if SampleBand.LOW in (e.sample_band, v.sample_band):
+        st.warning(LOW_SAMPLE_WARNING, icon=":material/warning:")
+    st.plotly_chart(
+        _range_histogram(v, e.enumerator, v.variable in e.flagged_variables),
+        width="stretch",
+    )
+    _render_skipped(e.skipped_variables)
+
+
+def _render_range_compression(result: RangeCompressionResult, min_sample: int) -> None:
+    """Render the Range Compression sub-tab."""
+    st.markdown(
+        "Are an enumerator's numeric answers spread much less widely than the "
+        "rest of the team's? Each selected integer and continuous variable is "
+        "compared separately, by the ratio of the enumerator's standard "
+        "deviation to the rest of the team's; the lowest ratio counts."
+    )
+    _render_range_sensitivity(result.sensitivity)
+    if _render_check_conditions(result, "Range Compression", min_sample):
+        return
+
+    st.caption("Select an enumerator to see their answers' spread.")
+    selected = _render_range_table(result.enumerators, RC_TABLE_KEY)
+    _render_range_detail(selected, min_sample)
 
 
 # =============================================================================
@@ -377,13 +678,15 @@ def render_response_patterns(
     settings = response_pattern_settings(
         settings_file, data, _excluded_columns(enumerator_settings), missing_codes
     )
-    results: ResponsePatternResults = compute_response_patterns(
+    results: ResponsePatternResults = _cached_response_patterns(
         data, settings, enumerator_col, missing_codes
     )
     if results.condition is not None:
         _render_page_condition(results.condition)
         return
 
-    (digit_tab,) = st.tabs(["Digit Preference"])
+    digit_tab, range_tab = st.tabs(["Digit Preference", "Range Compression"])
     with digit_tab:
         _render_digit_preference(results.digit_preference)
+    with range_tab:
+        _render_range_compression(results.range_compression, results.min_sample)

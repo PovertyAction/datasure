@@ -1,10 +1,16 @@
 """AppTest tests for the Response Patterns section (seam B)."""
 
 import json
+from itertools import pairwise
 
 import polars as pl
 import pytest
 from streamlit.testing.v1 import AppTest
+
+from datasure.checks.enumerator.response_patterns.report_ui import (
+    LOW_SAMPLE_WARNING,
+    _bucket_label,
+)
 
 ENUM = "enum"
 
@@ -165,6 +171,20 @@ class TestEnumeratorTable:
             at.warning
         )
 
+    def test_tiles_show_one_number_with_the_team_underneath(
+        self, team_data, settings_file
+    ):
+        _save(settings_file, selected_variables=["age"])
+
+        at = _run(team_data, settings_file)
+
+        tab = next(t for t in at.tabs if t.label == "Digit Preference")
+        rounding, responses = tab.metric
+        assert [m.label for m in tab.metric] == ["Ending in 0 or 5", "Responses"]
+        assert rounding.value == "60.0%"
+        assert rounding.delta == "Rest of team: 20.0%"
+        assert responses.value == "40"
+
     def test_chart_y_axis_always_spans_0_to_100(self, team_data, settings_file):
         _save(settings_file, selected_variables=["age"])
 
@@ -211,6 +231,17 @@ class TestVariableEditor:
         assert editor["Variable"].tolist() == ["age", "choice"]
         assert editor["Inferred type"].tolist() == ["integer", "categorical"]
         assert not editor["Select"].any()
+
+    def test_gps_columns_are_not_listed(self, team_data, settings_file):
+        data = team_data.with_columns(
+            pl.lit(26.15).alias("household_latitude"),
+            pl.lit(85.9).alias("household_longitude"),
+        )
+
+        at = _run(data, settings_file)
+
+        editor = at.dataframe(key="rp_variable_editor").value
+        assert editor["Variable"].tolist() == ["age", "choice"]
 
     def test_infers_types_after_masking_missing_codes(self, team_data, settings_file):
         # -99.5 is a missing code, so the remaining values are all whole
@@ -349,3 +380,271 @@ class TestFlagSensitivity:
 
         table = at.dataframe(key="rp_dp_enumerators").value
         assert table["Flag"].tolist()[0] == "High"
+
+
+# =============================================================================
+# Range Compression
+# =============================================================================
+
+SPREAD = [float(v) for v in range(30, 70)]
+
+
+def _narrowed(values: list[float], factor: float, shift: float = 0.0) -> list[float]:
+    mean = sum(values) / len(values)
+    return [mean + (v - mean) * factor + shift for v in values]
+
+
+def _range_frame(values_by_enum: dict[str, list[float]]) -> pl.DataFrame:
+    """Build the section's data with ``income`` and a matching ``age``."""
+    frame = _frame(values_by_enum).with_columns(pl.col("age").cast(pl.Float64))
+    return frame.with_columns((pl.col("age") * 100).alias("income"))
+
+
+@pytest.fixture
+def range_data():
+    # "anchor" answers within half the spread of the others
+    return _range_frame(
+        {"anchor": _narrowed(SPREAD, 0.4), "steady": SPREAD, "careful": SPREAD}
+    )
+
+
+def _range_tab(at: AppTest):
+    return next(t for t in at.tabs if t.label == "Range Compression")
+
+
+class TestRangeCompressionTab:
+    def test_lists_enumerators_by_sd_ratio_with_flags(self, range_data, settings_file):
+        _save(settings_file, selected_variables=["age"])
+
+        at = _run(range_data, settings_file)
+
+        table = at.dataframe(key="rp_rc_enumerators").value
+        assert table["Enumerator"].tolist()[0] == "anchor"
+        assert table["Flag"].tolist()[0] == "High"
+        assert table["SD ratio"].tolist()[0] == pytest.approx(0.4, abs=0.01)
+        assert "Score" not in table.columns
+        assert "Signal" not in table.columns
+
+    def test_lowest_sd_ratio_shows_tiles_and_compression_verdict(
+        self, range_data, settings_file
+    ):
+        _save(settings_file, selected_variables=["age"])
+
+        at = _run(range_data, settings_file)
+
+        tab = _range_tab(at)
+        assert "anchor: spread · SD ratio **0.40** on **age**" in _texts(tab.markdown)
+        assert "spread much less widely" in _texts(tab.warning)
+        mean, sd, ratio = tab.metric
+        assert [m.label for m in tab.metric] == [
+            "Mean",
+            "Standard deviation",
+            "SD ratio",
+        ]
+        # One number per tile; the rest of the team's sits underneath
+        assert mean.value == "49.50"
+        assert mean.delta == "Rest of team: 49.50"
+        team_sd = float(sd.delta.removeprefix("Rest of team: "))
+        assert float(sd.value) / team_sd == pytest.approx(0.4, abs=0.01)
+        assert ratio.value.startswith("0.4")
+
+    def test_compressed_bars_are_amber_on_shared_buckets(
+        self, range_data, settings_file
+    ):
+        _save(settings_file, selected_variables=["age"])
+
+        at = _run(range_data, settings_file)
+
+        spec = json.loads(at.get("plotly_chart")[1].proto.spec)
+        enum_bars, team_bars = spec["data"]
+        assert team_bars["name"] == "Rest of team"
+        assert enum_bars["x"] == team_bars["x"]
+        assert len(enum_bars["x"]) == 10
+        assert set(enum_bars["marker"]["color"]) == {"#f5cb57"}
+
+    def test_shifted_mean_alone_is_not_flagged(self, settings_file):
+        data = _range_frame(
+            {
+                "high": _narrowed(SPREAD, 1, shift=30),
+                "steady": SPREAD,
+                "careful": SPREAD,
+            }
+        )
+        _save(settings_file, selected_variables=["age"])
+
+        at = _run(data, settings_file)
+        # high widens the others' rest of team, so it doesn't sort first
+        names = at.dataframe(key="rp_rc_enumerators").value["Enumerator"].tolist()
+        at.session_state["rp_rc_enumerators"] = {
+            "selection": {"rows": [names.index("high")], "columns": [], "cells": []}
+        }
+        at.run()
+
+        tab = _range_tab(at)
+        assert "high: spread · SD ratio **1.0" in _texts(tab.markdown)
+        assert not tab.warning
+        assert "high's answers are spread like the rest" in _texts(tab.success)
+        spec = json.loads(at.get("plotly_chart")[1].proto.spec)
+        assert set(spec["data"][0]["marker"]["color"]) == {"#155240"}
+
+    def test_moderate_enumerator_gets_a_caution(self, settings_file):
+        # SD ratio 0.6: flagged at High, Moderate at Medium
+        data = _range_frame(
+            {"mid": _narrowed(SPREAD, 0.6), "steady": SPREAD, "careful": SPREAD}
+        )
+        _save(settings_file, selected_variables=["age"])
+
+        at = _run(data, settings_file)
+
+        tab = _range_tab(at)
+        assert "Moderate" in _texts(tab.markdown)
+        assert "mid's answers on **age** spread somewhat less widely" in _texts(
+            tab.info
+        )
+        assert not tab.success
+
+    def test_switching_the_variable_redraws_the_histogram(
+        self, range_data, settings_file
+    ):
+        _save(settings_file, selected_variables=["age", "income"])
+        at = _run(range_data, settings_file)
+        (select,) = _range_tab(at).selectbox
+        assert select.value == "age"
+
+        select.set_value("income").run()
+
+        assert not at.exception
+        spec = json.loads(at.get("plotly_chart")[1].proto.spec)
+        assert "income" in spec["layout"]["xaxis"]["title"]["text"]
+
+    def test_low_sample_warning_follows_the_scoring_variable(self, settings_file):
+        # anchor answers age only 20 times (low sample) but income 40 times;
+        # age still sets the flag, so its caution stays on income too
+        data = _range_frame(
+            {"anchor": SPREAD, "steady": SPREAD, "careful": SPREAD}
+        ).with_columns(
+            age=pl.Series(_narrowed(SPREAD, 0.4)[:20] + [None] * 20 + SPREAD * 2)
+        )
+        _save(settings_file, selected_variables=["age", "income"])
+        at = _run(data, settings_file)
+        assert LOW_SAMPLE_WARNING in _texts(_range_tab(at).warning)
+
+        _range_tab(at).selectbox[0].set_value("income").run()
+
+        assert not at.exception
+        tab = _range_tab(at)
+        assert "on **age**" in _texts(tab.markdown)
+        assert LOW_SAMPLE_WARNING in _texts(tab.warning)
+
+    def test_selecting_a_row_shows_that_enumerator(self, range_data, settings_file):
+        _save(settings_file, selected_variables=["age"])
+        at = _run(range_data, settings_file)
+
+        at.session_state["rp_rc_enumerators"] = {
+            "selection": {"rows": [2], "columns": [], "cells": []}
+        }
+        at.run()
+
+        assert not at.exception
+        assert "spread like the rest of the team's" in _texts(_range_tab(at).success)
+
+    def test_team_without_variation_is_noted(self, settings_file):
+        # varied's rest of team is flat, which always answers 50
+        data = _range_frame({"varied": SPREAD, "flat": [50.0] * 40})
+        _save(settings_file, selected_variables=["age"])
+        at = _run(data, settings_file)
+
+        at.session_state["rp_rc_enumerators"] = {
+            "selection": {"rows": [1], "columns": [], "cells": []}
+        }
+        at.run()
+
+        assert not at.exception
+        assert "no variation in the rest of the team's responses" in _texts(
+            _range_tab(at).caption
+        )
+
+    def test_no_applicable_variables(self, range_data, settings_file):
+        _save(settings_file, selected_variables=["choice"])
+
+        at = _run(range_data, settings_file)
+
+        assert "Range Compression has nothing to check" in _texts(_range_tab(at).info)
+
+    def test_sensitivity_defaults_to_medium_with_three_levels(
+        self, range_data, settings_file
+    ):
+        at = _run(range_data, settings_file)
+
+        control = at.segmented_control(key="rp_rc_sensitivity")
+        assert control.options == ["High", "Medium", "Low"]
+        assert control.value == "medium"
+        assert "at most 0.5 times as widely" in _texts(at.caption)
+
+    def test_sensitivity_survives_a_new_session(self, range_data, settings_file):
+        _save(settings_file, selected_variables=["age"])
+        at = _run(range_data, settings_file)
+
+        at.segmented_control(key="rp_rc_sensitivity").set_value("low").run()
+        assert not at.exception
+        assert "0.35 times as widely" in _texts(at.caption)
+
+        new_session = _run(range_data, settings_file)
+
+        assert new_session.segmented_control(key="rp_rc_sensitivity").value == "low"
+        table = new_session.dataframe(key="rp_rc_enumerators").value
+        assert table["Flag"].tolist()[0] == "Moderate"
+
+
+class TestBucketLabel:
+    @pytest.mark.parametrize(
+        ("width", "expected"),
+        [
+            (2, "1 to <3"),
+            (9.8, "1.00 to <10.80"),
+            (0.25, "1.00 to <1.25"),
+            (0.005, "1.000 to <1.005"),
+        ],
+    )
+    def test_precision_follows_the_width(self, width, expected):
+        assert _bucket_label(1, 1 + width, width) == expected
+
+    def test_continuous_neighbours_share_no_value(self):
+        edges = [1 + 2 * i for i in range(11)]
+
+        labels = [_bucket_label(lo, hi, 2) for lo, hi in pairwise(edges)]
+
+        assert labels[:2] == ["1 to <3", "3 to <5"]
+
+    def test_float_error_does_not_add_decimals(self):
+        width = 0.1 * 30  # 3.0000000000000004
+
+        assert _bucket_label(0, width, width) == "0 to <3"
+
+    def test_narrow_buckets_get_unique_labels(self):
+        width = 0.005
+        edges = [i * width for i in range(11)]
+
+        labels = [_bucket_label(lo, hi, width) for lo, hi in pairwise(edges)]
+
+        assert len(set(labels)) == 10
+
+    @pytest.mark.parametrize(
+        ("low", "high", "expected"),
+        [
+            (10, 20, "10 to 19"),
+            (7, 8, "7"),
+            (-5, -2, "-5 to -3"),
+            (1000, 2000, "1,000 to 1,999"),
+        ],
+    )
+    def test_whole_number_buckets_show_the_values_they_hold(self, low, high, expected):
+        assert _bucket_label(low, high, high - low, whole=True) == expected
+
+    def test_whole_number_neighbours_share_no_value(self):
+        edges = [1 + 10 * i for i in range(11)]
+
+        labels = [_bucket_label(lo, hi, 10, whole=True) for lo, hi in pairwise(edges)]
+
+        assert labels[:2] == ["1 to 10", "11 to 20"]
+        assert len(set(labels)) == 10

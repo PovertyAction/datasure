@@ -14,7 +14,7 @@ NUMERIC_TYPES: tuple[str, ...] = ("integer", "continuous")
 
 
 class Sensitivity(StrEnum):
-    """How readily Digit Preference flags an enumerator."""
+    """How readily a check flags an enumerator."""
 
     HIGH = "high"
     MEDIUM = "medium"
@@ -52,6 +52,31 @@ DIGIT_PREFERENCE_LEVELS: dict[Sensitivity, SensitivityLevel] = {
 DEFAULT_SENSITIVITY: Sensitivity = Sensitivity.MEDIUM
 
 
+class RangeCompressionLevel(BaseModel):
+    """What a Range Compression sensitivity level flags.
+
+    Attributes
+    ----------
+    label : str
+        The level's name in the UI.
+    max_sd_ratio : float
+        An enumerator is flagged when, on any checked variable, their
+        standard deviation is at most this many times the rest of the team's.
+    """
+
+    label: str
+    max_sd_ratio: float
+
+
+# Most sensitive first. A Moderate badge means the enumerator would be flagged
+# one level more sensitive.
+RANGE_COMPRESSION_LEVELS: dict[Sensitivity, RangeCompressionLevel] = {
+    Sensitivity.HIGH: RangeCompressionLevel(label="High", max_sd_ratio=0.65),
+    Sensitivity.MEDIUM: RangeCompressionLevel(label="Medium", max_sd_ratio=0.5),
+    Sensitivity.LOW: RangeCompressionLevel(label="Low", max_sd_ratio=0.35),
+}
+
+
 class ResponsePatternSettings(BaseModel):
     """Settings for the Response Patterns section, saved per project.
 
@@ -68,6 +93,9 @@ class ResponsePatternSettings(BaseModel):
     digit_preference_sensitivity : Sensitivity
         How readily Digit Preference flags an enumerator, one of
         ``DIGIT_PREFERENCE_LEVELS``.
+    range_compression_sensitivity : Sensitivity
+        How readily Range Compression flags an enumerator, one of
+        ``RANGE_COMPRESSION_LEVELS``.
     """
 
     selected_variables: list[str] = Field(default_factory=list)
@@ -75,6 +103,7 @@ class ResponsePatternSettings(BaseModel):
     min_sample: int = Field(15, ge=1)
     warn_sample: int = Field(30, ge=1)
     digit_preference_sensitivity: Sensitivity = DEFAULT_SENSITIVITY
+    range_compression_sensitivity: Sensitivity = DEFAULT_SENSITIVITY
 
 
 class SampleBand(StrEnum):
@@ -102,6 +131,7 @@ class SkipReason(StrEnum):
     NO_VARIATION = "no variation across the project"
     RANGE_UNDER_10 = "observed range under 10"
     BELOW_MINIMUM = "fewer responses than the minimum"
+    TEAM_NO_VARIATION = "no variation in the rest of the team's responses"
 
 
 class PageCondition(StrEnum):
@@ -156,6 +186,63 @@ class DigitPreferenceResult(BaseModel):
     enumerators: list[DigitPreferenceEnumerator] = Field(default_factory=list)
 
 
+class RangeVariable(BaseModel):
+    """One enumerator's Range Compression result on one variable.
+
+    ``team`` always means the rest of the team. Means and SDs are taken
+    after capping each side's values at its own 5th and 95th percentiles,
+    so one extreme answer can't dominate them. ``sd_ratio`` is
+    ``enum_sd / team_sd``, rounded to two decimals as shown. The histogram
+    uses the uncapped values and shares ``bucket_edges`` between the two
+    series; values beyond the team's 1st and 99th percentiles count in the
+    end buckets. Each bucket includes its lower edge and excludes its upper
+    one. ``whole_numbers`` is True when every answer is a whole number; the
+    edges are then whole numbers too. Bucket shares are percentages.
+    """
+
+    variable: str
+    n_responses: int
+    sample_band: SampleBand
+    enum_mean: float
+    team_mean: float
+    enum_sd: float
+    team_sd: float
+    sd_ratio: float
+    bucket_edges: list[float]
+    whole_numbers: bool = False
+    enum_bucket_pct: list[float]
+    team_bucket_pct: list[float]
+
+
+class RangeCompressionEnumerator(BaseModel):
+    """One enumerator's Range Compression result.
+
+    ``variables`` are sorted lowest SD ratio first. The SD ratio and sample
+    band are those of ``variables[0]``, the most compressed variable, so one
+    problem question is never averaged away. ``flagged_variables`` name the
+    variables whose SD ratio is at or below the sensitivity level's.
+    """
+
+    enumerator: str
+    interviews: int
+    sample_band: SampleBand
+    sd_ratio: float | None
+    badge: Badge
+    variables: list[RangeVariable] = Field(default_factory=list)
+    flagged_variables: list[str] = Field(default_factory=list)
+    skipped_variables: dict[str, SkipReason] = Field(default_factory=dict)
+
+
+class RangeCompressionResult(BaseModel):
+    """Range Compression results, enumerators sorted lowest SD ratio first."""
+
+    sensitivity: Sensitivity
+    condition: CheckCondition | None = None
+    variables: list[str] = Field(default_factory=list)
+    skipped_variables: dict[str, SkipReason] = Field(default_factory=dict)
+    enumerators: list[RangeCompressionEnumerator] = Field(default_factory=list)
+
+
 class ResponsePatternResults(BaseModel):
     """Everything the Response Patterns section shows."""
 
@@ -163,3 +250,4 @@ class ResponsePatternResults(BaseModel):
     min_sample: int
     warn_sample: int
     digit_preference: DigitPreferenceResult | None = None
+    range_compression: RangeCompressionResult | None = None
