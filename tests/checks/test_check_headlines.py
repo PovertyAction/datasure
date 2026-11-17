@@ -6,6 +6,7 @@ number the check shows.
 """
 
 import json
+import sys
 from datetime import date, datetime, timedelta
 from unittest.mock import MagicMock, patch
 
@@ -587,50 +588,60 @@ class TestEnumeratorHeadline:
 
     @staticmethod
     def _report_overview(data: pl.DataFrame, setting_file: str, config: dict):
-        """Run the Enumerator report; return its overview metrics by label.
+        """Run the Enumerator report; return its overview figures by label.
 
-        Streamlit and the sections after the overview are mocked; the
-        settings panel returns the page configuration as its settings.
+        Each figure is its value and its note. Streamlit and the sections
+        after the overview are mocked; the settings panel returns the page
+        configuration as its settings.
         """
-        metrics: dict[str, str] = {}
+        figures: dict[str, tuple[str, str | None]] = {}
 
         def column(*_args, **_kwargs):
             col = MagicMock()
-            col.metric.side_effect = lambda label, value, **_: metrics.update(
-                {label: value}
+            col.metric.side_effect = lambda label, value, **kw: figures.update(
+                {label: (value, kw.get("delta"))}
             )
             return col
 
         st = MagicMock()
+        st.segmented_control.return_value = None
+        st.selectbox.return_value = None
         st.columns.side_effect = lambda spec, **_: [
             column() for _ in range(spec if isinstance(spec, int) else len(spec))
         ]
-        with patch.multiple(
-            enumerator_ui,
-            st=st,
-            demo_callout=MagicMock(),
-            enumerator_report_settings=MagicMock(
-                return_value=enumerator_ui.EnumeratorSettings(**config)
+        with (
+            patch.dict(sys.modules, {"streamlit": st}),
+            patch.multiple(
+                enumerator_ui,
+                st=st,
+                demo_callout=MagicMock(),
+                enumerator_report_settings=MagicMock(
+                    return_value=enumerator_ui.EnumeratorSettings(**config)
+                ),
+                compute_enumerator_summary=MagicMock(return_value=pl.DataFrame()),
+                cached_response_patterns=MagicMock(return_value=None),
+                _render_needs_attention=MagicMock(),
+                _render_enumerator_summary_table=MagicMock(),
+                _render_enumerator_productivity=MagicMock(),
+                _render_enumerator_statistics_table=MagicMock(),
+                _render_enumerator_statistics_overtime_table=MagicMock(),
+                render_response_patterns=MagicMock(),
             ),
-            _render_enumerator_summary_table=MagicMock(),
-            _render_enumerator_productivity=MagicMock(),
-            _render_enumerator_statistics=MagicMock(),
-            _render_enumerator_statistics_overtime=MagicMock(),
         ):
             enumerator_ui.enumerator_report(
                 PROJECT_ID, data, setting_file, config, get_df_columns(data)
             )
-        return metrics
+        return figures
 
     def test_matches_the_enumerator_report_overview(self, setting_file):
         data = self._data(["e1", "e1", "e2", "e3", "e4"], [1, 20, 2, 30, 3])
 
         headline = enumerator_headline(PROJECT_ID, data, setting_file, self.CONFIG)
-        shown = self._report_overview(data, setting_file, self.CONFIG)
-
-        active = shown[r"\# of Active enumerators (past 7 days)"]
-        total = shown[r"\# of enumerators"]
-        assert headline.value == f"{active} / {total}"
+        active, of_total = self._report_overview(data, setting_file, self.CONFIG)[
+            "Active in the past 7 days"
+        ]
+        assert of_total == "of 4 enumerators"
+        assert headline.value == f"{active} / 4"
 
 
 class TestBackchecksHeadline:

@@ -9,6 +9,33 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Enumerator Report: Needs attention**: a list near the top of the report
+  of the enumerators any check singles out, each with Flagged or Watch
+  reasons
+  - `checks/enumerator/attention.py` (Streamlit-free): `attention_rows`
+    merges reasons from the report's own numbers (activity, interview
+    length, missing answers, consent, completion, form version), Response
+    Patterns' High and Moderate badges, and other checks' `IssueCounts`.
+    Rules compare each enumerator with the rest of the team in view; rates
+    need `MIN_SUBMISSIONS` (5). Thresholds are module constants
+  - `checks/enumerator_flags.py`: one `by_enumerator` function per check
+    (Duplicates, Outliers & Constraints, GPS Checks, Backchecks), named by
+    the new `CheckEntry.by_enumerator` field. `catalogue.enumerator_other_checks`
+    asks the ready checks, caches each on the page fingerprint and returns
+    a failing check as an error the list shows
+  - New per-check counters: `duplicates.duplicate_records_by_enumerator`,
+    `outliers.report_ui.outliers_by_enumerator`,
+    `GPSOutlierSummary.unreviewed_by`,
+    `backchecks.report_ui.backcheck_mismatches_by_enumerator` (mismatches
+    attributed to the backchecker or respondent left out)
+  - `health.cached_headline` returns a headline with its basis from Summary's
+    cache; `health.cached_on_page` caches other page-level results with it
+- **Enumerator Report: page controls**: one Period, Week starts on and Team
+  control for every section (`report_ui._render_page_controls`). The Team
+  filter narrows every section's data. The period and week start that
+  Productivity and Statistics Over Time saved separately move to the page's
+  `period` and `week_start` view state on first load
+  (`_adopt_shared_controls`)
 - **Response Patterns: Digit Preference** (#418, part of #158): a new
   section at the bottom of the Enumerator Report, in
   `checks/enumerator/response_patterns/` (`models.py`, `compute.py`,
@@ -279,6 +306,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Enumerator Report overview**: four figures with comparisons
+  (`compute.compute_overview_figures`, `models.OverviewFigures`) replace
+  the eight metrics. The old Fewest/Highest/Average "enumerator submissions"
+  were per enumerator per day; the new figure uses each enumerator's total
+- **Enumerator Report layout**: a caption names the columns in use; one
+  message replaces the five "requires a date and enumerator" boxes;
+  sections use `section_header` and `st.divider()`; selector labels lose
+  "Select ..:"; `response_patterns.report_ui.cached_response_patterns` is
+  public so the list reuses the section's cache
 - **Progress page**: Rebuilt as the settings expander
   (`progress_report_settings`, with "Reset filters" beside it, as on
   Summary), then a header shown on every tab (`display_progress_header`:
@@ -342,6 +378,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Enumerator Summary**: % Consent and % Completed showed the 0 to 1 rate
+  with a % sign (0.94%); they now use the `percent` format (94%)
 - **Progress targets**: Targets entered on the Progress page did not load
   back, so the page config's survey target always won on reload
   - Root cause: `progress_report_settings` saved the targets under `target`

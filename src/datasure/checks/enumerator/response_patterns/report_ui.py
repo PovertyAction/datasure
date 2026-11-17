@@ -449,7 +449,7 @@ def _render_range_table(
 
 
 @st.cache_data(ttl=300)
-def _cached_response_patterns(
+def cached_response_patterns(
     data: pl.DataFrame,
     settings: ResponsePatternSettings,
     enumerator_col: str,
@@ -883,7 +883,7 @@ def render_response_patterns(
     settings = response_pattern_settings(
         settings_file, data, _excluded_columns(enumerator_settings), missing_codes
     )
-    results: ResponsePatternResults = _cached_response_patterns(
+    results: ResponsePatternResults = cached_response_patterns(
         data, settings, enumerator_col, missing_codes
     )
     if results.condition is not None:

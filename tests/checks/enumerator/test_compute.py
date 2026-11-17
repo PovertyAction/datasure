@@ -15,6 +15,7 @@ from datasure.checks.enumerator.compute import (
     compute_enumerator_statistics_overtime,
     compute_enumerator_summary,
     compute_latest_submission_date,
+    compute_overview_figures,
 )
 
 # ============================================
@@ -1101,3 +1102,71 @@ def test_compute_enumerator_statistics_overtime_counts_codes_as_missing(
 
     assert e2_values("mean") == [pytest.approx(73 / 3)]
     assert e2_values("missing") == [pytest.approx(0.5)]
+
+
+# ============================================
+# OVERVIEW FIGURES
+# ============================================
+
+OVERVIEW_TODAY = date(2026, 11, 17)
+OVERVIEW_DATA = pl.DataFrame(
+    {
+        "enum": ["a", "a", "b", "c", "c", "c"],
+        "team": ["x", "x", "y", "y", "y", "y"],
+        "when": [
+            datetime(2026, 11, 16, 9),
+            datetime(2026, 11, 10, 9),
+            datetime(2026, 11, 5, 9),
+            datetime(2026, 11, 15, 9),
+            datetime(2026, 11, 11, 9),
+            datetime(2026, 11, 1, 9),
+        ],
+        "dur": [600, 1200, 1800, 2400, 3000, 60],
+    }
+)
+
+
+def test_overview_figures_compare_the_past_7_days_with_the_7_before():
+    """The past 7 days run up to today; the 7 before end the day before."""
+    figures = compute_overview_figures(
+        OVERVIEW_DATA, "when", "enum", "team", today=OVERVIEW_TODAY
+    )
+
+    assert figures.num_enumerators == 3
+    assert figures.num_active == 2
+    assert figures.num_teams == 2
+    # 11 to 17 Nov: a on the 16th, c on the 15th and 11th.
+    assert figures.submissions_past_week == 3
+    # 4 to 10 Nov: a on the 10th, b on the 5th.
+    assert figures.submissions_week_before == 2
+
+
+def test_overview_figures_name_the_fewest_and_most_submissions():
+    """Per enumerator totals, not per day, give the median and the range."""
+    figures = compute_overview_figures(
+        OVERVIEW_DATA, "when", "enum", today=OVERVIEW_TODAY
+    )
+
+    assert figures.median_per_enumerator == 2
+    assert figures.fewest == ("b", 1)
+    assert figures.most == ("c", 3)
+    assert figures.num_teams is None
+    assert figures.duration_minutes is None
+
+
+def test_overview_figures_give_interview_length_quartiles_in_minutes():
+    figures = compute_overview_figures(
+        OVERVIEW_DATA,
+        "when",
+        "enum",
+        duration="dur",
+        duration_unit="seconds",
+        today=OVERVIEW_TODAY,
+    )
+
+    assert figures.duration_minutes == pytest.approx((12.5, 25.0, 37.5))
+
+
+def test_overview_figures_need_data():
+    with pytest.raises(ValueError, match="empty"):
+        compute_overview_figures(OVERVIEW_DATA.clear(), "when", "enum")

@@ -275,3 +275,39 @@ class EnumeratorOverviewMetrics(BaseModel):
     max_submissions: int = Field(ge=0)
     avg_submissions: int = Field(ge=0)
     pct_active_enumerators: str
+
+
+class OverviewFigures(BaseModel):
+    """The four figures at the top of the enumerator report.
+
+    Attributes
+    ----------
+    num_enumerators : int
+        Enumerators in the data.
+    num_active : int
+        Enumerators with a submission in the past 7 days, counted from today.
+    num_teams : int | None
+        Teams in the data; None without a team column.
+    submissions_past_week : int
+        Submissions dated in the past 7 days, counted from today.
+    submissions_week_before : int
+        Submissions dated in the 7 days before that.
+    median_per_enumerator : float
+        The median of each enumerator's total submissions.
+    fewest, most : tuple[str, int]
+        The enumerator with the fewest and the most submissions, and the
+        count.
+    duration_minutes : tuple[float, float, float] | None
+        The interview length's lower quartile, median and upper quartile,
+        in minutes; None without a duration column.
+    """
+
+    num_enumerators: int = Field(ge=0)
+    num_active: int = Field(ge=0)
+    num_teams: int | None = None
+    submissions_past_week: int = Field(ge=0)
+    submissions_week_before: int = Field(ge=0)
+    median_per_enumerator: float = Field(ge=0)
+    fewest: tuple[str, int]
+    most: tuple[str, int]
+    duration_minutes: tuple[float, float, float] | None = None

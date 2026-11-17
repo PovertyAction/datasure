@@ -19,6 +19,7 @@ from datasure.checks.backchecks.attribution import (
     backcheck_key_col,
     build_attribution_entries,
     count_error_sources,
+    excused_mismatches,
     is_mismatch,
     load_attribution_log,
     mark_error_sources,
@@ -905,6 +906,83 @@ def backchecks_headline(
         outstanding=unattributed,
         resolved=sum(sources.values()) - unattributed,
     )
+
+
+@dataclass(frozen=True)
+class EnumeratorMismatches:
+    """Each enumerator's backcheck mismatches and values compared.
+
+    Attributes
+    ----------
+    mismatches : dict[str, int]
+        Mismatches by enumerator, less those attributed to the backchecker
+        or the respondent, as the enumerator-adjusted error rate counts them.
+    compared : dict[str, int]
+        Values compared by enumerator.
+    """
+
+    mismatches: dict[str, int]
+    compared: dict[str, int]
+
+
+def backcheck_mismatches_by_enumerator(
+    project_id: str,
+    page_name_id: str,
+    survey_data: pl.DataFrame,
+    backcheck_data: pl.DataFrame,
+    setting_file: str,
+    config: dict,
+    enumerator: str,
+) -> EnumeratorMismatches | None:
+    """Return each enumerator's mismatches behind the total error rate.
+
+    The comparisons are those of the Backchecks tab's "Error Rate (Total)",
+    with the saved settings, columns and Records to Include filters. Each is
+    matched to the survey submission's enumerator by the Survey KEY. Takes
+    the parameters of `backchecks_headline` and the page's enumerator
+    column, which may differ from the one the Backchecks settings name.
+
+    Returns
+    -------
+    EnumeratorMismatches | None
+        None when no values were compared or the Survey KEY or enumerator
+        column is not in the survey data.
+
+    Raises
+    ------
+    ValueError
+        If the saved settings no longer fit the data.
+    """
+    total = _total_errors(
+        project_id, page_name_id, survey_data, backcheck_data, setting_file, config
+    )
+    key = None if total is None else total.survey_key
+    if total is None or not {key, enumerator} <= set(survey_data.columns):
+        return None
+    if key not in total.comparisons.columns:
+        return None
+    owners = (
+        survey_data.select(
+            pl.col(key).cast(pl.String),
+            pl.col(enumerator).cast(pl.String).alias("_enumerator"),
+        )
+        .drop_nulls()
+        .unique(subset=key)
+    )
+    marked = mark_error_sources(
+        total.comparisons, load_attribution_log(project_id, page_name_id), key
+    ).with_columns(pl.col(key).cast(pl.String))
+    mismatches: dict[str, int] = {}
+    compared: dict[str, int] = {}
+    for (name,), rows in marked.join(owners, on=key, how="inner").group_by(
+        "_enumerator"
+    ):
+        rates = compute_overall_error_rates(rows)
+        if not rates or not rates[0].compared:
+            continue
+        compared[name] = rates[0].compared
+        mismatches[name] = rates[0].mismatches - excused_mismatches(rows, "enumerator")
+    return EnumeratorMismatches(mismatches, compared)
 
 
 def _unattributed(

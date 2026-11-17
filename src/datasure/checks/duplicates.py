@@ -2739,3 +2739,43 @@ def duplicates_delta(
         else _resolved_in_period(project_id, alias, basis, window)
     )
     return CheckDelta(_ids_in_period(basis, window), resolved=resolved)
+
+
+def duplicate_records_by_enumerator(
+    basis: DuplicatesBasis, enumerator: str
+) -> dict[str, int]:
+    """Count each enumerator's records that hold an unresolved duplicate ID.
+
+    Counted on the records `duplicates_headline` counts its IDs on
+    (``basis.records``: corrected, filtered by the saved Records to Include),
+    so the numbers agree with the check. Records with no enumerator are left
+    out.
+
+    Parameters
+    ----------
+    basis : DuplicatesBasis
+        The duplicates headline's basis.
+    enumerator : str
+        The enumerator column.
+
+    Returns
+    -------
+    dict[str, int]
+        Records by enumerator, as text; enumerators with none are left out.
+    """
+    records, id_col = basis.records, basis.id_col
+    if not id_col or not {id_col, enumerator} <= set(records.columns):
+        return {}
+    duplicated = find_duplicate_groups(records, id_col, None, None)["id"]
+    if duplicated.is_empty():
+        return {}
+    held = records.filter(
+        pl.col(id_col).cast(pl.String).is_in(duplicated.cast(pl.String).implode())
+    )
+    counts = (
+        held.select(pl.col(enumerator).cast(pl.String).alias("enumerator"))
+        .drop_nulls()
+        .group_by("enumerator")
+        .len()
+    )
+    return dict(counts.iter_rows())

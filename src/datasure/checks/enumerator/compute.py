@@ -7,9 +7,11 @@ import polars as pl
 import streamlit as st
 
 from datasure.checks import missing
+from datasure.checks.enumerator.attention import duration_minutes
 from datasure.checks.enumerator.models import (
     WEEKDAY_OFFSET_TO_NUMERIC,
     EnumeratorOverviewMetrics,
+    OverviewFigures,
 )
 from datasure.utils.duckdb_utils import load_missing_codes_from_db
 
@@ -237,6 +239,91 @@ def compute_enumerator_overview(
         max_submissions=max_submissions,
         avg_submissions=avg_submissions,
         pct_active_enumerators=pct_active_enumerators,
+    )
+
+
+def compute_overview_figures(
+    data: pl.DataFrame,
+    date: str,
+    enumerator: str,
+    team: str | None = None,
+    duration: str | None = None,
+    duration_unit: str | None = None,
+    today: dt_date | None = None,
+) -> OverviewFigures:
+    """Compute the four figures at the top of the enumerator report.
+
+    Each figure carries what it is compared with: active enumerators out of
+    all, the past 7 days' submissions against the 7 days before, the median
+    submissions per enumerator with who has the fewest and the most, and the
+    median interview length with its middle half.
+
+    Parameters
+    ----------
+    data : pl.DataFrame
+        Survey data with at least one row.
+    date : str
+        Date column name.
+    enumerator : str
+        Enumerator column name.
+    team : str | None
+        Team column name, for the team count.
+    duration : str | None
+        Duration column name, for the interview length.
+    duration_unit : str | None
+        The duration's unit: "seconds", "minutes" or "hours"; anything else
+        is read as seconds.
+    today : date | None
+        The day the past 7 days count back from. Defaults to the system clock.
+
+    Raises
+    ------
+    ValueError
+        If ``data`` is empty.
+    """
+    if data.is_empty():
+        raise ValueError("Input data is empty. Cannot compute the overview figures.")
+    if today is None:
+        today = dt_date.today()
+    days = data.select(
+        pl.col(enumerator).cast(pl.String).alias("enumerator"),
+        pl.col(date).dt.date().alias("day"),
+    )
+    week_start = today - timedelta(days=6)
+    before_start = week_start - timedelta(days=7)
+    in_week = pl.col("day").is_between(week_start, today)
+    in_before = pl.col("day").is_between(before_start, week_start - timedelta(days=1))
+
+    totals = (
+        days.drop_nulls("enumerator")
+        .group_by("enumerator")
+        .len()
+        .sort(["len", "enumerator"])
+    )
+    fewest = totals.row(0)
+    most = totals.sort(["len", "enumerator"], descending=[True, False]).row(0)
+
+    length_minutes = None
+    if duration and duration in data.columns:
+        lengths = data[duration].cast(pl.Float64, strict=False).drop_nulls()
+        if not lengths.is_empty():
+            length_minutes = tuple(
+                duration_minutes(
+                    float(lengths.quantile(q, interpolation="linear")), duration_unit
+                )
+                for q in (0.25, 0.5, 0.75)
+            )
+
+    return OverviewFigures(
+        num_enumerators=totals.height,
+        num_active=days.filter(in_week)["enumerator"].drop_nulls().n_unique(),
+        num_teams=data[team].n_unique() if team and team in data.columns else None,
+        submissions_past_week=days.filter(in_week).height,
+        submissions_week_before=days.filter(in_before).height,
+        median_per_enumerator=float(totals["len"].median()),
+        fewest=(fewest[0], int(fewest[1])),
+        most=(most[0], int(most[1])),
+        duration_minutes=length_minutes,
     )
 
 

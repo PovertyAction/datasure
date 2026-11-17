@@ -9,12 +9,13 @@ catalogue, so adding an entry here is the only change needed for a new check
 to appear.
 """
 
+import logging
 from collections.abc import Callable, Hashable
 from dataclasses import dataclass
 from datetime import date
 from functools import partial
 
-from datasure.checks import health_deltas
+from datasure.checks import enumerator_flags, health_deltas
 from datasure.checks.backchecks.report_ui import (
     backchecks_headline,
     backchecks_report,
@@ -36,6 +37,7 @@ from datasure.checks.duplicates import (
     duplicates_report,
     duplicates_status,
 )
+from datasure.checks.enumerator.attention import IssueCounts, OtherChecks
 from datasure.checks.enumerator.report_ui import (
     enumerator_headline,
     enumerator_report,
@@ -51,6 +53,7 @@ from datasure.checks.gpschecks.report_ui import (
 from datasure.checks.headline import CheckHeadline
 from datasure.checks.health import (
     Delta,
+    cached_on_page,
     health_rows,
     render_comparison_period,
     render_health_header,
@@ -92,6 +95,8 @@ from datasure.utils.navigation import (
 )
 from datasure.utils.navigations_utils import demo_callout
 from datasure.utils.onboarding_utils import demo_output_onboarding
+
+logger = logging.getLogger(__name__)
 
 OVERVIEW = "Overview"
 DATA_INTEGRITY = "Data integrity"
@@ -152,6 +157,11 @@ class CheckEntry:
         check's Auto-Clustering sliders. Summary's cached numbers are keyed
         on page data and settings without view state, so these are added to
         the check's key. None for headlines that ignore view state.
+    by_enumerator : ByEnumerator | None
+        The check's outstanding issues by enumerator, from the context and
+        the page's enumerator column, for the Enumerator page's "Needs
+        attention" list (see `enumerator_flags`). None for checks whose
+        issues are not counted by enumerator.
     """
 
     slug: str
@@ -166,6 +176,10 @@ class CheckEntry:
     setup_hint: str = SET_UP_BELOW
     delta: Delta | None = None
     headline_view: Callable[[CheckContext], Hashable] | None = None
+    by_enumerator: "ByEnumerator | None" = None
+
+
+ByEnumerator = Callable[[CheckContext, str], tuple[IssueCounts, ...]]
 
 
 def _render_summary(ctx: CheckContext) -> None:
@@ -302,7 +316,43 @@ def _render_enumerator(ctx: CheckContext) -> None:
         ctx.config.setting_file,
         enumerator_config(ctx),
         ctx.survey_columns,
+        other_checks=partial(enumerator_other_checks, ctx),
     )
+
+
+def enumerator_other_checks(ctx: CheckContext, enumerator: str) -> OtherChecks:
+    """Return the other checks' outstanding issues by enumerator.
+
+    Only checks that are ready (set up, with data) are asked, in catalogue
+    order. A check whose numbers cannot be computed is left out and named
+    in ``errors`` with the reason, which the Enumerator page shows under its
+    "Needs attention" list; the other checks still count.
+    """
+    counts: list[IssueCounts] = []
+    errors: list[tuple[str, str]] = []
+    for entry in CHECK_CATALOGUE:
+        if entry.by_enumerator is None:
+            continue
+        status, _ = guarded_status(entry.slug, lambda e=entry: e.status(ctx))
+        if status is not READY.status:
+            continue
+        try:
+            view = entry.headline_view(ctx) if entry.headline_view else None
+            counts.extend(
+                cached_on_page(
+                    ctx,
+                    ("by_enumerator", entry.slug, enumerator, view),
+                    lambda e=entry: e.by_enumerator(ctx, enumerator),
+                )
+            )
+        # UI boundary: one check's numbers must not stop the list or the
+        # other checks. The error is shown under the Enumerator page's "Needs
+        # attention" list (deferred display, see CONTRIBUTING "Error Handling
+        # Conventions").
+        except Exception as exc:
+            logger.exception("Could not count %r issues by enumerator", entry.slug)
+            errors.append((entry.label, f"{type(exc).__name__}: {exc}"))
+    return OtherChecks(tuple(counts), tuple(errors))
 
 
 def _render_backchecks(ctx: CheckContext) -> None:
@@ -520,6 +570,7 @@ CHECK_CATALOGUE: tuple[CheckEntry, ...] = (
         _duplicates_status,
         headline=_duplicates_headline,
         delta=health_deltas.duplicates,
+        by_enumerator=enumerator_flags.duplicates,
     ),
     CheckEntry(
         "outliers",
@@ -531,6 +582,7 @@ CHECK_CATALOGUE: tuple[CheckEntry, ...] = (
         headline=_outliers_headline,
         delta=health_deltas.outliers,
         settings=_outliers_settings,
+        by_enumerator=enumerator_flags.outliers,
     ),
     CheckEntry(
         "gps",
@@ -543,6 +595,7 @@ CHECK_CATALOGUE: tuple[CheckEntry, ...] = (
         delta=health_deltas.gps,
         settings=_gps_settings,
         headline_view=_gps_headline_view,
+        by_enumerator=enumerator_flags.gps,
     ),
     CheckEntry(
         "enumerator",
@@ -565,6 +618,7 @@ CHECK_CATALOGUE: tuple[CheckEntry, ...] = (
         headline=_backchecks_headline,
         delta=health_deltas.backchecks,
         settings=_backchecks_settings,
+        by_enumerator=enumerator_flags.backchecks,
         # The backcheck dataset is chosen and imported on other pages.
         setup_hint="Fix it on the page linked below.",
     ),

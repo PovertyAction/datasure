@@ -452,6 +452,18 @@ class GPSOutlierSummary:
         )
         return self.outliers[flagged]
 
+    def unreviewed_by(self, column: str) -> dict[str, int]:
+        """Count the outstanding outliers by a column of the data, as text.
+
+        For example by enumerator. Empty when the column is not in the data;
+        rows with no value are left out.
+        """
+        unreviewed = self.unreviewed()
+        if column not in unreviewed.columns:
+            return {}
+        counts = unreviewed[column].dropna().astype(str).value_counts()
+        return {str(name): int(count) for name, count in counts.items()}
+
 
 _RESOLUTIONS_SCHEMA = {"KEY": pl.String, "date": pl.Datetime("us")}
 

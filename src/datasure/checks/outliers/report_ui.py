@@ -1721,6 +1721,62 @@ def _on_keys(flags: _ReviewedFlags, keys: pl.Series) -> _ReviewedFlags:
     )
 
 
+def outliers_by_enumerator(
+    basis: OutliersBasis, data: pl.DataFrame, enumerator: str
+) -> tuple[dict[str, int], dict[str, int]]:
+    """Count each enumerator's outstanding outliers and constraint violations.
+
+    Counted as `outliers_headline` counts them, on the flags in ``basis``
+    left after review, so the numbers agree with the check. Each flag's
+    submission is matched to its enumerator by the Survey KEY column.
+
+    Parameters
+    ----------
+    basis : OutliersBasis
+        The outliers headline's basis.
+    data : pl.DataFrame
+        The survey data the basis was computed on.
+    enumerator : str
+        The enumerator column.
+
+    Returns
+    -------
+    tuple[dict[str, int], dict[str, int]]
+        Outliers, then constraint violations, by enumerator as text;
+        enumerators with none are left out. Both empty when the Survey KEY
+        or enumerator column is not in the data.
+    """
+    flags = basis.reviewed
+    key = flags.survey_key
+    if not key or not {key, enumerator} <= set(data.columns):
+        return {}, {}
+    flagged = pl.concat(
+        [
+            frame.select(pl.col(key).cast(pl.String))
+            for frame in (flags.outliers, flags.violations)
+            if not frame.is_empty() and key in frame.columns
+        ]
+        or [pl.DataFrame(schema={key: pl.String})]
+    )[key]
+    owners = (
+        data.select(
+            pl.col(key).cast(pl.String),
+            pl.col(enumerator).cast(pl.String).alias("_enumerator"),
+        )
+        .drop_nulls()
+        .filter(pl.col(key).is_in(flagged.implode()))
+    )
+    outliers: dict[str, int] = {}
+    violations: dict[str, int] = {}
+    for (name,), rows in owners.group_by("_enumerator"):
+        found, broken = _outstanding(_on_keys(flags, rows[key]))
+        if found:
+            outliers[name] = found
+        if broken:
+            violations[name] = broken
+    return outliers, violations
+
+
 def _plural(count: int, noun: str) -> str:
     return f"{count:,} {noun}{'' if count == 1 else 's'}"
 
