@@ -875,6 +875,24 @@ class TestCategoricalGap:
         (question,) = _categorical(results, "A").questions
         assert question.flagged is flagged
 
+    def test_gap_shown_at_the_level_is_flagged(self):
+        # A: 26/40 = 65%; rest of team: 2402/6000 = 40.03%. The gap of
+        # 24.97 points is shown as 25.0, so it meets Medium's 25.
+        data = _frame(
+            {
+                "A": _choices({"yes": 26, "no": 14}),
+                "B": _choices({"yes": 2402, "no": 3598}),
+            }
+        )
+
+        results = compute_response_patterns(data, _settings(), ENUM, None)
+
+        a = _categorical(results, "A")
+        (question,) = a.questions
+        assert a.largest_gap == 25.0
+        assert question.flagged
+        assert a.badge == "High"
+
     def test_baseline_leaves_out_the_enumerator_being_compared(self):
         # A always says yes; B and C split evenly. A's rest of team says yes
         # 50% of the time (gap 50). B's rest of team is A and C, 75% yes
@@ -1032,6 +1050,54 @@ class TestCategoricalOptions:
         (question,) = _categorical(results, "A").questions
         assert [o.option for o in question.options] == ["1", "2", "10"]
         assert results.digit_preference.condition == "no_applicable_variables"
+
+    def test_codes_stored_as_text_are_options_in_value_order(self):
+        # A text missing code such as ".d" leaves a code column typed String
+        data = _frame({"A": ["1", "2", "10", ".d"] * 14, "B": ["2", "10", "1"] * 14})
+        codes = pl.DataFrame({"label": ["Don't know"], "codes": [".d"]})
+
+        results = compute_response_patterns(data, _settings(), ENUM, codes)
+
+        (question,) = _categorical(results, "A").questions
+        assert [o.option for o in question.options] == ["1", "2", "10"]
+
+    def test_text_options_follow_numeric_codes(self):
+        data = _frame({"A": ["10", "2", "dk"] * 14, "B": ["2", "dk", "10"] * 14})
+
+        results = compute_response_patterns(data, _settings(), ENUM, None)
+
+        (question,) = _categorical(results, "A").questions
+        assert [o.option for o in question.options] == ["2", "10", "dk"]
+
+    def test_nan_in_a_float_code_column_is_not_an_option(self):
+        # Blank answers stored as NaN in a float column of whole-number codes
+        nan = float("nan")
+        data = _frame(
+            {
+                "A": [1.0, 2.0] * 20 + [nan] * 30,
+                "B": [1.0, 2.0] * 20,
+            }
+        )
+        settings = _settings(type_overrides={"x": "categorical"})
+
+        results = compute_response_patterns(data, settings, ENUM, None)
+
+        (question,) = _categorical(results, "A").questions
+        assert len(question.options) == 2
+        assert "NaN" not in [o.option for o in question.options]
+        assert question.n_responses == 40
+        assert question.largest_gap == pytest.approx(0)
+
+    def test_nan_does_not_count_as_variation(self):
+        nan = float("nan")
+        data = _frame({"A": [1.0] * 40 + [nan] * 10, "B": [1.0] * 40})
+        settings = _settings(type_overrides={"x": "categorical"})
+
+        results = compute_response_patterns(data, settings, ENUM, None)
+
+        assert results.categorical.skipped_variables == {
+            "x": "no variation across the project"
+        }
 
 
 class TestCategoricalSkipsAndConditions:

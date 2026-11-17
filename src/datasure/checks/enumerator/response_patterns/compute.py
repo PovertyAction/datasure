@@ -64,8 +64,9 @@ HISTOGRAM_BUCKETS: int = 10
 # The histogram spans the rest of the team's 1st to 99th percentile
 HISTOGRAM_QUANTILES: tuple[float, float] = (0.01, 0.99)
 
-# Decimals Categorical gaps are rounded to before comparing them with a level
-_GAP_DECIMALS: int = 6
+# Decimals Categorical gaps are rounded to before comparing them with a level:
+# the precision the report shows them at
+_GAP_DECIMALS: int = 1
 
 
 def is_gps_column(name: str) -> bool:
@@ -559,13 +560,20 @@ def _option_counts(
 ) -> tuple[list[str], dict[str, list[int]]]:
     """Return the options and each enumerator's count of each.
 
-    Options are every value anyone on the team chose, as text, in the order
-    of their values, so numeric codes sort 1, 2, 10 rather than 1, 10, 2.
+    Options are every value anyone on the team chose, as text. Numeric
+    options come first in the order of their values, so codes sort 1, 2, 10
+    rather than 1, 10, 2 even when they are stored as text. Other options
+    follow in text order.
     """
+    option = pl.col(_VALUE).cast(pl.String)
     options = (
-        frame.select(_VALUE, pl.col(_VALUE).cast(pl.String).alias(_OPTION))
+        frame.select(option.alias(_OPTION))
         .unique()
-        .sort(_VALUE)[_OPTION]
+        .sort(
+            pl.col(_OPTION).cast(pl.Float64, strict=False),
+            pl.col(_OPTION),
+            nulls_last=True,
+        )[_OPTION]
         .to_list()
     )
     index = {option: i for i, option in enumerate(options)}
@@ -600,7 +608,7 @@ def _categorical_question(
         return SkipReason.TEAM_NO_RESPONSES
 
     enum_pct, team_pct = _pct(enum_counts), _pct(team_counts)
-    # Rounded so float noise can't drop a gap at a level just below it
+    # Rounded as shown, so a gap shown as 25.0 is flagged at 25
     gaps = [
         round(e - t, _GAP_DECIMALS) for e, t in zip(enum_pct, team_pct, strict=True)
     ]
@@ -688,6 +696,9 @@ def _compute_categorical(
     counts: dict[str, tuple[list[str], dict[str, list[int]]]] = {}
     for var in variables:
         frame = data.select(_ENUM, pl.col(var).alias(_VALUE)).drop_nulls(_VALUE)
+        if frame.schema[_VALUE].is_float():
+            # NaN marks a blank answer, not an option
+            frame = frame.filter(pl.col(_VALUE).is_finite())
         reason = _variation_skip(frame[_VALUE])
         if reason is None:
             counts[var] = _option_counts(frame)
