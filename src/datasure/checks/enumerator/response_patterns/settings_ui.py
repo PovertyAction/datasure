@@ -31,6 +31,7 @@ DP_SENSITIVITY_KEY = "rp_dp_sensitivity"
 RC_SENSITIVITY_KEY = "rp_rc_sensitivity"
 _EDITOR_KEY = "rp_variable_editor"
 _EDITOR_BASE_KEY = "rp_variable_editor_base"
+_INFERRED_TYPE_COL = "Inferred type"
 
 
 def load_response_pattern_settings(settings_file: str) -> ResponsePatternSettings:
@@ -73,7 +74,7 @@ def _editor_frame(
         {
             "Select": [v in saved.selected_variables for v in inferred],
             "Variable": list(inferred),
-            "Inferred type": list(inferred.values()),
+            _INFERRED_TYPE_COL: list(inferred.values()),
             "Type": [saved.type_overrides.get(v, t) for v, t in inferred.items()],
         }
     )
@@ -114,14 +115,14 @@ def _render_variable_editor(
         hide_index=True,
         width="stretch",
         height=min(400, 38 + 35 * max(len(inferred), 1)),
-        disabled=["Variable", "Inferred type"],
+        disabled=["Variable", _INFERRED_TYPE_COL],
         column_config={
             "Select": st.column_config.CheckboxColumn(
                 "Include", help="Check to run the response pattern checks on it"
             ),
             "Variable": st.column_config.TextColumn("Variable"),
-            "Inferred type": st.column_config.TextColumn(
-                "Inferred type",
+            _INFERRED_TYPE_COL: st.column_config.TextColumn(
+                _INFERRED_TYPE_COL,
                 help="Integer if every value is a whole number, otherwise "
                 "continuous. Text columns are categorical.",
             ),
@@ -142,7 +143,7 @@ def _render_variable_editor(
     overrides = {v: t for v, t in saved.type_overrides.items() if v not in columns} | {
         row["Variable"]: row["Type"]
         for row in edited.iter_rows(named=True)
-        if row["Type"] != row["Inferred type"]
+        if row["Type"] != row[_INFERRED_TYPE_COL]
     }
     return selected, overrides
 
