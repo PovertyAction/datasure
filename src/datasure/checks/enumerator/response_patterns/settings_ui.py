@@ -10,6 +10,7 @@ from datasure.checks import missing
 from datasure.checks.enumerator.models import TAB_NAME
 from datasure.checks.enumerator.response_patterns.compute import infer_variable_types
 from datasure.checks.enumerator.response_patterns.models import (
+    CATEGORICAL_LEVELS,
     DIGIT_PREFERENCE_LEVELS,
     RANGE_COMPRESSION_LEVELS,
     SETTINGS_KEY,
@@ -29,6 +30,7 @@ logger = logging.getLogger(__name__)
 SAVE_STATE: str = f"{TAB_NAME}_{SETTINGS_KEY}"
 DP_SENSITIVITY_KEY = "rp_dp_sensitivity"
 RC_SENSITIVITY_KEY = "rp_rc_sensitivity"
+CAT_SENSITIVITY_KEY = "rp_cat_sensitivity"
 _EDITOR_KEY = "rp_variable_editor"
 _EDITOR_BASE_KEY = "rp_variable_editor_base"
 _INFERRED_TYPE_COL = "Inferred type"
@@ -132,7 +134,8 @@ def _render_variable_editor(
                 required=True,
                 help="Change the type if the inferred one is wrong. Digit "
                 "Preference and Range Compression use integer and continuous "
-                "variables.",
+                "variables; Categorical Response Patterns uses categorical "
+                "ones, such as numerically coded single-choice questions.",
             ),
         },
         on_change=mark_settings_changed,
@@ -184,6 +187,16 @@ def range_compression_description(sensitivity: Sensitivity) -> str:
         f"Flags an enumerator when, on any checked variable, their answers "
         f"spread at most {ratio} times as widely as the rest of the team's "
         f"(SD ratio {ratio} or less)."
+    )
+
+
+def categorical_description(sensitivity: Sensitivity) -> str:
+    """Explain what flagging Categorical Response Patterns at ``sensitivity`` means."""
+    gap = f"{CATEGORICAL_LEVELS[sensitivity].min_gap:g}"
+    return (
+        f"Flags an enumerator when, on any checked question, their share of "
+        f"one answer option differs from the rest of the team's by at least "
+        f"{gap} percentage points."
     )
 
 
@@ -288,6 +301,13 @@ def response_pattern_settings(
             RANGE_COMPRESSION_LEVELS,
         )
         st.caption(range_compression_description(rc_sensitivity))
+        cat_sensitivity = _render_sensitivity(
+            "Categorical Response Patterns sensitivity",
+            CAT_SENSITIVITY_KEY,
+            saved.categorical_sensitivity,
+            CATEGORICAL_LEVELS,
+        )
+        st.caption(categorical_description(cat_sensitivity))
 
     settings = saved.model_copy(
         update={
@@ -297,6 +317,7 @@ def response_pattern_settings(
             "warn_sample": int(warn_sample),
             "digit_preference_sensitivity": dp_sensitivity,
             "range_compression_sensitivity": rc_sensitivity,
+            "categorical_sensitivity": cat_sensitivity,
         }
     )
     save_response_pattern_settings(settings_file, settings)

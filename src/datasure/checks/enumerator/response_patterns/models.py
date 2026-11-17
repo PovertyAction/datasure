@@ -77,6 +77,32 @@ RANGE_COMPRESSION_LEVELS: dict[Sensitivity, RangeCompressionLevel] = {
 }
 
 
+class CategoricalLevel(BaseModel):
+    """What a Categorical Response Patterns sensitivity level flags.
+
+    Attributes
+    ----------
+    label : str
+        The level's name in the UI.
+    min_gap : float
+        An enumerator is flagged when, on any checked question, their share
+        of one answer option differs from the rest of the team's by at least
+        this many percentage points.
+    """
+
+    label: str
+    min_gap: float
+
+
+# Most sensitive first. A Moderate badge means the enumerator would be flagged
+# one level more sensitive.
+CATEGORICAL_LEVELS: dict[Sensitivity, CategoricalLevel] = {
+    Sensitivity.HIGH: CategoricalLevel(label="High", min_gap=15),
+    Sensitivity.MEDIUM: CategoricalLevel(label="Medium", min_gap=25),
+    Sensitivity.LOW: CategoricalLevel(label="Low", min_gap=35),
+}
+
+
 class ResponsePatternSettings(BaseModel):
     """Settings for the Response Patterns section, saved per project.
 
@@ -96,6 +122,9 @@ class ResponsePatternSettings(BaseModel):
     range_compression_sensitivity : Sensitivity
         How readily Range Compression flags an enumerator, one of
         ``RANGE_COMPRESSION_LEVELS``.
+    categorical_sensitivity : Sensitivity
+        How readily Categorical Response Patterns flags an enumerator, one of
+        ``CATEGORICAL_LEVELS``.
     """
 
     selected_variables: list[str] = Field(default_factory=list)
@@ -104,6 +133,7 @@ class ResponsePatternSettings(BaseModel):
     warn_sample: int = Field(30, ge=1)
     digit_preference_sensitivity: Sensitivity = DEFAULT_SENSITIVITY
     range_compression_sensitivity: Sensitivity = DEFAULT_SENSITIVITY
+    categorical_sensitivity: Sensitivity = DEFAULT_SENSITIVITY
 
 
 class SampleBand(StrEnum):
@@ -132,6 +162,7 @@ class SkipReason(StrEnum):
     RANGE_UNDER_10 = "observed range under 10"
     BELOW_MINIMUM = "fewer responses than the minimum"
     TEAM_NO_VARIATION = "no variation in the rest of the team's responses"
+    TEAM_NO_RESPONSES = "no responses from the rest of the team"
 
 
 class PageCondition(StrEnum):
@@ -243,6 +274,70 @@ class RangeCompressionResult(BaseModel):
     enumerators: list[RangeCompressionEnumerator] = Field(default_factory=list)
 
 
+class CategoricalOption(BaseModel):
+    """One answer option's share for the enumerator and the rest of the team.
+
+    Shares are percentages; an option one side never chose is 0% there.
+    ``gap`` is the enumerator's share minus the team's, in percentage
+    points. ``flagged`` options have a gap of at least the sensitivity
+    level's either way.
+    """
+
+    option: str
+    enum_pct: float
+    team_pct: float
+    gap: float
+    flagged: bool
+
+
+class CategoricalQuestion(BaseModel):
+    """One enumerator's Categorical Response Patterns result on one question.
+
+    ``options`` are in the order of their values. ``largest_gap`` is the
+    largest absolute gap on any option, in percentage points, and
+    ``scoring_option`` the option it is on, which may be one the enumerator
+    chose less often than the team. ``dominant_option`` is the option the
+    enumerator chose most often relative to the team, if any. ``flagged``
+    questions have a largest gap of at least the sensitivity level's.
+    """
+
+    variable: str
+    n_responses: int
+    sample_band: SampleBand
+    largest_gap: float
+    scoring_option: str
+    flagged: bool
+    dominant_option: str | None = None
+    options: list[CategoricalOption]
+
+
+class CategoricalEnumerator(BaseModel):
+    """One enumerator's Categorical Response Patterns result.
+
+    ``questions`` are sorted largest gap first. The largest gap and sample
+    band are those of ``questions[0]``, so one problem question is never
+    averaged away.
+    """
+
+    enumerator: str
+    interviews: int
+    sample_band: SampleBand
+    largest_gap: float | None
+    badge: Badge
+    questions: list[CategoricalQuestion] = Field(default_factory=list)
+    skipped_variables: dict[str, SkipReason] = Field(default_factory=dict)
+
+
+class CategoricalResult(BaseModel):
+    """Categorical Response Patterns results, largest gap first."""
+
+    sensitivity: Sensitivity
+    condition: CheckCondition | None = None
+    variables: list[str] = Field(default_factory=list)
+    skipped_variables: dict[str, SkipReason] = Field(default_factory=dict)
+    enumerators: list[CategoricalEnumerator] = Field(default_factory=list)
+
+
 class ResponsePatternResults(BaseModel):
     """Everything the Response Patterns section shows."""
 
@@ -251,3 +346,4 @@ class ResponsePatternResults(BaseModel):
     warn_sample: int
     digit_preference: DigitPreferenceResult | None = None
     range_compression: RangeCompressionResult | None = None
+    categorical: CategoricalResult | None = None

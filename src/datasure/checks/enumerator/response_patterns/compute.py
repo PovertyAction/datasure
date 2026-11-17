@@ -13,10 +13,15 @@ import polars as pl
 
 from datasure.checks import missing
 from datasure.checks.enumerator.response_patterns.models import (
+    CATEGORICAL_LEVELS,
     DIGIT_PREFERENCE_LEVELS,
     NUMERIC_TYPES,
     RANGE_COMPRESSION_LEVELS,
     Badge,
+    CategoricalEnumerator,
+    CategoricalOption,
+    CategoricalQuestion,
+    CategoricalResult,
     CheckCondition,
     DigitPreferenceEnumerator,
     DigitPreferenceResult,
@@ -45,6 +50,7 @@ _GPS_NAME_WORDS: frozenset[str] = frozenset({"lat", "lon", "lng"})
 _ENUM = "__rp_enumerator"
 _VALUE = "__rp_value"
 _DIGIT = "__rp_digit"
+_OPTION = "__rp_option"
 
 # Terminal digits a rounding enumerator favors
 ROUND_DIGITS: tuple[int, ...] = (0, 5)
@@ -57,6 +63,10 @@ TRIM_QUANTILES: tuple[float, float] = (0.05, 0.95)
 HISTOGRAM_BUCKETS: int = 10
 # The histogram spans the rest of the team's 1st to 99th percentile
 HISTOGRAM_QUANTILES: tuple[float, float] = (0.01, 0.99)
+
+# Decimals Categorical gaps are rounded to before comparing them with a level:
+# the precision the report shows them at
+_GAP_DECIMALS: int = 1
 
 
 def is_gps_column(name: str) -> bool:
@@ -150,6 +160,29 @@ def _sort_key(result: DigitPreferenceEnumerator) -> tuple:
     return (result.ratio is None, -(result.ratio or 0), result.enumerator)
 
 
+def categorical_badge_band(gap: float | None, sensitivity: Sensitivity) -> Badge:
+    """Return the badge for a largest option gap at ``sensitivity``.
+
+    High when the gap reaches the level's. Moderate when the next more
+    sensitive level would flag the enumerator. The most sensitive level has
+    no Moderate band.
+    """
+    if gap is None:
+        return Badge.NA
+    if gap >= CATEGORICAL_LEVELS[sensitivity].min_gap:
+        return Badge.HIGH
+    levels = list(CATEGORICAL_LEVELS)
+    position = levels.index(sensitivity)
+    if position > 0 and gap >= CATEGORICAL_LEVELS[levels[position - 1]].min_gap:
+        return Badge.MODERATE
+    return Badge.LOW
+
+
+def _categorical_sort_key(result: CategoricalEnumerator) -> tuple:
+    """Order largest gap first, enumerators without one last, then by name."""
+    return (result.largest_gap is None, -(result.largest_gap or 0), result.enumerator)
+
+
 def range_badge_band(sd_ratio: float | None, sensitivity: Sensitivity) -> Badge:
     """Return the badge for an SD ratio at ``sensitivity``.
 
@@ -187,8 +220,8 @@ def _round_pct(counts: list[int]) -> float:
     return sum(counts[d] for d in ROUND_DIGITS) / total * 100 if total else 0.0
 
 
-def _numeric_skip(values: pl.Series) -> SkipReason | None:
-    """Return why a numeric variable cannot be used anywhere, if it can't."""
+def _variation_skip(values: pl.Series) -> SkipReason | None:
+    """Return why a variable cannot be used in any check, if it can't."""
     values = values.drop_nulls()
     if values.is_empty():
         return SkipReason.NO_RESPONSES
@@ -200,7 +233,7 @@ def _numeric_skip(values: pl.Series) -> SkipReason | None:
 def _digit_skip(values: pl.Series) -> SkipReason | None:
     """Return why a numeric variable cannot be checked for digit preference."""
     values = values.cast(pl.Float64).drop_nans()
-    reason = _numeric_skip(values)
+    reason = _variation_skip(values)
     if reason is None and values.max() - values.min() < MIN_DIGIT_RANGE:
         return SkipReason.RANGE_UNDER_10
     return reason
@@ -494,7 +527,7 @@ def _compute_range_compression(
             .drop_nulls(_VALUE)
             .filter(pl.col(_VALUE).is_finite())
         )
-        reason = _numeric_skip(frame[_VALUE])
+        reason = _variation_skip(frame[_VALUE])
         if reason is None:
             values[var] = frame
         else:
@@ -522,6 +555,178 @@ def _compute_range_compression(
     )
 
 
+def _option_counts(
+    frame: pl.DataFrame,
+) -> tuple[list[str], dict[str, list[int]]]:
+    """Return the options and each enumerator's count of each.
+
+    Options are every value anyone on the team chose, as text. Numeric
+    options come first in the order of their values, so codes sort 1, 2, 10
+    rather than 1, 10, 2 even when they are stored as text. Other options
+    follow in text order.
+    """
+    option = pl.col(_VALUE).cast(pl.String)
+    options = (
+        frame.select(option.alias(_OPTION))
+        .unique()
+        .sort(
+            pl.col(_OPTION).cast(pl.Float64, strict=False),
+            pl.col(_OPTION),
+            nulls_last=True,
+        )[_OPTION]
+        .to_list()
+    )
+    index = {option: i for i, option in enumerate(options)}
+    long = (
+        frame.select(_ENUM, pl.col(_VALUE).cast(pl.String).alias(_OPTION))
+        .group_by(_ENUM, _OPTION)
+        .len()
+    )
+    counts: dict[str, list[int]] = {}
+    for enum, option, n in long.iter_rows():
+        counts.setdefault(enum, [0] * len(options))[index[option]] += n
+    return options, counts
+
+
+def _categorical_question(
+    variable: str,
+    options: list[str],
+    enum_counts: list[int],
+    team_counts: list[int],
+    settings: ResponsePatternSettings,
+) -> CategoricalQuestion | SkipReason:
+    """Compare one enumerator with the team on one question, or say why not.
+
+    The options are those either side chose, so an option only one side
+    chose counts as 0% on the other.
+    """
+    n = sum(enum_counts)
+    band = sample_band(n, settings.min_sample, settings.warn_sample)
+    if band == SampleBand.INSUFFICIENT:
+        return SkipReason.BELOW_MINIMUM
+    if not sum(team_counts):
+        return SkipReason.TEAM_NO_RESPONSES
+
+    enum_pct, team_pct = _pct(enum_counts), _pct(team_counts)
+    # Rounded as shown, so a gap shown as 25.0 is flagged at 25
+    gaps = [
+        round(e - t, _GAP_DECIMALS) for e, t in zip(enum_pct, team_pct, strict=True)
+    ]
+    largest_gap = max(abs(g) for g in gaps)
+    min_gap = CATEGORICAL_LEVELS[settings.categorical_sensitivity].min_gap
+    top = max(range(len(options)), key=lambda i: gaps[i])
+    # An over-chosen option wins a tie, as it names what the enumerator chose
+    scoring = max(range(len(options)), key=lambda i: (abs(gaps[i]), gaps[i]))
+    return CategoricalQuestion(
+        variable=variable,
+        n_responses=n,
+        sample_band=band,
+        largest_gap=largest_gap,
+        scoring_option=options[scoring],
+        flagged=largest_gap >= min_gap,
+        dominant_option=options[top] if gaps[top] > 0 else None,
+        options=[
+            CategoricalOption(
+                option=option,
+                enum_pct=e,
+                team_pct=t,
+                gap=g,
+                flagged=abs(g) >= min_gap,
+            )
+            for option, e, t, g in zip(options, enum_pct, team_pct, gaps, strict=True)
+        ],
+    )
+
+
+def _categorical_enumerator(
+    enum: str,
+    n_interviews: int,
+    counts: dict[str, tuple[list[str], dict[str, list[int]]]],
+    settings: ResponsePatternSettings,
+) -> CategoricalEnumerator:
+    """Compare one enumerator with the team on every eligible question.
+
+    The enumerator's largest gap is the largest on any question, so one
+    badly asked question is enough to flag them.
+    """
+    scored: list[CategoricalQuestion] = []
+    skipped: dict[str, SkipReason] = {}
+    bands: list[SampleBand] = []
+    for var, (options, by_enum) in counts.items():
+        enum_counts = by_enum.get(enum, [0] * len(options))
+        totals = [sum(c[i] for c in by_enum.values()) for i in range(len(options))]
+        team_counts = [t - e for t, e in zip(totals, enum_counts, strict=True)]
+        bands.append(
+            sample_band(sum(enum_counts), settings.min_sample, settings.warn_sample)
+        )
+        result = _categorical_question(var, options, enum_counts, team_counts, settings)
+        if isinstance(result, SkipReason):
+            skipped[var] = result
+        else:
+            scored.append(result)
+
+    scored.sort(key=lambda q: -q.largest_gap)
+    top = scored[0] if scored else None
+    gap = top.largest_gap if top else None
+    return CategoricalEnumerator(
+        enumerator=enum,
+        interviews=n_interviews,
+        sample_band=top.sample_band if top else _best_band(bands),
+        largest_gap=gap,
+        badge=categorical_badge_band(gap, settings.categorical_sensitivity),
+        questions=scored,
+        skipped_variables=skipped,
+    )
+
+
+def _compute_categorical(
+    data: pl.DataFrame,
+    variables: list[str],
+    interviews: dict[str, int],
+    settings: ResponsePatternSettings,
+) -> CategoricalResult:
+    """Measure how far each enumerator's answer options differ from the team's."""
+    sensitivity = settings.categorical_sensitivity
+    if not variables:
+        return CategoricalResult(
+            sensitivity=sensitivity, condition=CheckCondition.NO_APPLICABLE_VARIABLES
+        )
+
+    skipped: dict[str, SkipReason] = {}
+    counts: dict[str, tuple[list[str], dict[str, list[int]]]] = {}
+    for var in variables:
+        frame = data.select(_ENUM, pl.col(var).alias(_VALUE)).drop_nulls(_VALUE)
+        if frame.schema[_VALUE].is_float():
+            # NaN marks a blank answer, not an option
+            frame = frame.filter(pl.col(_VALUE).is_finite())
+        reason = _variation_skip(frame[_VALUE])
+        if reason is None:
+            counts[var] = _option_counts(frame)
+        else:
+            skipped[var] = reason
+    if not counts:
+        return CategoricalResult(
+            sensitivity=sensitivity,
+            condition=CheckCondition.NO_ELIGIBLE_VARIABLES,
+            skipped_variables=skipped,
+        )
+
+    enumerators = [
+        _categorical_enumerator(enum, n_interviews, counts, settings)
+        for enum, n_interviews in interviews.items()
+    ]
+    all_insufficient = all(
+        e.sample_band == SampleBand.INSUFFICIENT for e in enumerators
+    )
+    return CategoricalResult(
+        sensitivity=sensitivity,
+        condition=CheckCondition.ALL_BELOW_MINIMUM if all_insufficient else None,
+        variables=list(counts),
+        skipped_variables=skipped,
+        enumerators=sorted(enumerators, key=_categorical_sort_key),
+    )
+
+
 def compute_response_patterns(
     data: pl.DataFrame,
     settings: ResponsePatternSettings,
@@ -539,7 +744,8 @@ def compute_response_patterns(
     enumerator_col : str
         The enumerator column.
     missing_codes : pl.DataFrame | None
-        The project's missing codes, set to missing before scoring.
+        The project's missing codes, set to missing before scoring in both
+        numeric and text columns.
 
     Returns
     -------
@@ -565,6 +771,7 @@ def compute_response_patterns(
     ).drop_nulls(_ENUM)
     if missing_codes is not None:
         data = missing.mask_missing_codes(data, variables, missing_codes)
+        data = missing.mask_text_missing_codes(data, variables, missing_codes)
 
     interviews = dict(data.group_by(_ENUM).len().sort(_ENUM).iter_rows())
     if len(interviews) < 2:
@@ -580,4 +787,6 @@ def compute_response_patterns(
     base.range_compression = _compute_range_compression(
         data, numeric, interviews, settings
     )
+    categorical = [v for v in variables if types[v] == "categorical"]
+    base.categorical = _compute_categorical(data, categorical, interviews, settings)
     return base
