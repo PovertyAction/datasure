@@ -68,12 +68,47 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     enumerator, its response minimum included. N/A means fewer responses
     than the minimum, or a team with no 0 or 5 endings
   - `ResponsePatternSettings` (selected variables, type overrides, minimum
-    and warning sample sizes, sensitivity) is saved under
-    `enumerators.response_patterns` in the page settings file; settings that
-    no longer validate fall back to the defaults
+    and warning sample sizes, and `digit_preference_sensitivity`,
+    `range_compression_sensitivity` and `categorical_sensitivity`) is saved
+    under `enumerators.response_patterns` in the page settings file;
+    settings that no longer validate fall back to the defaults
   - `utils/column_references` lists the selected variables
     (`_NESTED_SURVEY_SETTING_KEYS`), so renaming one in Prep warns that the
     Enumerator stats settings use it
+- **Response Patterns: Range Compression** (#419, part of #158): a second
+  sub-tab, `compute._compute_range_compression`, on the same integer and
+  continuous variables as Digit Preference (text columns typed as numeric
+  are parsed the same way)
+  - Per variable, `sd_ratio = enum_sd / team_sd` against the rest of the
+    team, each side capped at its own 5th and 95th percentiles
+    (`TRIM_QUANTILES`) first and the ratio rounded to two decimals. An
+    enumerator's SD ratio is their lowest across variables
+    (`RangeCompressionEnumerator.variables[0]`). Mean shift is not flagged;
+    the 0–100 compression/shift score in #158 was dropped
+  - `RANGE_COMPRESSION_LEVELS`: flagged at an SD ratio of 0.65 or less
+    (High), 0.5 (Medium, default) or 0.35 (Low); `range_badge_band` gives
+    Moderate when the next more sensitive level would flag
+  - A variable is skipped for one enumerator below the minimum (or with
+    fewer than 2 answers) or when the rest of the team has no spread
+    (`SkipReason.TEAM_NO_VARIATION`)
+  - The detail's histogram (`RangeVariable.bucket_edges`) shares buckets
+    between the two series over the rest of the team's 1st to 99th
+    percentile (`HISTOGRAM_QUANTILES`), with outlying values in the end
+    buckets and whole-number edges when every answer is whole
+- **Response Patterns: Categorical Response Patterns** (#420, part of
+  #158): a third sub-tab, `compute._compute_categorical`, on categorical
+  variables
+  - Per question, each option's share for the enumerator and the rest of
+    the team, over the union of options (an option one side never chose is
+    0%). The gap is the difference in percentage points, rounded to one
+    decimal; a question's result is its largest absolute gap and the
+    enumerator's their largest across questions
+  - `CATEGORICAL_LEVELS`: flagged at a gap of 15 pp (High), 25 (Medium,
+    default) or 35 (Low); `categorical_badge_band` gives Moderate as the
+    other checks do. Options are ordered numerically where they parse as
+    numbers (`_option_counts`), so codes sort 1, 2, 10
+  - `SkipReason.TEAM_NO_RESPONSES` marks a question only the enumerator
+    answered
 - **Progress tracking-file and master-list modes**: new pure module
   `checks/progress_tracking.py`. `TrackingSettings` (mixed into
   `ProgressSettings`) adds `tracking_target`, `tracking_unit`,

@@ -79,15 +79,31 @@ A dedicated tab for reviewing and recoding open-ended "other specify" responses.
 
 ### Enumerator Response Pattern Checks ([#158](https://github.com/PovertyAction/datasure/issues/158))
 
-**Status:** Planned
+**Status:** In Development (built; ships in the next release)
 
-Three additional sub-checks within the Enumerator Performance module to detect systematic response biases.
+A **Response Patterns** section at the bottom of the Enumerator Report with
+three sub-checks that compare each enumerator's answers with the rest of the
+team. One settings panel, saved per project, holds the variables to check,
+their types, the minimum responses and a High, Medium or Low flag sensitivity
+for each check. High and Moderate results also feed the report's Needs
+attention list.
 
 | Sub-Check | Description |
 | --------- | ----------- |
-| **Digit Preference** | Detect over-representation of specific digits (e.g., rounding to 0 or 5) in numeric responses |
-| **Range Compression** | Identify enumerators who consistently avoid extreme scale values |
-| **Categorical Response Patterns** | Flag enumerators with statistically unusual distributions across categorical choices |
+| **Digit Preference** | Flags enumerators whose numeric answers end in 0 or 5 more often than the rest of the team's, as a ratio of the two shares |
+| **Range Compression** | Flags enumerators whose numeric answers spread much less widely than the rest of the team's (SD ratio), which covers avoiding extreme scale values |
+| **Categorical Response Patterns** | Flags enumerators whose share of one answer option differs from the rest of the team's by a set number of percentage points |
+
+Out of scope for this release:
+
+- Flagging an enumerator whose average is shifted above or below the rest of the team's
+- Heaping detection (answers clustering around non-round values)
+- Per-question Digit Preference results
+- Questions that allow several answers (`select_multiple`)
+- Yes-bias detection, which needs value labels
+- Reading variable types from the SurveyCTO form definition
+- Exporting the results
+- Response pattern flags in the enumerator headline, status badge and summary table ([#422](https://github.com/PovertyAction/datasure/issues/422))
 
 ### Balance Test ([#156](https://github.com/PovertyAction/datasure/issues/156))
 
