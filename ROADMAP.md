@@ -79,7 +79,7 @@ A dedicated tab for reviewing and recoding open-ended "other specify" responses.
 
 ### Enumerator Response Pattern Checks ([#158](https://github.com/PovertyAction/datasure/issues/158))
 
-**Status:** In Development (built; ships in the next release)
+**Status:** In Development
 
 A **Response Patterns** section at the bottom of the Enumerator Report with
 three sub-checks that compare each enumerator's answers with the rest of the

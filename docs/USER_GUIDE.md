@@ -1948,13 +1948,15 @@ for each:
 - **N/A**: too few answers, or nothing to compare with.
 
 The first enumerator is selected. Select another row to see that
-enumerator's detail: a heading with their score and flag, a verdict in plain
-words, figures with the rest of the team's under each, and a chart of the
-enumerator (dark green) against the **Rest of team** (grey). Charts are
-always on a 0–100% scale, so they compare at a glance across enumerators.
+enumerator's detail, headed by their score and flag: a verdict in plain
+words and a chart of the enumerator (dark green) against the **Rest of
+team** (grey). Digit Preference and Range Compression also show figures;
+Categorical Response Patterns shows a verdict and chart for each question.
+Charts are always on a 0–100% scale, so they compare at a glance across
+enumerators.
 
 High and Moderate results also appear in [Needs attention](#needs-attention)
-as Flagged and Watch reasons.
+as **Flagged** and **Watch** reasons.
 
 ###### Digit Preference
 
@@ -2023,7 +2025,7 @@ with the rest of the team's. Each ticked categorical question is compared on
 its own.
 
 For each option, the enumerator's share of answers is compared with the rest
-of the team's. The **gap** is the difference in percentage points (pp). An
+of the team's. The gap is the difference in percentage points (pp). An
 option only one side chose counts as 0% on the other side, so both
 never-used and only-used options show up. A question's result is its largest
 gap on any option, whether the enumerator chose it more or less often than
@@ -2058,13 +2060,12 @@ Messages across the section:
 | Select one or more variables in the response pattern settings above to run these checks | Tick **Include** for one or more variables |
 | Response patterns compare each enumerator with the rest of the team, so they need at least 2 enumerators | Choose **All teams**, or a team with more than one enumerator, or wait for more data |
 
-Messages in a sub-tab, where *type* is numeric (integer or continuous) or
-categorical:
+Messages in a sub-tab, where *type* is numeric or categorical:
 
 | Message | What to do |
 | --- | --- |
 | None of the selected variables are *type*, so the check has nothing to check | Tick variables of the check's type, or change their **Type** |
-| None of the selected *type* variables can be checked | Read the skipped-variable notes above the message |
+| None of the selected *type* variables can be checked for the check. See the notes above | Read the skipped-variable notes above the message |
 | Every enumerator has fewer than *N* responses on the selected variables, so the check can't run yet | Lower **Hide results below** (or, for Digit Preference, the sensitivity), or wait for more data |
 
 A variable that can't be checked is named in a note, "Skipped
@@ -2075,7 +2076,7 @@ sub-tab; notes for one enumerator sit under their detail.
 | --- | --- |
 | no answers are numbers | A text column set to integer or continuous has no numbers in it |
 | no responses | Every answer is blank or a missing code |
-| no variation across the project | Everyone gave the same answer |
+| no variation across the project | Everyone in view (the chosen team, if any) gave the same answer |
 | observed range under 10 | Digit Preference only: the answers span less than 10 (such as number of children), so endings in 0 or 5 say little about rounding |
 | fewer responses than the minimum | Range Compression and Categorical Response Patterns: the enumerator has fewer answers on this variable than **Hide results below** |
 | no variation in the rest of the team's responses | Range Compression: the rest of the team's answers don't vary, so there is no spread to compare with |
