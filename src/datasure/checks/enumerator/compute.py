@@ -256,8 +256,12 @@ def compute_overview_figures(
         .len()
         .sort(["len", "enumerator"])
     )
-    fewest = totals.row(0)
-    most = totals.sort(["len", "enumerator"], descending=[True, False]).row(0)
+    fewest = most = median = None
+    if not totals.is_empty():
+        first = totals.row(0)
+        last = totals.sort(["len", "enumerator"], descending=[True, False]).row(0)
+        fewest, most = (first[0], int(first[1])), (last[0], int(last[1]))
+        median = float(totals["len"].median())
 
     length_minutes = None
     if duration and duration in data.columns:
@@ -276,9 +280,9 @@ def compute_overview_figures(
         num_teams=data[team].n_unique() if team and team in data.columns else None,
         submissions_past_week=days.filter(_past_week(today)).height,
         submissions_week_before=days.filter(week_before).height,
-        median_per_enumerator=float(totals["len"].median()),
-        fewest=(fewest[0], int(fewest[1])),
-        most=(most[0], int(most[1])),
+        median_per_enumerator=median,
+        fewest=fewest,
+        most=most,
         duration_minutes=length_minutes,
     )
 
@@ -442,42 +446,49 @@ def compute_enumerator_missing_table(
     return result_df
 
 
-def compute_enumerator_missing_shares(
+def compute_attention_summary(
     data: pl.DataFrame,
     enumerator: str,
-    team: str | None,
     missing_codes_config: pl.DataFrame,
 ) -> pl.DataFrame:
-    """Return each enumerator's submissions and missing-answer share.
+    """Return the summary columns Needs attention reads, one row per enumerator.
 
-    The "# submissions" and missing-share columns the summary table has,
-    computed the same way over ``data``, so Needs attention can compare
-    missing answers over only some interviews, such as completed ones.
+    "# submissions", the missing-answer shares, and "% consent" and
+    "% completed survey" when the data has them, computed as the summary
+    table computes them but grouped by enumerator alone. The summary table
+    groups by team as well, so an enumerator who worked in two teams has
+    two rows there; the rules must compare all of their work.
 
     Parameters
     ----------
     data : pl.DataFrame
-        The interviews to count.
+        The interviews to count: the report's data, or only those
+        ``counted_interviews`` keeps.
     enumerator : str
         Enumerator column name.
-    team : str | None
-        Team column name, grouped by as in the summary table.
     missing_codes_config : pl.DataFrame
         The project's missing codes.
 
     Returns
     -------
     pl.DataFrame
-        One row per enumerator (and team); empty when ``data`` is.
+        One row per enumerator; empty when ``data`` is.
     """
     if data.is_empty():
         return pl.DataFrame()
-    group_by_cols = [enumerator, team] if team else [enumerator]
-    counts = data.group_by(group_by_cols, maintain_order=True).agg(
-        pl.len().alias("# submissions")
+    rates = [
+        pl.col(flag).mean().alias(name)
+        for flag, name in (
+            (CONSENT_FLAG, "% consent"),
+            (COMPLETED_FLAG, "% completed survey"),
+        )
+        if flag in data.columns
+    ]
+    counts = data.group_by(enumerator, maintain_order=True).agg(
+        pl.len().alias("# submissions"), *rates
     )
-    shares = compute_enumerator_missing_table(data, missing_codes_config, group_by_cols)
-    return counts.join(shares, on=group_by_cols, how="left")
+    shares = compute_enumerator_missing_table(data, missing_codes_config, [enumerator])
+    return counts.join(shares, on=enumerator, how="left")
 
 
 def compute_enumerator_summary(

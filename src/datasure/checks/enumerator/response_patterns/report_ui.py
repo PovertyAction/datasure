@@ -830,7 +830,7 @@ def _render_categorical(result: CategoricalResult, min_sample: int) -> None:
 # =============================================================================
 
 
-def _excluded_columns(enumerator_settings: EnumeratorSettings) -> list[str]:
+def excluded_columns(enumerator_settings: EnumeratorSettings) -> list[str]:
     """Return the configured ID, enumerator and report helper columns."""
     configured = [
         enumerator_settings.survey_key,
@@ -881,7 +881,7 @@ def render_response_patterns(
         return
 
     settings = response_pattern_settings(
-        settings_file, data, _excluded_columns(enumerator_settings), missing_codes
+        settings_file, data, excluded_columns(enumerator_settings), missing_codes
     )
     results: ResponsePatternResults = cached_response_patterns(
         data, settings, enumerator_col, missing_codes

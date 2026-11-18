@@ -327,7 +327,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Interview length and missing answers count only consented and completed
     interviews when consent or outcome is set up (`counted_interviews`,
     `ColumnRoles.consent`/`completed`); missing answers then read
-    `compute.compute_enumerator_missing_shares` over those interviews,
+    `compute.compute_attention_summary` over those interviews,
     passed to `attention_rows` as `missing`
   - Form version: older-version submissions all within `FORM_VERSION_GRACE`
     (1 day) of the newest version's release are Watch, not Flagged
@@ -513,6 +513,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     no-op
   - The row-index help text on the Prep page now describes this syntax.
     `TestStataRemoveRows` expected the 0-based output and is corrected
+- **Enumerator Report: overview without named enumerators**: data where no
+  submission names an enumerator (such as a team whose enumerator values are
+  all blank) stopped the report at `compute_overview_figures`, before Needs
+  attention. `OverviewFigures.median_per_enumerator`, `fewest` and `most` are
+  now None then, and "Submissions per enumerator" shows a dash
+- **Needs attention: enumerators in two teams**: with a team column and "All
+  teams", the rules read the summary table's one row per enumerator and team,
+  so an enumerator could get two "Missing answers" reasons, or a Consent or
+  Completion reason from one team's work only. The rules now read
+  `compute.compute_attention_summary` (replacing
+  `compute_enumerator_missing_shares`), grouped by enumerator alone; the
+  summary table still groups by team
+- **Needs attention: GPS with numeric enumerator IDs**: an integer
+  enumerator or team column with a blank came back from detection's
+  `to_pandas` as floats, so `GPSOutlierSummary.unreviewed_by` named ID 101
+  "101.0" and every GPS reason was dropped without an error. It now takes
+  the survey data's schema and reads the names and teams back with their
+  polars dtype before casting to text, so IDs stored as floats keep "101.0"
+- **Needs attention: Response Patterns settings**: the list ran Response
+  Patterns on the raw saved settings, so a variable since set as the team,
+  survey ID or survey key column (which the section drops) could flag every
+  enumerator. `settings_ui.effective_response_pattern_settings` applies the
+  section's variable-editor filtering without rendering, and
+  `report_ui._list_patterns` uses it with `excluded_columns` (was
+  `_excluded_columns`), so both run on the same settings and cache entry
+- **Needs attention: relative rule** (`attention.count_reasons`): an
+  enumerator's rate was compared with the team's including their own
+  issues, so one doing most of the interviews could hide (30 outliers in 90
+  against a colleague's 1 in 10 gave no reason), and the rule did not need
+  `MIN_SUBMISSIONS`. Rates now compare with the rest of the team's, need 5
+  submissions, and any issues against none for the rest of the team are
+  Flagged
+- **Needs attention: submissions with no enumerator**:
+  `attention.activity_reasons` and `form_version_reasons` dropped them
+  before finding the latest submission and the newest version's release, so
+  an unnamed newest submission hid inactivity and outdated forms. They now
+  count for those dates and are left out only when attributing reasons
 
 ## [1.2.1] - 2026-11-06
 

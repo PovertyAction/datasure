@@ -141,14 +141,56 @@ def _render_variable_editor(
         on_change=mark_settings_changed,
     )
 
+    return _choices(edited, saved, columns)
+
+
+def _choices(
+    frame: pl.DataFrame, saved: ResponsePatternSettings, columns: list[str]
+) -> tuple[list[str], dict[str, str]]:
+    """Return the selection and type overrides an editor ``frame`` holds.
+
+    Saved choices for variables not in ``columns`` are kept after the
+    frame's.
+    """
     absent = [v for v in saved.selected_variables if v not in columns]
-    selected = edited.filter(pl.col("Select"))["Variable"].to_list() + absent
+    selected = frame.filter(pl.col("Select"))["Variable"].to_list() + absent
     overrides = {v: t for v, t in saved.type_overrides.items() if v not in columns} | {
         row["Variable"]: row["Type"]
-        for row in edited.iter_rows(named=True)
+        for row in frame.iter_rows(named=True)
         if row["Type"] != row[_INFERRED_TYPE_COL]
     }
     return selected, overrides
+
+
+def _candidates(
+    data: pl.DataFrame, exclude_cols: list[str], missing_codes: pl.DataFrame | None
+) -> tuple[pl.DataFrame, dict[str, str]]:
+    """Return ``data`` with missing codes masked, and its candidate variables."""
+    if missing_codes is not None:
+        data = missing.mask_missing_codes(data, data.columns, missing_codes)
+    return data, infer_variable_types(data, exclude=exclude_cols)
+
+
+def effective_response_pattern_settings(
+    settings_file: str,
+    data: pl.DataFrame,
+    exclude_cols: list[str],
+    missing_codes: pl.DataFrame | None,
+) -> ResponsePatternSettings:
+    """Return the settings the section would run on, without rendering it.
+
+    The saved settings, with the saved choices for columns in ``data`` that
+    are no longer candidates dropped, as the section's variable editor
+    drops them (such as a column since set as the team or survey ID). Takes
+    the parameters of `response_pattern_settings`, so the Needs attention
+    list and the section run the checks on the same settings.
+    """
+    saved = load_response_pattern_settings(settings_file)
+    data, inferred = _candidates(data, exclude_cols, missing_codes)
+    selected, overrides = _choices(_editor_frame(inferred, saved), saved, data.columns)
+    return saved.model_copy(
+        update={"selected_variables": selected, "type_overrides": overrides}
+    )
 
 
 # The "x" in a ratio such as 1.5x
@@ -246,9 +288,7 @@ def response_pattern_settings(
         The saved settings with this run's edits applied.
     """
     saved = load_response_pattern_settings(settings_file)
-    if missing_codes is not None:
-        data = missing.mask_missing_codes(data, data.columns, missing_codes)
-    inferred = infer_variable_types(data, exclude=exclude_cols)
+    data, inferred = _candidates(data, exclude_cols, missing_codes)
 
     with st.expander("Response pattern settings", icon=":material/tune:"):
         st.markdown(

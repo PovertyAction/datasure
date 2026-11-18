@@ -33,7 +33,7 @@ from datasure.checks.enumerator.compute import (
     CONSENT_FLAG,
     DISPLAY_DATE_FORMAT,
     add_consent_outcome_flags,
-    compute_enumerator_missing_shares,
+    compute_attention_summary,
     compute_enumerator_productivity,
     compute_enumerator_statistics,
     compute_enumerator_statistics_overtime,
@@ -58,10 +58,11 @@ from datasure.checks.enumerator.response_patterns.models import (
 )
 from datasure.checks.enumerator.response_patterns.report_ui import (
     cached_response_patterns,
+    excluded_columns,
     render_response_patterns,
 )
 from datasure.checks.enumerator.response_patterns.settings_ui import (
-    load_response_pattern_settings,
+    effective_response_pattern_settings,
 )
 from datasure.checks.enumerator.settings_ui import (
     enumerator_report_settings,
@@ -122,6 +123,7 @@ _LEGACY_WEEK_START_KEYS = (
 PERIODS = {"Day": "Daily", "Week": "Weekly", "Month": "Monthly"}
 ALL_TEAMS = "All teams"
 EN_DASH = "\N{EN DASH}"
+EM_DASH = "\N{EM DASH}"
 
 # Enumerators listed under "Needs attention" before the rest fold away.
 ATTENTION_SHOWN = 10
@@ -165,8 +167,22 @@ def _render_overview(
         settings.duration,
         settings.duration_unit,
     )
-    fewest_name, fewest = figures.fewest
-    most_name, most = figures.most
+    if figures.fewest is None or figures.most is None:
+        per_enumerator: tuple = (
+            "Submissions per enumerator",
+            EM_DASH,
+            "No submission names an enumerator",
+        )
+    else:
+        fewest_name, fewest = figures.fewest
+        most_name, most = figures.most
+        per_enumerator = (
+            "Submissions per enumerator",
+            f"{figures.median_per_enumerator:,.0f}",
+            "The median of each enumerator's total submissions. Fewest: "
+            f"{fewest_name} ({fewest:,}). Most: {most_name} ({most:,}).",
+            f"Range {fewest:,} to {most:,}",
+        )
     row: list[tuple] = [
         (
             "Active in the past 7 days",
@@ -180,13 +196,7 @@ def _render_overview(
             "Submissions dated in the 7 days up to today",
             f"{figures.submissions_week_before:,} in the 7 days before",
         ),
-        (
-            "Submissions per enumerator",
-            f"{figures.median_per_enumerator:,.0f}",
-            "The median of each enumerator's total submissions. Fewest: "
-            f"{fewest_name} ({fewest:,}). Most: {most_name} ({most:,}).",
-            f"Range {fewest:,} to {most:,}",
-        ),
+        per_enumerator,
     ]
     if figures.duration_minutes is not None:
         low, median, high = figures.duration_minutes
@@ -509,15 +519,21 @@ def _render_attention_footer(
 def _list_patterns(
     data: pl.DataFrame,
     setting_file: str,
-    enumerator: str,
+    settings: EnumeratorSettings,
     missing_codes: pl.DataFrame | None,
 ) -> tuple[ResponsePatternResults | None, tuple[LeftOut, ...]]:
-    """Return Response Patterns' results for the list, or why there are none."""
+    """Return Response Patterns' results for the list, or why there are none.
+
+    Computed on the settings the section runs on, so the list shows only
+    what the section shows, from the same cache entry.
+    """
     try:
         return cached_response_patterns(
             data,
-            load_response_pattern_settings(setting_file),
-            enumerator,
+            effective_response_pattern_settings(
+                setting_file, data, excluded_columns(settings), missing_codes
+            ),
+            settings.enumerator,
             missing_codes,
         ), ()
     # UI boundary: Response Patterns failing must not stop the list. The
@@ -1219,7 +1235,7 @@ def enumerator_report(
         else pl.DataFrame()
     )
     patterns, patterns_failed = _list_patterns(
-        report_data, setting_file, enumerator, missing_codes
+        report_data, setting_file, settings, missing_codes
     )
     scope = EnumeratorScope(enumerator, settings.team, controls.team)
     other = other_checks(scope) if other_checks else OtherChecks()
@@ -1234,15 +1250,19 @@ def enumerator_report(
         COMPLETED_FLAG if COMPLETED_FLAG in report_data.columns else None,
     )
     counted, narrowed = counted_interviews(report_data, roles)
+    # Grouped by enumerator alone: the summary table also groups by team.
+    attention_summary = (
+        compute_attention_summary(report_data, enumerator, missing_codes)
+        if survey_date
+        else pl.DataFrame()
+    )
     attention = attention_rows(
         report_data,
         roles,
-        summary_df,
+        attention_summary,
         patterns,
         other.counts,
-        compute_enumerator_missing_shares(
-            counted, enumerator, settings.team, missing_codes
-        )
+        compute_attention_summary(counted, enumerator, missing_codes)
         if narrowed and survey_date
         else None,
     )
@@ -1251,7 +1271,7 @@ def enumerator_report(
             attention.rows,
             (*other.errors, *patterns_failed, *attention.left_out),
         ),
-        _rules_in_use(settings, summary_df, patterns, other),
+        _rules_in_use(settings, attention_summary, patterns, other),
         other,
         setting_file,
         len(submissions_by_enumerator(report_data, enumerator)),

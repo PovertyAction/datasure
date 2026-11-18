@@ -8,7 +8,9 @@ import pytest
 from polars.exceptions import ColumnNotFoundError
 
 from datasure.checks.enumerator.compute import (
-    compute_enumerator_missing_shares,
+    COMPLETED_FLAG,
+    CONSENT_FLAG,
+    compute_attention_summary,
     compute_enumerator_missing_table,
     compute_enumerator_productivity,
     compute_enumerator_statistics,
@@ -116,12 +118,12 @@ def test_compute_enumerator_missing_table_with_config(
     assert "enumerator" in result.columns
 
 
-def test_missing_shares_count_submissions_beside_the_share(
+def test_attention_summary_counts_submissions_beside_the_share(
     sample_enumerator_data, sample_missing_codes_config
 ):
-    """Needs attention reads the summary's columns over only some interviews."""
-    result = compute_enumerator_missing_shares(
-        sample_enumerator_data, "enumerator", None, sample_missing_codes_config
+    """Needs attention reads the summary's columns, one row per enumerator."""
+    result = compute_attention_summary(
+        sample_enumerator_data, "enumerator", sample_missing_codes_config
     )
     counts = sample_enumerator_data.group_by("enumerator").len()
 
@@ -131,11 +133,33 @@ def test_missing_shares_count_submissions_beside_the_share(
     )
 
 
-def test_missing_shares_of_no_interviews_are_empty(sample_missing_codes_config):
-    assert compute_enumerator_missing_shares(
+def test_attention_summary_pools_an_enumerator_across_teams(
+    sample_missing_codes_config,
+):
+    """One row per enumerator, though they worked in two teams."""
+    data = pl.DataFrame(
+        {
+            "enumerator": ["a", "a", "a", "b"],
+            "team": ["x", "x", "y", "y"],
+            "answer": [1, None, None, 2],
+            CONSENT_FLAG: [True, True, False, True],
+            COMPLETED_FLAG: [True, False, False, True],
+        }
+    )
+
+    result = compute_attention_summary(data, "enumerator", sample_missing_codes_config)
+    a = result.filter(pl.col("enumerator") == "a").row(0, named=True)
+
+    assert result.height == 2
+    assert a["# submissions"] == 3
+    assert a["% consent"] == pytest.approx(2 / 3)
+    assert a["% completed survey"] == pytest.approx(1 / 3)
+
+
+def test_attention_summary_of_no_interviews_is_empty(sample_missing_codes_config):
+    assert compute_attention_summary(
         pl.DataFrame({"enumerator": []}),
         "enumerator",
-        None,
         sample_missing_codes_config,
     ).is_empty()
 
@@ -1192,6 +1216,19 @@ def test_overview_figures_give_interview_length_quartiles_in_minutes():
     )
 
     assert figures.duration_minutes == pytest.approx((12.5, 25.0, 37.5))
+
+
+def test_overview_figures_without_named_enumerators():
+    """With no enumerator named, the per-enumerator figures are unavailable."""
+    unnamed = OVERVIEW_DATA.with_columns(pl.lit(None, pl.String).alias("enum"))
+
+    figures = compute_overview_figures(unnamed, "when", "enum", today=OVERVIEW_TODAY)
+
+    assert figures.num_enumerators == 0
+    assert figures.submissions_past_week == 3
+    assert figures.median_per_enumerator is None
+    assert figures.fewest is None
+    assert figures.most is None
 
 
 def test_overview_figures_need_data():

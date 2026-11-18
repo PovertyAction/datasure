@@ -1826,8 +1826,8 @@ and **% Null values** (blank answers only) when it has none.
 | Response patterns | A High result | A Moderate result, or a High result on a low sample |
 | Duplicates | Any record holding an unresolved duplicate ID | |
 | GPS | 3 or more GPS outliers not yet accepted or corrected | 1 or 2 |
-| Outliers, Constraints | 3 or more, at 2× the team's rate per submission | 1.5× |
-| Backchecks | 3 or more mismatches, at 2× the team's rate per value compared | 1.5× |
+| Outliers, Constraints | 3 or more, at 2× the rest of the team's rate per submission, or any rate when the rest of the team has none | 1.5× |
+| Backchecks | 3 or more mismatches, at 2× the rest of the team's rate per value compared, or any rate when the rest of the team has none | 1.5× |
 
 Duplicates, Outliers, Constraints, GPS and Backchecks count only when those
 checks are set up on the page, and use their own settings, corrections and

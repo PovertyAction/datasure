@@ -380,14 +380,15 @@ def activity_reasons(data: pl.DataFrame, roles: ColumnRoles) -> dict[str, list[R
     day = _day(data, column)
     if day is None:
         return {}
-    days = (
-        data.select(_text(data[roles.enumerator]).alias("enumerator"), day.alias("day"))
-        .drop_nulls()
-        .unique()
-    )
+    days = data.select(
+        _text(data[roles.enumerator]).alias("enumerator"), day.alias("day")
+    ).drop_nulls("day")
+    # Every submission dates the data, named or not; only named ones have a
+    # pace.
+    latest = days["day"].max()
+    days = days.drop_nulls("enumerator").unique()
     if days.is_empty():
         return {}
-    latest = days["day"].max()
     pace = (
         days.sort("enumerator", "day")
         .with_columns(
@@ -590,11 +591,13 @@ def form_version_reasons(
     dtype = data.schema[day]
     if not (dtype == pl.Date or isinstance(dtype, pl.Datetime)):
         return {}
+    # Every submission with a version and time dates the release, named or
+    # not; only named ones are attributed.
     rows = data.select(
         _text(data[roles.enumerator]).alias("enumerator"),
         _text(data[version]).alias("version"),
         pl.col(day).alias("at"),
-    ).drop_nulls()
+    ).drop_nulls(["version", "at"])
     if rows.is_empty():
         return {}
     as_number = rows["version"].cast(pl.Float64, strict=False)
@@ -605,7 +608,11 @@ def form_version_reasons(
     newest = rows.filter(pl.col("rank") == newest_rank)
     released = newest["at"].min()
     outdated = (
-        rows.filter((pl.col("at") > released) & (pl.col("rank") != newest_rank))
+        rows.filter(
+            (pl.col("at") > released)
+            & (pl.col("rank") != newest_rank)
+            & pl.col("enumerator").is_not_null()
+        )
         .sort("rank")
         .group_by("enumerator", maintain_order=True)
         .agg(
@@ -706,6 +713,12 @@ def count_reasons(
 ) -> dict[str, list[Reason]]:
     """Turn another check's per-enumerator issues into reasons.
 
+    Under the relative rule an enumerator needs `RELATIVE_MIN_ISSUES` issues
+    and `MIN_SUBMISSIONS` submissions, and their rate is compared with the
+    rest of the team's: issues and denominators of everyone but them. Any
+    issues against none for the rest of the team are Flagged; with no one
+    else to compare with there is no reason.
+
     Parameters
     ----------
     issues : IssueCounts
@@ -733,22 +746,39 @@ def count_reasons(
     totals = issues.denominators or submissions
     total_issues = sum(shown.values())
     total_out_of = sum(totals.get(name, 0) for name in submissions)
-    if total_issues == 0 or total_out_of == 0:
-        return reasons
-    team_rate = total_issues / total_out_of
     for name, count in shown.items():
         out_of = totals.get(name, 0)
-        if count < RELATIVE_MIN_ISSUES or out_of <= 0:
+        if (
+            count < RELATIVE_MIN_ISSUES
+            or out_of <= 0
+            or submissions[name] < MIN_SUBMISSIONS
+        ):
             continue
-        ratio = (count / out_of) / team_rate
+        # The rest of the team's rate, so one who has most of the issues
+        # can't set their own benchmark.
+        rest_out_of = total_out_of - out_of
+        if rest_out_of <= 0:
+            continue
+        rest_rate = (total_issues - count) / rest_out_of
+        rate = count / out_of
+        if rest_rate == 0:
+            reasons[name] = [
+                Reason(
+                    issues.check,
+                    f"{issues.noun(count)}, none for the rest of the team",
+                    Severity.FLAG,
+                )
+            ]
+            continue
+        ratio = rate / rest_rate
         if ratio < RELATIVE_WATCH_RATIO:
             continue
         severity = Severity.FLAG if ratio >= RELATIVE_FLAG_RATIO else Severity.WATCH
         reasons[name] = [
             Reason(
                 issues.check,
-                f"{issues.noun(count)}, {ratio:.1f}{TIMES} the team's rate per "
-                f"{issues.per}",
+                f"{issues.noun(count)}, {ratio:.1f}{TIMES} the rest of the "
+                f"team's rate per {issues.per}",
                 severity,
             )
         ]
@@ -820,15 +850,16 @@ def attention_rows(
     roles : ColumnRoles
         The page's columns.
     summary : pl.DataFrame
-        ``compute_enumerator_summary`` on ``data``.
+        ``compute_attention_summary`` on ``data``: one row per enumerator,
+        not the summary table's one per enumerator and team.
     patterns : ResponsePatternResults | None
         Response Patterns' results on ``data``, if it ran.
     other : Iterable[IssueCounts]
         Other checks' outstanding issues by enumerator.
     missing : pl.DataFrame | None
-        "# submissions" and the missing share by enumerator over the
-        interviews `counted_interviews` keeps, when it narrows them; None
-        reads them from ``summary``.
+        ``compute_attention_summary`` over the interviews
+        `counted_interviews` keeps, when it narrows them; None reads the
+        missing shares from ``summary``.
     """
     submissions = submissions_by_enumerator(data, roles.enumerator)
     enumerator = roles.enumerator

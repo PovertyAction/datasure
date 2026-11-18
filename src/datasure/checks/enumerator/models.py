@@ -274,11 +274,12 @@ class OverviewFigures(BaseModel):
         Submissions dated in the past 7 days, counted from today.
     submissions_week_before : int
         Submissions dated in the 7 days before that.
-    median_per_enumerator : float
-        The median of each enumerator's total submissions.
-    fewest, most : tuple[str, int]
+    median_per_enumerator : float | None
+        The median of each enumerator's total submissions; None when no
+        submission names an enumerator.
+    fewest, most : tuple[str, int] | None
         The enumerator with the fewest and the most submissions, and the
-        count.
+        count; None when no submission names an enumerator.
     duration_minutes : tuple[float, float, float] | None
         The interview length's lower quartile, median and upper quartile,
         in minutes; None without a duration column.
@@ -289,7 +290,7 @@ class OverviewFigures(BaseModel):
     num_teams: int | None = None
     submissions_past_week: int = Field(ge=0)
     submissions_week_before: int = Field(ge=0)
-    median_per_enumerator: float = Field(ge=0)
-    fewest: tuple[str, int]
-    most: tuple[str, int]
+    median_per_enumerator: float | None = Field(default=None, ge=0)
+    fewest: tuple[str, int] | None = None
+    most: tuple[str, int] | None = None
     duration_minutes: tuple[float, float, float] | None = None

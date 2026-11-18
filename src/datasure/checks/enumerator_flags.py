@@ -152,7 +152,7 @@ def gps(ctx: CheckContext, scope: EnumeratorScope) -> Iterator[IssueCounts]:
     )
     if headline is None or headline.basis is None:
         return
-    points = headline.basis.unreviewed_by(scope)
+    points = headline.basis.unreviewed_by(scope, ctx.data.page_data.schema)
     yield IssueCounts(
         "GPS",
         "GPS point far from the others",

@@ -239,6 +239,23 @@ def test_render_overview_says_when_it_counts_one_team(
     )
 
 
+def test_render_overview_without_named_enumerators(
+    tracked_columns, sample_enumerator_data, sample_enumerator_settings
+):
+    """No named enumerator leaves the per-enumerator figure blank, not a crash."""
+    unnamed = sample_enumerator_data.with_columns(
+        pl.lit(None, pl.String).alias(sample_enumerator_settings.enumerator)
+    )
+    with patch.dict(sys.modules, {"streamlit": tracked_columns}):
+        _render_overview(unnamed, sample_enumerator_settings)
+
+    metrics = [
+        m for col in _drawn_columns(tracked_columns) for m in col.metric.mock_calls
+    ]
+    assert metrics[2].args[:2] == ("Submissions per enumerator", "—")
+    assert metrics[2].kwargs["help"] == "No submission names an enumerator"
+
+
 def test_render_overview_without_duration_shows_teams(
     tracked_columns, sample_enumerator_data, sample_enumerator_settings
 ):

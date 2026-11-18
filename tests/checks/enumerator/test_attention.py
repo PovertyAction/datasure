@@ -7,6 +7,7 @@ import pytest
 
 from datasure.checks.enumerator.attention import (
     GPS_FLAG_POINTS,
+    MIN_SUBMISSIONS,
     TIMES,
     AttentionRow,
     ColumnRoles,
@@ -135,6 +136,22 @@ def test_a_weekly_worker_is_not_marked_after_a_quiet_week():
 
     assert list(reasons) == ["gone"]
     assert reasons["gone"][0].finding.endswith("(usually works every 7 days)")
+
+
+def test_unnamed_submissions_date_the_data():
+    """The latest submission counts even with no enumerator on it."""
+    data = pl.DataFrame(
+        {
+            "enum": ["a", "a", None],
+            "day": [LATEST - timedelta(days=16), LATEST - timedelta(days=15), LATEST],
+        },
+        schema_overrides={"enum": pl.String},
+    )
+
+    reasons = activity_reasons(data, ROLES)
+
+    assert list(reasons) == ["a"]
+    assert "15 days before the latest submission" in reasons["a"][0].finding
 
 
 def test_activity_reads_datetimes_and_skips_text_dates():
@@ -393,6 +410,30 @@ def test_old_versions_after_the_newest_came_out_are_flagged():
     assert list(reasons) == ["b"]
     assert reasons["b"][0].finding == (
         "1 submission on version 1 after 2 came out on Fri 13 Nov"
+    )
+
+
+def test_an_unnamed_submission_dates_the_newest_version():
+    """The newest version came out with its first submission, named or not."""
+    data = pl.DataFrame(
+        {
+            "enum": [None, "b", "b", None],
+            "version": [2, 1, 1, 1],
+            "day": [
+                LATEST - timedelta(days=4),
+                LATEST - timedelta(days=9),
+                LATEST - timedelta(days=1),
+                LATEST - timedelta(days=1),
+            ],
+        },
+        schema_overrides={"enum": pl.String},
+    )
+
+    reasons = form_version_reasons(data, ROLES)
+
+    assert list(reasons) == ["b"]
+    assert reasons["b"][0].finding == (
+        "1 submission on version 1 after 2 came out on Thu 12 Nov"
     )
 
 
@@ -670,7 +711,7 @@ def test_a_few_gps_points_are_watched_and_more_are_flagged():
     )
 
 
-def test_the_relative_rule_compares_rates_with_the_team():
+def test_the_relative_rule_compares_rates_with_the_rest_of_the_team():
     issues = IssueCounts(
         "Outliers",
         "outlier",
@@ -682,16 +723,65 @@ def test_the_relative_rule_compares_rates_with_the_team():
 
     reasons = count_reasons(issues, submissions)
 
-    # The team's rate is 25 outliers in 100 submissions.
+    # Without "high", the rest of the team has 13 outliers in 80 submissions.
     assert reasons["high"] == [
         Reason(
             "Outliers",
-            f"12 outliers, 2.4{TIMES} the team's rate per submission",
+            f"12 outliers, 3.7{TIMES} the rest of the team's rate per submission",
             Severity.FLAG,
         )
     ]
     assert reasons["raised"][0].severity is Severity.WATCH
     assert set(reasons) == {"high", "raised"}
+
+
+def test_the_relative_rule_leaves_out_the_enumerators_own_issues():
+    """One with most of the interviews can't hide in the team's rate."""
+    issues = IssueCounts(
+        "Outliers",
+        "outlier",
+        "outliers",
+        {"most": 30, "few": 1},
+        rule=CountRule.RELATIVE,
+    )
+
+    reasons = count_reasons(issues, {"most": 90, "few": 10})
+
+    # 30 in 90 against 1 in 10; with them in, the team's rate is 31 in 100.
+    assert reasons["most"][0].finding == (
+        f"30 outliers, 3.3{TIMES} the rest of the team's rate per submission"
+    )
+
+
+def test_the_relative_rule_needs_the_minimum_submissions():
+    issues = IssueCounts(
+        "Constraints",
+        "constraint",
+        "constraints",
+        {"new": 3, "old": 1},
+        rule=CountRule.RELATIVE,
+        denominators={"new": 30, "old": 300},
+    )
+
+    reasons = count_reasons(issues, {"new": MIN_SUBMISSIONS - 1, "old": 50})
+
+    assert reasons == {}
+
+
+def test_the_relative_rule_flags_issues_when_the_rest_have_none():
+    issues = IssueCounts(
+        "Outliers", "outlier", "outliers", {"a": 3}, rule=CountRule.RELATIVE
+    )
+
+    assert count_reasons(issues, {"a": 10, "b": 10}) == {
+        "a": [
+            Reason(
+                "Outliers", "3 outliers, none for the rest of the team", Severity.FLAG
+            )
+        ]
+    }
+    # Alone, there is no one to compare with.
+    assert count_reasons(issues, {"a": 10}) == {}
 
 
 def test_the_relative_rule_can_use_its_own_denominators():
@@ -707,8 +797,10 @@ def test_the_relative_rule_can_use_its_own_denominators():
 
     reasons = count_reasons(issues, {"a": 100, "b": 100})
 
+    # 6 in 10 against b's 1 in 30.
     assert reasons["a"][0].finding == (
-        f"6 backcheck mismatches, 3.4{TIMES} the team's rate per value compared"
+        f"6 backcheck mismatches, 18.0{TIMES} the rest of the team's rate per "
+        "value compared"
     )
 
 
