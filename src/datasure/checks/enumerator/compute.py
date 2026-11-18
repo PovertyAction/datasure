@@ -450,7 +450,7 @@ def compute_enumerator_missing_shares(
 ) -> pl.DataFrame:
     """Return each enumerator's submissions and missing-answer share.
 
-    The "# submissions" and "% Total Missing" columns the summary table has,
+    The "# submissions" and missing-share columns the summary table has,
     computed the same way over ``data``, so Needs attention can compare
     missing answers over only some interviews, such as completed ones.
 

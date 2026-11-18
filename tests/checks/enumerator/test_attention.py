@@ -24,6 +24,7 @@ from datasure.checks.enumerator.attention import (
     duration_reasons,
     form_version_reasons,
     format_minutes,
+    missing_column,
     missing_reasons,
     pattern_reasons,
     rate_reasons,
@@ -295,6 +296,24 @@ def test_missing_answers_name_the_interviews_counted():
         "30% of answers missing in completed interviews against 2.0% for the "
         "rest of the team"
     )
+
+
+def test_missing_answers_fall_back_to_blanks_without_missing_codes():
+    """Without missing codes the summary has only "% Null values"."""
+    summary = _summary([("a", 10, 2.0, 0.9), ("gaps", 10, 30.0, 0.9)]).rename(
+        {"% Total Missing": "% Null values"}
+    )
+
+    reasons = missing_reasons(summary, "enum")
+
+    assert set(reasons) == {"gaps"}
+    assert reasons["gaps"][0].severity is Severity.FLAG
+
+
+def test_missing_column_prefers_the_total_with_missing_codes():
+    assert missing_column(["% Null values", "% Total Missing"]) == "% Total Missing"
+    assert missing_column(["% Null values"]) == "% Null values"
+    assert missing_column(["# submissions"]) is None
 
 
 def test_attention_rows_read_missing_answers_over_the_interviews_counted():

@@ -38,6 +38,10 @@ REVIEW_RESPONSE_PATTERNS = "Open Response Patterns below to review its settings.
 
 # The summary table's submissions column, which the rates' sample sizes use.
 SUBMISSIONS = "# submissions"
+# Its share of missing answers: with the project's missing codes, or only
+# blank answers when it has none.
+TOTAL_MISSING = "% Total Missing"
+NULL_VALUES = "% Null values"
 
 # An enumerator's rates count only with this many submissions.
 MIN_SUBMISSIONS = 5
@@ -481,20 +485,33 @@ def _missing_severity(share: float, team: float) -> Severity | None:
     return None
 
 
+def missing_column(columns: Iterable[str]) -> str | None:
+    """Return the missing-answer share column to read, if any.
+
+    "% Total Missing" counts missing codes and blanks; without missing codes
+    the summary has only "% Null values", the blanks.
+    """
+    columns = set(columns)
+    for column in (TOTAL_MISSING, NULL_VALUES):
+        if column in columns:
+            return column
+    return None
+
+
 def missing_reasons(
     summary: pl.DataFrame, enumerator: str, counted: str | None = None
 ) -> dict[str, list[Reason]]:
     """Flag enumerators with a much larger share of missing answers.
 
-    Reads "% Total Missing" and "# submissions" from ``summary``: the
-    summary table, or the same columns over the interviews
+    Reads the share `missing_column` picks and "# submissions" from
+    ``summary``: the summary table, or the same columns over the interviews
     `counted_interviews` keeps, which ``counted`` then names for the
     finding. Each enumerator is compared with the median share of the rest
     of the team.
     """
     within = f" in {counted}" if counted else ""
-    column = "% Total Missing"
-    if column not in summary.columns or SUBMISSIONS not in summary.columns:
+    column = missing_column(summary.columns)
+    if column is None or SUBMISSIONS not in summary.columns:
         return {}
     reasons: dict[str, list[Reason]] = {}
     for name, share, n in summary.select(
@@ -809,7 +826,7 @@ def attention_rows(
     other : Iterable[IssueCounts]
         Other checks' outstanding issues by enumerator.
     missing : pl.DataFrame | None
-        "# submissions" and "% Total Missing" by enumerator over the
+        "# submissions" and the missing share by enumerator over the
         interviews `counted_interviews` keeps, when it narrows them; None
         reads them from ``summary``.
     """

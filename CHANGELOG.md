@@ -334,6 +334,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   - Response Patterns: a High badge on a low-sample result is Watch
   - GPS: fewer than `GPS_FLAG_POINTS` (3) unreviewed points are Watch, via
     the new `IssueCounts.flag_from`
+  - Missing answers read "% Null values" when the project has no missing
+    codes (`missing_column`); before, the rule needed "% Total Missing" and
+    never ran without codes
 - **Enumerator Report overview**: four figures with comparisons
   (`compute.compute_overview_figures`, `models.OverviewFigures`) replace
   the eight metrics. The old Fewest/Highest/Average "enumerator submissions"

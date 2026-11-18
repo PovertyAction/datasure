@@ -1813,6 +1813,8 @@ length and missing answers count only consented and completed interviews, since
 refusals and partial interviews are short and sparse by nature; their reasons
 say so ("over 20 completed interviews"), and missing answers can then differ
 from the summary table's **% Total Missing**, which counts every submission.
+Missing answers use **% Total Missing** when the project has missing codes,
+and **% Null values** (blank answers only) when it has none.
 
 | Reason | Flagged | Watch |
 | --- | --- | --- |

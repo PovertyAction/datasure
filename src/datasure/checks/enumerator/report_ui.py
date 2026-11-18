@@ -22,6 +22,7 @@ from datasure.checks.enumerator.attention import (
     attention_totals,
     counted_interviews,
     format_minutes,
+    missing_column,
     row_label,
     shown_rows,
     submissions_by_enumerator,
@@ -356,7 +357,7 @@ def _rules_in_use(
         names.append("activity")
     if settings.duration:
         names.append("interview length")
-    if "% Total Missing" in summary.columns:
+    if missing_column(summary.columns):
         names.append("missing answers")
     if "% consent" in summary.columns:
         names.append("consent")
