@@ -26,7 +26,11 @@ from datasure.checks.duplicates import (
     duplicate_records_by_enumerator,
     duplicates_headline,
 )
-from datasure.checks.enumerator.attention import CountRule, IssueCounts
+from datasure.checks.enumerator.attention import (
+    GPS_FLAG_POINTS,
+    CountRule,
+    IssueCounts,
+)
 from datasure.checks.gpschecks.report_ui import (
     gpschecks_headline,
     gpschecks_headline_view,
@@ -111,7 +115,7 @@ def _gps_view(ctx: CheckContext) -> object:
 
 
 def gps(ctx: CheckContext, scope: EnumeratorScope) -> tuple[IssueCounts, ...]:
-    """GPS points flagged as outliers and not yet reviewed."""
+    """GPS points flagged as outliers and not yet reviewed; a few are Watch."""
     config = ctx.config
     headline = cached_headline(
         ctx,
@@ -135,6 +139,7 @@ def gps(ctx: CheckContext, scope: EnumeratorScope) -> tuple[IssueCounts, ...]:
             "GPS points far from the others",
             points.counts,
             unattributed=points.unattributed,
+            flag_from=GPS_FLAG_POINTS,
         ),
     )
 

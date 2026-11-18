@@ -1798,7 +1798,11 @@ each reason in plain words. A **Flagged** reason is worth reviewing now; a
 
 Reasons compare the enumerator with the rest of the team (or the chosen
 team), so a project where everyone has a few outliers doesn't flag everyone.
-Rates need at least 5 submissions.
+Rates need at least 5 submissions. When consent or outcome is set up, interview
+length and missing answers count only consented and completed interviews, since
+refusals and partial interviews are short and sparse by nature; their reasons
+say so ("over 20 completed interviews"), and missing answers can then differ
+from the summary table's **% Total Missing**, which counts every submission.
 
 | Reason | Flagged | Watch |
 | --- | --- | --- |
@@ -1806,10 +1810,10 @@ Rates need at least 5 submissions.
 | Interview length | Median 60% or less of the rest of the team's median | 75% or less |
 | Missing answers | 10 points and 2× above the rest of the team's median share | 5 points and 1.5× |
 | Consent, Completion | 15 points or more below the rest of the team's median rate | 8 points |
-| Form version | Any submission on an older version after the newest version's first submission (from the next day if the date column has no times). Versions compare as numbers, so 10 is newer than 9 | |
-| Response patterns | A High result | A Moderate result |
+| Form version | Any submission on an older version more than a day after the newest version's first submission. Versions compare as numbers, so 10 is newer than 9 | Older-version submissions only within a day of it: 24 hours, or the next day if the date column has no times (the release day itself doesn't count) |
+| Response patterns | A High result | A Moderate result, or a High result on a low sample |
 | Duplicates | Any record holding an unresolved duplicate ID | |
-| GPS | Any GPS outlier not yet accepted or corrected | |
+| GPS | 3 or more GPS outliers not yet accepted or corrected | 1 or 2 |
 | Outliers, Constraints | 3 or more, at 2× the team's rate per submission | 1.5× |
 | Backchecks | 3 or more mismatches, at 2× the team's rate per value compared | 1.5× |
 

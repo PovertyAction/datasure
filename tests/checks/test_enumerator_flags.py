@@ -20,7 +20,12 @@ from datasure.checks.catalogue import (
     get_check,
 )
 from datasure.checks.context import CheckContext, CheckData, PageConfig
-from datasure.checks.enumerator.attention import CountRule, IssueCounts, LeftOut
+from datasure.checks.enumerator.attention import (
+    GPS_FLAG_POINTS,
+    CountRule,
+    IssueCounts,
+    LeftOut,
+)
 from datasure.checks.headline import EnumeratorScope
 from datasure.checks.id_duplicates import find_duplicate_groups
 from datasure.processing.correction_log import CORRECTION_LOG_SCHEMA
@@ -351,6 +356,7 @@ class TestGPS:
 
         assert issues.counts == {"e2": 1, "e3": 1}
         assert issues.unattributed == 0
+        assert issues.flag_from == GPS_FLAG_POINTS
         assert sum(issues.counts.values()) == headline.outstanding
 
     def test_points_with_no_enumerator_are_unattributed(self, tmp_path):

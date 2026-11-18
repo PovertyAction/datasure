@@ -6,6 +6,7 @@ import polars as pl
 import pytest
 
 from datasure.checks.enumerator.attention import (
+    GPS_FLAG_POINTS,
     TIMES,
     ColumnRoles,
     CountRule,
@@ -16,6 +17,7 @@ from datasure.checks.enumerator.attention import (
     activity_reasons,
     attention_rows,
     count_reasons,
+    counted_interviews,
     duration_minutes,
     duration_reasons,
     flag_counts,
@@ -193,6 +195,57 @@ def test_no_interview_length_without_a_duration_column():
     assert duration_reasons(pl.DataFrame({"enum": ["a"]}), roles) == {}
 
 
+def test_interviews_counted_are_the_consented_and_completed_ones():
+    data = pl.DataFrame({"enum": ["a"] * 4, "ok": [1, 1, 0, 1], "done": [1, 0, 1, 1]})
+
+    both, label = counted_interviews(
+        data, ColumnRoles("enum", consent="ok", completed="done")
+    )
+    consent_only, consent_label = counted_interviews(
+        data, ColumnRoles("enum", consent="ok")
+    )
+    unset, none = counted_interviews(data, ColumnRoles("enum"))
+
+    assert (both.height, label) == (2, "completed interviews")
+    assert (consent_only.height, consent_label) == (3, "consented interviews")
+    assert (unset.height, none) == (4, None)
+
+
+def test_interview_length_counts_only_completed_interviews():
+    """Short refusals don't make an enumerator look rushed."""
+    roles = ColumnRoles(
+        "enum", duration="dur", duration_unit="minutes", completed="done"
+    )
+    data = _frame(
+        _rows("refusals", 10, dur=2.0, done=0),
+        _rows("refusals", 6, dur=38.0, done=1),
+        _rows("fast", 6, dur=10.0, done=1),
+        _rows("a", 6, dur=40.0, done=1),
+        _rows("b", 6, dur=40.0, done=1),
+    )
+
+    reasons = duration_reasons(data, roles)
+
+    assert set(reasons) == {"fast"}
+    assert reasons["fast"][0].finding == (
+        "Median 10 min over 6 completed interviews against 40 min for the rest "
+        "of the team"
+    )
+
+
+def test_interview_length_needs_enough_completed_interviews():
+    roles = ColumnRoles(
+        "enum", duration="dur", duration_unit="minutes", completed="done"
+    )
+    data = _frame(
+        _rows("fast", 4, dur=10.0, done=1),
+        _rows("fast", 6, dur=10.0, done=0),
+        _rows("a", 10, dur=40.0, done=1),
+    )
+
+    assert duration_reasons(data, roles) == {}
+
+
 # --- Missing answers and rates -----------------------------------------------
 
 
@@ -228,6 +281,35 @@ def test_missing_answers_compare_with_the_rest_of_the_team():
     assert reasons["gaps"][0].finding == (
         "30% of answers missing against 2.0% for the rest of the team"
     )
+
+
+def test_missing_answers_name_the_interviews_counted():
+    summary = _summary([("a", 10, 2.0, 0.9), ("gaps", 10, 30.0, 0.9)])
+
+    reasons = missing_reasons(summary, "enum", "completed interviews")
+
+    assert reasons["gaps"][0].finding == (
+        "30% of answers missing in completed interviews against 2.0% for the "
+        "rest of the team"
+    )
+
+
+def test_attention_rows_read_missing_answers_over_the_interviews_counted():
+    """The narrowed table, not the summary, decides missing answers."""
+    data = _frame(
+        _rows("a", 6, done=1), _rows("b", 6, done=1), _rows("gaps", 6, done=1)
+    )
+    summary = _summary([("a", 6, 2.0, 0.9), ("b", 6, 2.0, 0.9), ("gaps", 6, 2.0, 0.9)])
+    narrowed = _summary(
+        [("a", 6, 2.0, 0.9), ("b", 6, 2.0, 0.9), ("gaps", 6, 30.0, 0.9)]
+    )
+
+    rows = attention_rows(
+        data, ColumnRoles("enum", completed="done"), summary, missing=narrowed
+    ).rows
+
+    assert [row.enumerator for row in rows] == ["gaps"]
+    assert "in completed interviews" in rows[0].reasons[0].finding
 
 
 def test_low_consent_is_flagged_in_points_below_the_team():
@@ -364,6 +446,56 @@ def test_with_dates_only_the_release_day_itself_is_not_flagged():
     assert list(reasons) == ["c"]
 
 
+def test_old_versions_within_a_day_of_the_update_are_watched():
+    """Tablets take a while to update, so the first day is Watch, not Flagged."""
+    release = datetime.combine(LATEST - timedelta(days=3), time(14))
+    data = pl.DataFrame(
+        {
+            "enum": ["a", "late", "later", "later"],
+            "version": [2, 1, 1, 1],
+            "day": [
+                release,
+                release + timedelta(hours=23),
+                release + timedelta(hours=2),
+                release + timedelta(hours=25),
+            ],
+        }
+    )
+
+    reasons = form_version_reasons(data, ROLES)
+
+    assert reasons["late"][0] == Reason(
+        "Form version",
+        "1 submission on version 1 after 2 came out on Fri 13 Nov, all within a "
+        "day of it",
+        Severity.WATCH,
+    )
+    assert reasons["later"][0].severity is Severity.FLAG
+    assert reasons["later"][0].finding == (
+        "2 submissions on version 1 after 2 came out on Fri 13 Nov"
+    )
+
+
+def test_with_dates_only_the_day_after_the_update_is_watched():
+    release_day = LATEST - timedelta(days=3)
+    data = pl.DataFrame(
+        {
+            "enum": ["a", "next", "after"],
+            "version": [2, 1, 1],
+            "day": [
+                release_day,
+                release_day + timedelta(days=1),
+                release_day + timedelta(days=2),
+            ],
+        }
+    )
+
+    reasons = form_version_reasons(data, ROLES)
+
+    assert reasons["next"][0].severity is Severity.WATCH
+    assert reasons["after"][0].severity is Severity.FLAG
+
+
 # --- Response patterns -------------------------------------------------------
 
 
@@ -465,6 +597,20 @@ def test_no_pattern_reasons_when_the_section_did_not_run():
     assert pattern_reasons(None) == {}
 
 
+def test_a_high_badge_on_a_low_sample_is_watched():
+    results = _patterns()
+    digit = results.digit_preference.enumerators[0]
+    results.digit_preference.enumerators[0] = digit.model_copy(
+        update={"sample_band": SampleBand.LOW}
+    )
+
+    reasons = pattern_reasons(results)
+
+    assert reasons["a"][0].severity is Severity.WATCH
+    assert reasons["a"][0].finding.endswith("(low sample)")
+    assert reasons["c"][0].severity is Severity.FLAG
+
+
 # --- Other checks' issues ----------------------------------------------------
 
 
@@ -482,6 +628,24 @@ def test_any_outstanding_issue_flags_under_the_any_rule():
         "a": [Reason("Duplicates", "1 record with a duplicate ID", Severity.FLAG)],
         "b": [Reason("Duplicates", "3 records with a duplicate ID", Severity.FLAG)],
     }
+
+
+def test_a_few_gps_points_are_watched_and_more_are_flagged():
+    issues = IssueCounts(
+        "GPS",
+        "GPS point far from the others",
+        "GPS points far from the others",
+        {"one": 1, "two": 2, "three": GPS_FLAG_POINTS},
+        flag_from=GPS_FLAG_POINTS,
+    )
+
+    reasons = count_reasons(issues, {"one": 10, "two": 10, "three": 10})
+
+    assert reasons["one"][0].severity is Severity.WATCH
+    assert reasons["two"][0].severity is Severity.WATCH
+    assert reasons["three"][0] == Reason(
+        "GPS", "3 GPS points far from the others", Severity.FLAG
+    )
 
 
 def test_the_relative_rule_compares_rates_with_the_team():

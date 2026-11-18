@@ -8,6 +8,7 @@ import pytest
 from polars.exceptions import ColumnNotFoundError
 
 from datasure.checks.enumerator.compute import (
+    compute_enumerator_missing_shares,
     compute_enumerator_missing_table,
     compute_enumerator_productivity,
     compute_enumerator_statistics,
@@ -113,6 +114,30 @@ def test_compute_enumerator_missing_table_with_config(
 
     assert not result.is_empty()
     assert "enumerator" in result.columns
+
+
+def test_missing_shares_count_submissions_beside_the_share(
+    sample_enumerator_data, sample_missing_codes_config
+):
+    """Needs attention reads the summary's columns over only some interviews."""
+    result = compute_enumerator_missing_shares(
+        sample_enumerator_data, "enumerator", None, sample_missing_codes_config
+    )
+    counts = sample_enumerator_data.group_by("enumerator").len()
+
+    assert {"enumerator", "# submissions", "% Total Missing"} <= set(result.columns)
+    assert dict(result.select("enumerator", "# submissions").iter_rows()) == dict(
+        counts.iter_rows()
+    )
+
+
+def test_missing_shares_of_no_interviews_are_empty(sample_missing_codes_config):
+    assert compute_enumerator_missing_shares(
+        pl.DataFrame({"enumerator": []}),
+        "enumerator",
+        None,
+        sample_missing_codes_config,
+    ).is_empty()
 
 
 def test_compute_enumerator_missing_table_with_team(sample_enumerator_data):

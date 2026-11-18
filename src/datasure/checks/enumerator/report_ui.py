@@ -19,6 +19,7 @@ from datasure.checks.enumerator.attention import (
     OtherChecks,
     Severity,
     attention_rows,
+    counted_interviews,
     flag_counts,
     format_minutes,
     unattributed_notes,
@@ -28,6 +29,7 @@ from datasure.checks.enumerator.compute import (
     CONSENT_FLAG,
     DISPLAY_DATE_FORMAT,
     add_consent_outcome_flags,
+    compute_enumerator_missing_shares,
     compute_enumerator_productivity,
     compute_enumerator_statistics,
     compute_enumerator_statistics_overtime,
@@ -1132,19 +1134,28 @@ def enumerator_report(
     )
     scope = EnumeratorScope(enumerator, settings.team, controls.team)
     other = other_checks(scope) if other_checks else OtherChecks()
+    roles = ColumnRoles(
+        enumerator,
+        settings.team,
+        survey_date,
+        settings.duration,
+        settings.duration_unit,
+        settings.formversion,
+        CONSENT_FLAG if CONSENT_FLAG in report_data.columns else None,
+        COMPLETED_FLAG if COMPLETED_FLAG in report_data.columns else None,
+    )
+    counted, narrowed = counted_interviews(report_data, roles)
     attention = attention_rows(
         report_data,
-        ColumnRoles(
-            enumerator,
-            settings.team,
-            survey_date,
-            settings.duration,
-            settings.duration_unit,
-            settings.formversion,
-        ),
+        roles,
         summary_df,
         patterns,
         other.counts,
+        compute_enumerator_missing_shares(
+            counted, enumerator, settings.team, missing_codes
+        )
+        if narrowed and survey_date
+        else None,
     )
     _render_needs_attention(
         replace(

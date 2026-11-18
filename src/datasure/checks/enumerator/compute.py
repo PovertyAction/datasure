@@ -442,6 +442,44 @@ def compute_enumerator_missing_table(
     return result_df
 
 
+def compute_enumerator_missing_shares(
+    data: pl.DataFrame,
+    enumerator: str,
+    team: str | None,
+    missing_codes_config: pl.DataFrame,
+) -> pl.DataFrame:
+    """Return each enumerator's submissions and missing-answer share.
+
+    The "# submissions" and "% Total Missing" columns the summary table has,
+    computed the same way over ``data``, so Needs attention can compare
+    missing answers over only some interviews, such as completed ones.
+
+    Parameters
+    ----------
+    data : pl.DataFrame
+        The interviews to count.
+    enumerator : str
+        Enumerator column name.
+    team : str | None
+        Team column name, grouped by as in the summary table.
+    missing_codes_config : pl.DataFrame
+        The project's missing codes.
+
+    Returns
+    -------
+    pl.DataFrame
+        One row per enumerator (and team); empty when ``data`` is.
+    """
+    if data.is_empty():
+        return pl.DataFrame()
+    group_by_cols = [enumerator, team] if team else [enumerator]
+    counts = data.group_by(group_by_cols, maintain_order=True).agg(
+        pl.len().alias("# submissions")
+    )
+    shares = compute_enumerator_missing_table(data, missing_codes_config, group_by_cols)
+    return counts.join(shares, on=group_by_cols, how="left")
+
+
 def compute_enumerator_summary(
     project_id: str,
     data: pl.DataFrame,

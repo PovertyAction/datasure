@@ -17,7 +17,7 @@ new enumerator.
 import logging
 from collections.abc import Callable, Iterable, Mapping, Sequence
 from dataclasses import dataclass
-from datetime import date, datetime
+from datetime import date, datetime, timedelta
 from enum import StrEnum
 
 import polars as pl
@@ -25,6 +25,7 @@ import polars as pl
 from datasure.checks.enumerator.response_patterns.models import (
     Badge,
     ResponsePatternResults,
+    SampleBand,
 )
 
 logger = logging.getLogger(__name__)
@@ -57,6 +58,11 @@ SHORT_WATCH_RATIO = 0.75
 MISSING_FLAG = (10.0, 2.0)
 MISSING_WATCH = (5.0, 1.5)
 
+# Form version: older-version submissions only this long after the newest
+# version's first are Watch, as tablets take a while to update; any later is
+# Flagged.
+FORM_VERSION_GRACE = timedelta(days=1)
+
 # Consent and completion: points below the team's median rate.
 RATE_FLAG_POINTS = 15.0
 RATE_WATCH_POINTS = 8.0
@@ -66,6 +72,10 @@ RATE_WATCH_POINTS = 8.0
 RELATIVE_FLAG_RATIO = 2.0
 RELATIVE_WATCH_RATIO = 1.5
 RELATIVE_MIN_ISSUES = 3
+
+# GPS outliers not yet reviewed: fewer than this many are Watch, as one odd
+# point is often weak signal or a household far from the rest.
+GPS_FLAG_POINTS = 3
 
 
 class Severity(StrEnum):
@@ -117,7 +127,8 @@ class CountRule(StrEnum):
     """When another check's per-enumerator issues give a reason."""
 
     # Every outstanding issue is worth a look: a duplicate ID or a GPS point
-    # far from the rest is rare and specific.
+    # far from the rest is rare and specific. Flagged from
+    # ``IssueCounts.flag_from`` issues, Watch below that.
     ANY = "any"
     # Only a rate well above the team's: most enumerators have a few
     # outliers, so a count alone says little.
@@ -149,6 +160,9 @@ class IssueCounts:
     unattributed : int
         Outstanding issues on records with no enumerator, which no row of
         the list can show; with ``counts`` they add up to the check's total.
+    flag_from : int
+        Under the "any" rule, the fewest issues that are Flagged; fewer are
+        Watch. The default flags any.
     """
 
     check: str
@@ -159,6 +173,7 @@ class IssueCounts:
     denominators: Mapping[str, int] | None = None
     per: str = "submission"
     unattributed: int = 0
+    flag_from: int = 1
 
     def noun(self, count: int) -> str:
         """Return the count with the issue's name, such as "3 outliers"."""
@@ -253,7 +268,11 @@ class AttentionList:
 
 @dataclass(frozen=True)
 class ColumnRoles:
-    """The page's columns the rules read; None when not set."""
+    """The page's columns the rules read; None when not set.
+
+    ``consent`` and ``completed`` are the 0/1 columns marking consented and
+    completed interviews, which the page adds when they are set up.
+    """
 
     enumerator: str
     team: str | None = None
@@ -261,6 +280,33 @@ class ColumnRoles:
     duration: str | None = None
     duration_unit: str | None = None
     formversion: str | None = None
+    consent: str | None = None
+    completed: str | None = None
+
+
+def counted_interviews(
+    data: pl.DataFrame, roles: ColumnRoles
+) -> tuple[pl.DataFrame, str | None]:
+    """Return the interviews interview length and missing answers count.
+
+    Only consented and completed interviews, as far as the page has them set
+    up, since refusals and partial interviews are short and sparse by
+    nature. Returns the data narrowed, with what it holds for the findings
+    ("completed interviews" or "consented interviews"), or the data as it is
+    with None when neither is set up.
+    """
+    flags = [
+        (column, label)
+        for column, label in (
+            (roles.consent, "consented interviews"),
+            (roles.completed, "completed interviews"),
+        )
+        if column and column in data.columns
+    ]
+    if not flags:
+        return data, None
+    narrowed = data.filter(*(pl.col(column) == 1 for column, _ in flags))
+    return narrowed, flags[-1][1]
 
 
 # --- Formatting -------------------------------------------------------------
@@ -368,12 +414,13 @@ def duration_reasons(data: pl.DataFrame, roles: ColumnRoles) -> dict[str, list[R
 
     Each enumerator is compared with the median over the rest of the team's
     submissions, so one who does most of the interviews can't set their own
-    benchmark. Long interviews are not marked: they are rarely a sign of
-    made-up answers.
+    benchmark. Only the interviews `counted_interviews` keeps count. Long
+    interviews are not marked: they are rarely a sign of made-up answers.
     """
     column = roles.duration
     if not column or column not in data.columns:
         return {}
+    data, counted = counted_interviews(data, roles)
     lengths = data.select(
         _text(data[roles.enumerator]).alias("enumerator"),
         pl.col(column).cast(pl.Float64, strict=False).alias("length"),
@@ -394,10 +441,11 @@ def duration_reasons(data: pl.DataFrame, roles: ColumnRoles) -> dict[str, list[R
         if ratio > SHORT_WATCH_RATIO:
             continue
         severity = Severity.FLAG if ratio <= SHORT_FLAG_RATIO else Severity.WATCH
+        over = f" over {n:,} {counted}" if counted else ""
         reasons[name] = [
             Reason(
                 "Interview length",
-                f"Median {format_minutes(duration_minutes(median, unit))} "
+                f"Median {format_minutes(duration_minutes(median, unit))}{over} "
                 f"against {team_text} for the rest of the team",
                 severity,
             )
@@ -433,13 +481,18 @@ def _missing_severity(share: float, team: float) -> Severity | None:
     return None
 
 
-def missing_reasons(summary: pl.DataFrame, enumerator: str) -> dict[str, list[Reason]]:
+def missing_reasons(
+    summary: pl.DataFrame, enumerator: str, counted: str | None = None
+) -> dict[str, list[Reason]]:
     """Flag enumerators with a much larger share of missing answers.
 
-    Reads the summary table's "% Total Missing", so the numbers match it.
-    Each enumerator is compared with the median share of the rest of the
-    team.
+    Reads "% Total Missing" and "# submissions" from ``summary``: the
+    summary table, or the same columns over the interviews
+    `counted_interviews` keeps, which ``counted`` then names for the
+    finding. Each enumerator is compared with the median share of the rest
+    of the team.
     """
+    within = f" in {counted}" if counted else ""
     column = "% Total Missing"
     if column not in summary.columns or SUBMISSIONS not in summary.columns:
         return {}
@@ -457,7 +510,7 @@ def missing_reasons(summary: pl.DataFrame, enumerator: str) -> dict[str, list[Re
             reasons.setdefault(name, []).append(
                 Reason(
                     "Missing answers",
-                    f"{_pct(share)} of answers missing against {_pct(team)} "
+                    f"{_pct(share)} of answers missing{within} against {_pct(team)} "
                     "for the rest of the team",
                     severity,
                 )
@@ -510,7 +563,9 @@ def form_version_reasons(
     out with its first submission. Only older-version submissions after that
     count: after its first submission's time when the date column has
     times, and from the next day when it has dates only, since the order on
-    the release day is then unknown.
+    the release day is then unknown. They are Watch while all fall within
+    `FORM_VERSION_GRACE` of the release (24 hours, or the next day with
+    dates only), as tablets take a while to update, and Flagged after.
     """
     version, day = roles.formversion, roles.survey_date
     if not version or not day or not {version, day} <= set(data.columns):
@@ -536,18 +591,24 @@ def form_version_reasons(
         rows.filter((pl.col("at") > released) & (pl.col("rank") != newest_rank))
         .sort("rank")
         .group_by("enumerator", maintain_order=True)
-        .agg(pl.len().alias("n"), pl.col("version").last().alias("latest_used"))
+        .agg(
+            pl.len().alias("n"),
+            pl.col("version").last().alias("latest_used"),
+            pl.col("at").max().alias("last_at"),
+        )
     )
     newest_name = newest["version"][0]
     released_day = released.date() if isinstance(released, datetime) else released
     reasons: dict[str, list[Reason]] = {}
-    for name, n, used in outdated.iter_rows():
+    for name, n, used, last_at in outdated.iter_rows():
+        in_grace = last_at <= released + FORM_VERSION_GRACE
         reasons[name] = [
             Reason(
                 "Form version",
                 f"{n:,} submission{'' if n == 1 else 's'} on version {used} "
-                f"after {newest_name} came out on {_format_date(released_day)}",
-                Severity.FLAG,
+                f"after {newest_name} came out on {_format_date(released_day)}"
+                + (", all within a day of it" if in_grace else ""),
+                Severity.WATCH if in_grace else Severity.FLAG,
             )
         ]
     return reasons
@@ -565,6 +626,7 @@ def _digit_findings(results: ResponsePatternResults) -> Iterable[tuple]:
             yield (
                 e.enumerator,
                 e.badge,
+                e.sample_band,
                 "Digit preference",
                 f"{_pct(e.enum_pct)} of numeric answers end in 0 or 5 against "
                 f"{_pct(e.team_pct)} for the rest of the team",
@@ -579,6 +641,7 @@ def _range_findings(results: ResponsePatternResults) -> Iterable[tuple]:
             yield (
                 e.enumerator,
                 e.badge,
+                e.sample_band,
                 "Range compression",
                 f"Answers to {variables} spread {e.sd_ratio:.2f}{TIMES} as widely "
                 "as the rest of the team's",
@@ -593,6 +656,7 @@ def _categorical_findings(results: ResponsePatternResults) -> Iterable[tuple]:
             yield (
                 e.enumerator,
                 e.badge,
+                e.sample_band,
                 "Categorical answers",
                 f"Answers to {question.variable} differ from the team's by "
                 f"{e.largest_gap:.0f} points (option “{question.scoring_option}”)",
@@ -600,15 +664,23 @@ def _categorical_findings(results: ResponsePatternResults) -> Iterable[tuple]:
 
 
 def pattern_reasons(results: ResponsePatternResults | None) -> dict[str, list[Reason]]:
-    """Turn Response Patterns' High and Moderate badges into reasons."""
+    """Turn Response Patterns' High and Moderate badges into reasons.
+
+    High is Flagged and Moderate is Watch, except that a High result on a
+    low sample, which Response Patterns shows with a caution, is Watch.
+    """
     if results is None or results.condition is not None:
         return {}
     reasons: dict[str, list[Reason]] = {}
     for findings in (_digit_findings, _range_findings, _categorical_findings):
-        for name, badge, check, finding in findings(results):
+        for name, badge, band, check, finding in findings(results):
             severity = _BADGE_SEVERITY.get(badge)
-            if severity is not None:
-                reasons.setdefault(name, []).append(Reason(check, finding, severity))
+            if severity is None:
+                continue
+            if band is SampleBand.LOW:
+                severity = Severity.WATCH
+                finding += " (low sample)"
+            reasons.setdefault(name, []).append(Reason(check, finding, severity))
     return reasons
 
 
@@ -629,7 +701,13 @@ def count_reasons(
     shown = {name: n for name, n in issues.counts.items() if name in submissions}
     if issues.rule is CountRule.ANY:
         return {
-            name: [Reason(issues.check, issues.noun(count), Severity.FLAG)]
+            name: [
+                Reason(
+                    issues.check,
+                    issues.noun(count),
+                    Severity.FLAG if count >= issues.flag_from else Severity.WATCH,
+                )
+            ]
             for name, count in shown.items()
             if count > 0
         }
@@ -701,6 +779,7 @@ def attention_rows(
     summary: pl.DataFrame,
     patterns: ResponsePatternResults | None = None,
     other: Iterable[IssueCounts] = (),
+    missing: pl.DataFrame | None = None,
 ) -> AttentionList:
     """Return the enumerators with a reason to look at, most urgent first.
 
@@ -719,16 +798,22 @@ def attention_rows(
         Response Patterns' results on ``data``, if it ran.
     other : Iterable[IssueCounts]
         Other checks' outstanding issues by enumerator.
+    missing : pl.DataFrame | None
+        "# submissions" and "% Total Missing" by enumerator over the
+        interviews `counted_interviews` keeps, when it narrows them; None
+        reads them from ``summary``.
     """
     submissions = submissions_by_enumerator(data, roles.enumerator)
     enumerator = roles.enumerator
+    counted = counted_interviews(data, roles)[1] if missing is not None else None
+    missing_table = summary if missing is None else missing
     rules: list[tuple[str, str, Callable[[], dict[str, list[Reason]]]]] = [
         ("Activity", REVIEW_THIS_PAGE, lambda: activity_reasons(data, roles)),
         ("Interview length", REVIEW_THIS_PAGE, lambda: duration_reasons(data, roles)),
         (
             "Missing answers",
             REVIEW_THIS_PAGE,
-            lambda: missing_reasons(summary, enumerator),
+            lambda: missing_reasons(missing_table, enumerator, counted),
         ),
         (
             "Consent",

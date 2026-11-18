@@ -316,6 +316,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Needs attention rules** (`checks/enumerator/attention.py`):
+  - Interview length and missing answers count only consented and completed
+    interviews when consent or outcome is set up (`counted_interviews`,
+    `ColumnRoles.consent`/`completed`); missing answers then read
+    `compute.compute_enumerator_missing_shares` over those interviews,
+    passed to `attention_rows` as `missing`
+  - Form version: older-version submissions all within `FORM_VERSION_GRACE`
+    (1 day) of the newest version's release are Watch, not Flagged
+  - Response Patterns: a High badge on a low-sample result is Watch
+  - GPS: fewer than `GPS_FLAG_POINTS` (3) unreviewed points are Watch, via
+    the new `IssueCounts.flag_from`
 - **Enumerator Report overview**: four figures with comparisons
   (`compute.compute_overview_figures`, `models.OverviewFigures`) replace
   the eight metrics. The old Fewest/Highest/Average "enumerator submissions"
