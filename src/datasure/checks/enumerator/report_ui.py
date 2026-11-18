@@ -19,9 +19,12 @@ from datasure.checks.enumerator.attention import (
     OtherChecks,
     Severity,
     attention_rows,
+    attention_totals,
     counted_interviews,
-    flag_counts,
     format_minutes,
+    row_label,
+    shown_rows,
+    submissions_by_enumerator,
     unattributed_notes,
 )
 from datasure.checks.enumerator.compute import (
@@ -121,6 +124,9 @@ EN_DASH = "\N{EN DASH}"
 
 # Enumerators listed under "Needs attention" before the rest fold away.
 ATTENTION_SHOWN = 10
+# The "Needs attention" toggles for each severity, saved as view state.
+SHOW_FLAGGED_KEY = "attention_show_flagged"
+SHOW_WATCH_KEY = "attention_show_watch"
 
 # =============================================================================
 # Display Functions - Overview
@@ -366,13 +372,72 @@ def _rules_in_use(
     return names
 
 
+def _plural(count: int, singular: str, plural: str) -> str:
+    return f"{count:,} {singular if count == 1 else plural}"
+
+
+def _render_attention_metrics(rows: list[AttentionRow], in_view: int) -> None:
+    """Show how many enumerators have Flagged and Watch reasons, and how many."""
+    totals = attention_totals(rows)
+    metric_row(
+        [
+            (
+                "Flagged enumerators",
+                f"{totals.flagged:,}",
+                "Enumerators with at least one Flagged reason, worth reviewing "
+                "now. One who also has Watch reasons counts under both.",
+                _plural(totals.flags, "flag", "flags"),
+            ),
+            (
+                "Watch enumerators",
+                f"{totals.watched:,}",
+                "Enumerators with at least one Watch reason, worth keeping an "
+                "eye on. One who also has Flagged reasons counts under both.",
+                _plural(totals.watches, "watch reason", "watch reasons"),
+            ),
+            (
+                "Enumerators listed",
+                f"{totals.listed:,}",
+                "Enumerators with any reason, each listed once",
+                f"of {_plural(in_view, 'enumerator', 'enumerators')}",
+            ),
+        ]
+    )
+
+
+def _render_severity_toggles(setting_file: str) -> tuple[bool, bool]:
+    """Draw the Show Flagged and Show Watch toggles; return their states.
+
+    Saved as view state, like the page's team, and on by default.
+    """
+    view = check_view(setting_file)
+    with st.container(horizontal=True):
+        flagged = st.toggle(
+            "Show Flagged",
+            help="List the reasons worth reviewing now",
+            **view.bind(SHOW_FLAGGED_KEY, value=True),
+        )
+        watch = st.toggle(
+            "Show Watch",
+            help="List the reasons worth keeping an eye on",
+            **view.bind(SHOW_WATCH_KEY, value=True),
+        )
+    return bool(flagged), bool(watch)
+
+
 def _render_needs_attention(
-    attention: AttentionList, rules: list[str], other: OtherChecks
+    attention: AttentionList,
+    rules: list[str],
+    other: OtherChecks,
+    setting_file: str,
+    in_view: int,
 ) -> None:
     """Draw the enumerators the checks single out, most flags first.
 
-    Each rule or check in ``attention.left_out`` is named under the list
-    with its reason, and left out of the "Checked" caption.
+    Metrics count every reason; the toggles under them choose which
+    severities the list shows. Each rule or check in ``attention.left_out``
+    is named under the list with its reason, and left out of the "Checked"
+    caption. ``in_view`` is the enumerators in the data shown.
     """
     rows = attention.rows
     section_header("Needs attention", icon=":material/flag:")
@@ -384,7 +449,8 @@ def _render_needs_attention(
         an eye on. Reasons compare the enumerator with the rest of the team,
         and come from this page (activity, interview length, missing answers,
         consent, form version, response patterns) and from Duplicates,
-        Outliers, GPS and Backchecks when they are set up.
+        Outliers, GPS and Backchecks when they are set up. Use **Show
+        Flagged** and **Show Watch** to list only one kind.
         """
     )
     if not rows:
@@ -393,20 +459,24 @@ def _render_needs_attention(
             icon=":material/check_circle:",
         )
     else:
-        flagged = sum(1 for row in rows if row.flags)
-        watched = len(rows) - flagged
-        st.caption(
-            f"{flagged:,} flagged and {watched:,} to watch, most flags first. "
-            "Each reason compares the enumerator with the rest of the team."
-        )
-        labels = flag_counts(rows)
-        for row in rows[:ATTENTION_SHOWN]:
-            _render_attention_row(row, labels[row.enumerator])
-        rest = rows[ATTENTION_SHOWN:]
+        _render_attention_metrics(rows, in_view)
+        show_flagged, show_watch = _render_severity_toggles(setting_file)
+        shown = shown_rows(rows, flagged=show_flagged, watch=show_watch)
+        if not (show_flagged or show_watch):
+            st.info(
+                "Turn on Show Flagged or Show Watch to see enumerators.",
+                icon=":material/visibility_off:",
+            )
+        elif not shown:
+            kind = "Flagged" if show_flagged else "Watch"
+            st.info(f"No enumerator has a {kind} reason.", icon=":material/info:")
+        for row in shown[:ATTENTION_SHOWN]:
+            _render_attention_row(row, row_label(row))
+        rest = shown[ATTENTION_SHOWN:]
         if rest:
             with st.expander(f"{len(rest):,} more"):
                 for row in rest:
-                    _render_attention_row(row, labels[row.enumerator])
+                    _render_attention_row(row, row_label(row))
     failed = {item.check.lower() for item in attention.left_out}
     checked = [rule for rule in rules if rule not in failed]
     if checked:
@@ -1164,6 +1234,8 @@ def enumerator_report(
         ),
         _rules_in_use(settings, summary_df, patterns, other),
         other,
+        setting_file,
+        len(submissions_by_enumerator(report_data, enumerator)),
     )
 
     if survey_date:

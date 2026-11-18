@@ -316,6 +316,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Needs attention layout** (`checks/enumerator/report_ui.py`): metrics for
+  Flagged and Watch enumerators (an enumerator with both counts under both,
+  `attention.attention_totals`) and enumerators listed replace the "N flagged
+  and N to watch" caption. "Show Flagged" and "Show Watch" toggles, saved as
+  view state, filter the list (`attention.shown_rows`); rows are labelled
+  "2 flagged · 1 watch" (`attention.row_label`, replacing `flag_counts`), and
+  reasons within a row sort Flagged first, then by check
 - **Needs attention rules** (`checks/enumerator/attention.py`):
   - Interview length and missing answers count only consented and completed
     interviews when consent or outcome is set up (`counted_interviews`,

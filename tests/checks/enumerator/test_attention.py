@@ -8,6 +8,7 @@ import pytest
 from datasure.checks.enumerator.attention import (
     GPS_FLAG_POINTS,
     TIMES,
+    AttentionRow,
     ColumnRoles,
     CountRule,
     IssueCounts,
@@ -16,16 +17,18 @@ from datasure.checks.enumerator.attention import (
     Severity,
     activity_reasons,
     attention_rows,
+    attention_totals,
     count_reasons,
     counted_interviews,
     duration_minutes,
     duration_reasons,
-    flag_counts,
     form_version_reasons,
     format_minutes,
     missing_reasons,
     pattern_reasons,
     rate_reasons,
+    row_label,
+    shown_rows,
     submissions_by_enumerator,
     teams_by_enumerator,
     unattributed_notes,
@@ -721,8 +724,47 @@ def test_attention_rows_merge_reasons_and_put_most_flags_first():
     assert attention.left_out == ()
     assert [row.enumerator for row in rows] == ["a", "c", "b"]
     assert rows[0].team == "North"
-    assert [r.check for r in rows[0].reasons] == ["Interview length", "Duplicates"]
-    assert flag_counts(rows) == {"a": "2 flags", "c": "1 flag", "b": "Watch"}
+    assert [r.check for r in rows[0].reasons] == ["Duplicates", "Interview length"]
+    assert [row_label(row) for row in rows] == ["2 flagged", "1 flagged", "1 watch"]
+
+
+def _listed(name: str, flags: int, watches: int) -> AttentionRow:
+    return AttentionRow(
+        name,
+        None,
+        tuple(Reason(f"F{i}", "f", Severity.FLAG) for i in range(flags))
+        + tuple(Reason(f"W{i}", "w", Severity.WATCH) for i in range(watches)),
+    )
+
+
+def test_totals_count_an_enumerator_with_both_severities_under_both():
+    rows = [_listed("both", 2, 1), _listed("flag", 1, 0), _listed("watch", 0, 3)]
+
+    totals = attention_totals(rows)
+
+    assert (totals.flagged, totals.flags) == (2, 3)
+    assert (totals.watched, totals.watches) == (2, 4)
+    assert totals.listed == 3
+
+
+def test_shown_rows_keep_only_the_severities_shown():
+    rows = [_listed("both", 2, 1), _listed("flag", 1, 0), _listed("watch", 0, 3)]
+
+    watch_only = shown_rows(rows, flagged=False)
+    flagged_only = shown_rows(rows, watch=False)
+
+    # Ordered by the Watch count once Flagged is hidden.
+    assert [row.enumerator for row in watch_only] == ["watch", "both"]
+    assert {r.severity for row in watch_only for r in row.reasons} == {Severity.WATCH}
+    assert [row.enumerator for row in flagged_only] == ["both", "flag"]
+    assert shown_rows(rows, flagged=False, watch=False) == []
+    assert [row.enumerator for row in shown_rows(rows)] == ["both", "flag", "watch"]
+
+
+def test_row_label_counts_each_severity_and_leaves_out_zeros():
+    assert row_label(_listed("a", 2, 1)) == "2 flagged · 1 watch"
+    assert row_label(_listed("b", 0, 3)) == "3 watch"
+    assert row_label(_listed("c", 1, 0)) == "1 flagged"
 
 
 def test_attention_rows_leave_out_enumerators_not_in_view():

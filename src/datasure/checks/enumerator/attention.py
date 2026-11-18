@@ -773,6 +773,16 @@ def teams_by_enumerator(data: pl.DataFrame, roles: ColumnRoles) -> dict[str, str
     return {name: team for name, team, _ in pairs.iter_rows()}
 
 
+def _reason_order(reason: Reason) -> tuple[bool, str]:
+    """Flagged reasons first, then by check, so a row reads the same each time."""
+    return reason.severity is not Severity.FLAG, reason.check
+
+
+def _row_order(row: AttentionRow) -> tuple[int, int, str]:
+    """Most Flagged reasons first, then most Watch reasons, then by name."""
+    return -row.flags, -row.watches, row.enumerator
+
+
 def attention_rows(
     data: pl.DataFrame,
     roles: ColumnRoles,
@@ -865,22 +875,75 @@ def attention_rows(
         AttentionRow(
             name,
             teams.get(name),
-            tuple(sorted(reasons, key=lambda r: r.severity is not Severity.FLAG)),
+            tuple(sorted(reasons, key=_reason_order)),
         )
         for name, reasons in merged.items()
     ]
     return AttentionList(
-        sorted(rows, key=lambda row: (-row.flags, -row.watches, row.enumerator)),
+        sorted(rows, key=_row_order),
         tuple(left_out),
     )
 
 
-def flag_counts(rows: Sequence[AttentionRow]) -> dict[str, str]:
-    """Return each listed enumerator's flags as text, such as "3 flags" or "Watch"."""
-    labels = {}
+@dataclass(frozen=True)
+class AttentionTotals:
+    """The list's figures, for the metrics above it.
+
+    Attributes
+    ----------
+    flagged, watched : int
+        Enumerators with at least one Flagged, or Watch, reason. One with
+        both counts in both.
+    flags, watches : int
+        Flagged and Watch reasons over all enumerators.
+    listed : int
+        Enumerators with any reason.
+    """
+
+    flagged: int
+    flags: int
+    watched: int
+    watches: int
+    listed: int
+
+
+def attention_totals(rows: Sequence[AttentionRow]) -> AttentionTotals:
+    """Count the enumerators and reasons of each severity in the list."""
+    return AttentionTotals(
+        flagged=sum(1 for row in rows if row.flags),
+        flags=sum(row.flags for row in rows),
+        watched=sum(1 for row in rows if row.watches),
+        watches=sum(row.watches for row in rows),
+        listed=len(rows),
+    )
+
+
+def shown_rows(
+    rows: Sequence[AttentionRow], *, flagged: bool = True, watch: bool = True
+) -> list[AttentionRow]:
+    """Keep only the reasons of the severities shown, most urgent first.
+
+    An enumerator left with no reason drops out. With one severity hidden,
+    the rest are ordered by the count of the one shown.
+    """
+    kept = {
+        severity
+        for severity, show in ((Severity.FLAG, flagged), (Severity.WATCH, watch))
+        if show
+    }
+    shown = []
     for row in rows:
-        if row.flags:
-            labels[row.enumerator] = f"{row.flags} flag{'' if row.flags == 1 else 's'}"
-        else:
-            labels[row.enumerator] = "Watch"
-    return labels
+        reasons = tuple(r for r in row.reasons if r.severity in kept)
+        if reasons:
+            shown.append(AttentionRow(row.enumerator, row.team, reasons))
+    return sorted(shown, key=_row_order)
+
+
+def row_label(row: AttentionRow) -> str:
+    """Count a row's reasons by severity, such as "2 flagged · 1 watch"."""
+    parts = [
+        f"{count:,} {name}"
+        for count, name in ((row.flags, "flagged"), (row.watches, "watch"))
+        if count
+    ]
+    return " · ".join(parts)

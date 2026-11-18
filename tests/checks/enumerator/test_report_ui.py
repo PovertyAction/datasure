@@ -459,25 +459,84 @@ def _row(name, *severities, team="T1"):
     )
 
 
-def test_needs_attention_with_no_rows_says_so(patched_enum):
-    """An empty list is a success, with what was checked under it."""
+@pytest.fixture
+def attention_ui(patched_enum):
+    """The Needs attention section with its metrics recorded and toggles on."""
+    patched_enum.toggle.return_value = True
+    with patch("datasure.checks.enumerator.report_ui.metric_row") as metrics:
+        patched_enum.metric_row = metrics
+        yield patched_enum
+
+
+def _needs_attention(attention: AttentionList, rules=("activity",)) -> None:
     _render_needs_attention(
-        AttentionList([]), ["activity", "duplicates"], OtherChecks()
+        attention, list(rules), OtherChecks(), "settings.json", in_view=40
     )
 
-    patched_enum.success.assert_called_once()
-    assert patched_enum.caption.call_args.args[0] == "Checked: activity, duplicates."
+
+def test_needs_attention_with_no_rows_says_so(attention_ui):
+    """An empty list is a success, with what was checked under it."""
+    _needs_attention(AttentionList([]), ["activity", "duplicates"])
+
+    attention_ui.success.assert_called_once()
+    attention_ui.metric_row.assert_not_called()
+    assert attention_ui.caption.call_args.args[0] == "Checked: activity, duplicates."
 
 
-def test_needs_attention_lists_rows_and_folds_the_rest(patched_enum):
+def test_needs_attention_lists_rows_and_folds_the_rest(attention_ui):
     """The first rows show; the rest fold into an expander."""
     rows = [_row(f"E{i}", Severity.FLAG) for i in range(ATTENTION_SHOWN + 2)]
 
-    _render_needs_attention(AttentionList(rows), ["activity"], OtherChecks())
+    _needs_attention(AttentionList(rows))
 
-    patched_enum.expander.assert_called_once_with("2 more")
-    first = patched_enum.caption.call_args_list[0].args[0]
-    assert first.startswith("12 flagged and 0 to watch")
+    attention_ui.expander.assert_called_once_with("2 more")
+
+
+def test_needs_attention_metrics_count_enumerators_and_reasons(attention_ui):
+    """Enumerators with both severities count under both; notes count reasons."""
+    rows = [
+        _row("both", Severity.FLAG, Severity.FLAG, Severity.WATCH),
+        _row("watch", Severity.WATCH),
+    ]
+
+    _needs_attention(AttentionList(rows))
+
+    (metrics,) = attention_ui.metric_row.call_args.args
+    assert [(label, value, note) for label, value, _help, note in metrics] == [
+        ("Flagged enumerators", "1", "2 flags"),
+        ("Watch enumerators", "2", "2 watch reasons"),
+        ("Enumerators listed", "2", "of 40 enumerators"),
+    ]
+    # The old summary caption is gone.
+    assert not any("to watch" in c.args[0] for c in attention_ui.caption.call_args_list)
+
+
+def test_hiding_watch_drops_rows_with_only_watch_reasons(attention_ui):
+    attention_ui.toggle.side_effect = [True, False]
+    rows = [_row("both", Severity.FLAG, Severity.WATCH), _row("watch", Severity.WATCH)]
+
+    with patch("datasure.checks.enumerator.report_ui._render_attention_row") as draw:
+        _needs_attention(AttentionList(rows))
+
+    (call,) = draw.call_args_list
+    row, label = call.args
+    assert row.enumerator == "both"
+    assert [r.severity for r in row.reasons] == [Severity.FLAG]
+    assert label == "1 flagged"
+    # The metrics still count what is hidden.
+    (metrics,) = attention_ui.metric_row.call_args.args
+    assert metrics[1][1] == "2"
+
+
+def test_hiding_both_severities_asks_to_turn_one_on(attention_ui):
+    attention_ui.toggle.return_value = False
+
+    _needs_attention(AttentionList([_row("a", Severity.FLAG)]))
+
+    attention_ui.info.assert_called_once()
+    assert attention_ui.info.call_args.args[0] == (
+        "Turn on Show Flagged or Show Watch to see enumerators."
+    )
 
 
 def test_needs_attention_shows_each_check_left_out_as_an_error(patched_enum):
@@ -487,9 +546,7 @@ def test_needs_attention_shows_each_check_left_out_as_an_error(patched_enum):
         LeftOut("Activity", "ValueError: bad dates"),
     )
 
-    _render_needs_attention(
-        AttentionList([], left_out), ["activity", "duplicates"], OtherChecks()
-    )
+    _needs_attention(AttentionList([], left_out), ["activity", "duplicates"])
 
     messages = [c.args[0] for c in patched_enum.error.call_args_list]
     assert messages == [item.message for item in left_out]
@@ -510,7 +567,7 @@ def test_attention_row_shows_badges_and_escaped_findings(patched_enum):
         ),
     )
 
-    _render_attention_row(row, "1 flag")
+    _render_attention_row(row, "1 flagged · 1 watch")
 
     markdown = [c.args[0] for c in patched_enum.markdown.call_args_list]
     assert markdown[0] == r"**E\*1**"

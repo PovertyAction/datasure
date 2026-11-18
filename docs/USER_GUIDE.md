@@ -1793,7 +1793,17 @@ refreshed, these counts can be 0.
 
 The enumerators that one or more checks single out, most flags first, with
 each reason in plain words. A **Flagged** reason is worth reviewing now; a
-**Watch** reason is worth keeping an eye on. Ten are shown; the rest are under
+**Watch** reason is worth keeping an eye on.
+
+Three figures sit above the list: **Flagged enumerators** and **Watch
+enumerators** (with the number of flags and Watch reasons under each), and
+**Enumerators listed** out of all enumerators in view. An enumerator with both
+kinds of reason counts under both, so the first two can add up to more than
+the third. Turn off **Show Flagged** or **Show Watch** to list only the other
+kind; the figures still count both. The page remembers your choice.
+
+Each row lists its Flagged reasons first and is labelled with its counts, such
+as "2 flagged · 1 watch". Ten enumerators are shown; the rest are under
 **more**. The line under the list names what was checked.
 
 Reasons compare the enumerator with the rest of the team (or the chosen
