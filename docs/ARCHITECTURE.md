@@ -299,20 +299,27 @@ to appear.
   function, one per check in `checks/enumerator_flags.py` (Duplicates,
   Outliers & Constraints, GPS Checks, Backchecks), returns the check's
   outstanding issues by enumerator as `IssueCounts`
-  (`checks/enumerator/attention.py`). The Enumerator report's "Needs
-  attention" list adds them to its own reasons through
-  `catalogue.enumerator_other_checks`, which asks only ready checks, caches
-  each result on the page fingerprint (`health.cached_on_page`, keyed with
-  the check's `headline_view`) and returns a check that raises as an error
-  the list shows (deferred display). Each function starts from the check's
-  headline through Summary's cache (`health.cached_headline`, same key as
-  `health_rows`), so the counts use the headline's basis and agree with the
-  check, and the page computes nothing Summary already did. Each check module
-  keeps the counting itself (`duplicate_records_by_enumerator`,
-  `outliers_by_enumerator`, `GPSOutlierSummary.unreviewed_by`,
-  `backcheck_mismatches_by_enumerator`). The rules that turn counts and the
-  report's own numbers into Flagged or Watch reasons, against the rest of
-  the team, are in `attention.py` and listed in the user guide.
+  (`checks/enumerator/attention.py`), for an `EnumeratorScope`
+  (`checks/headline.py`: the enumerator column and the team chosen on the
+  page). The Enumerator report's "Needs attention" list adds them to its
+  own reasons through `catalogue.enumerator_other_checks`, which asks only
+  ready checks, caches each result on the page fingerprint
+  (`health.cached_on_page`, keyed with the scope and the check's
+  `headline_view`) and returns a check whose numbers or status raise as an
+  `attention.LeftOut` the list shows (deferred display). Each function
+  starts from the check's headline through Summary's cache
+  (`health.cached_headline`, same key as `health_rows`), so the counts use
+  the headline's basis and agree with the check, and the page computes
+  nothing Summary already did. Each check module keeps the counting itself
+  (`duplicate_records_by_enumerator`, `outliers_by_enumerator`,
+  `GPSOutlierSummary.unreviewed_by`, `backcheck_mismatches_by_enumerator`),
+  returning a `headline.ByEnumerator`: the counts plus the issues with no
+  enumerator, which add up to the check's own total. A check finds its
+  issues on all its records and counts only those in the scope's team. The
+  rules that turn counts and the report's own numbers into Flagged or Watch
+  reasons, against the rest of the team, are in `attention.py` and listed
+  in the user guide; `attention_rows` runs each rule on its own and returns
+  one that raises in `AttentionList.left_out`.
 - **Render wrapper.** Every check renders through `nav_ui.run_guarded`. An
   exception becomes an error state with the traceback in an expander, is
   logged, and is remembered so the navigation marks the check until it
