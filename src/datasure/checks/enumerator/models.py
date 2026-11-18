@@ -244,34 +244,53 @@ class StatisticsOvertimeSettings(BaseModel):
         return v
 
 
-class EnumeratorOverviewMetrics(BaseModel):
-    """Metrics for enumerator overview.
+class ActiveEnumerators(BaseModel):
+    """Enumerators active in the past 7 days, out of all.
 
     Attributes
     ----------
-    all_submissions : int
-        Total number of submissions.
-    num_active_enumerators : int
-        Number of enumerators active in past 7 days.
-    num_enumerators : int
-        Total number of enumerators.
-    num_teams : int | str
-        Number of teams or 'n/a' if not available.
-    min_submissions : int
-        Minimum daily submissions.
-    max_submissions : int
-        Maximum daily submissions.
-    avg_submissions : int
-        Average daily submissions.
-    pct_active_enumerators : str
-        Percentage of active enumerators formatted as string.
+    active : int
+        Enumerators with a submission dated in the 7 days up to today.
+    total : int
+        Enumerators in the data.
     """
 
-    all_submissions: int = Field(ge=0)
-    num_active_enumerators: int = Field(ge=0)
+    active: int = Field(ge=0)
+    total: int = Field(ge=0)
+
+
+class OverviewFigures(BaseModel):
+    """The four figures at the top of the enumerator report.
+
+    Attributes
+    ----------
+    num_enumerators : int
+        Enumerators in the data.
+    num_active : int
+        Enumerators with a submission in the past 7 days, counted from today.
+    num_teams : int | None
+        Teams in the data; None without a team column.
+    submissions_past_week : int
+        Submissions dated in the past 7 days, counted from today.
+    submissions_week_before : int
+        Submissions dated in the 7 days before that.
+    median_per_enumerator : float | None
+        The median of each enumerator's total submissions; None when no
+        submission names an enumerator.
+    fewest, most : tuple[str, int] | None
+        The enumerator with the fewest and the most submissions, and the
+        count; None when no submission names an enumerator.
+    duration_minutes : tuple[float, float, float] | None
+        The interview length's lower quartile, median and upper quartile,
+        in minutes; None without a duration column.
+    """
+
     num_enumerators: int = Field(ge=0)
-    num_teams: int | str
-    min_submissions: int = Field(ge=0)
-    max_submissions: int = Field(ge=0)
-    avg_submissions: int = Field(ge=0)
-    pct_active_enumerators: str
+    num_active: int = Field(ge=0)
+    num_teams: int | None = None
+    submissions_past_week: int = Field(ge=0)
+    submissions_week_before: int = Field(ge=0)
+    median_per_enumerator: float | None = Field(default=None, ge=0)
+    fewest: tuple[str, int] | None = None
+    most: tuple[str, int] | None = None
+    duration_minutes: tuple[float, float, float] | None = None

@@ -329,6 +329,38 @@ class TestSettingsPersistence:
         assert saved["selected_variables"] == ["age", "gone"]
         assert "Skipped" not in _texts(at.caption)
 
+    def test_effective_settings_drop_a_column_now_excluded(
+        self, team_data, settings_file
+    ):
+        """Needs attention runs on what the section runs on, without rendering."""
+        from datasure.checks.enumerator.models import EnumeratorSettings
+        from datasure.checks.enumerator.response_patterns.report_ui import (
+            excluded_columns,
+        )
+        from datasure.checks.enumerator.response_patterns.settings_ui import (
+            effective_response_pattern_settings,
+        )
+
+        # "choice" became the team column after it was selected; "gone" is
+        # not in this data, so it is kept as the section keeps it.
+        _save(
+            settings_file,
+            selected_variables=["choice", "age", "gone"],
+            type_overrides={"choice": "integer", "gone": "integer"},
+            min_sample=7,
+        )
+        settings = EnumeratorSettings(
+            survey_key="key", survey_id="key", enumerator="enum", team="choice"
+        )
+
+        effective = effective_response_pattern_settings(
+            settings_file, team_data, excluded_columns(settings), None
+        )
+
+        assert effective.selected_variables == ["age", "gone"]
+        assert effective.type_overrides == {"gone": "integer"}
+        assert effective.min_sample == 7
+
     def test_thresholds_survive_a_new_session(self, team_data, settings_file):
         _save(settings_file, selected_variables=["age"])
         at = _run(team_data, settings_file)

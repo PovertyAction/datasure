@@ -1754,62 +1754,129 @@ page keeps its own consent and outcome settings. The % consent and %
 completed columns appear in the Enumerator Summary only once you choose both
 a column and its values.
 
-##### Enumerator Overview
+##### Columns in use, period and team
 
-High-level metrics:
+Under the settings, a line names the columns the report uses and the ones
+not set yet. Below it:
 
-- Total enumerators
-- Total teams
-- Active enumerators (past 7 days)
-- % active enumerators
-- Min/Max/Average submissions
-- Total submissions
+- **Period** (Daily, Weekly, Monthly) and **Week starts on** set how
+  Productivity and Statistics Over Time group submissions. One choice applies
+  to both.
+- **Team** shows one team only. Every section then uses that team's
+  submissions, and Needs attention compares each enumerator with the rest of
+  that team.
 
-##### Enumerator Summary Table
+These choices are remembered for you, like the other filters. The line under
+them shows the latest submission date ("Data as of") and how many
+submissions, enumerators and teams are in view.
 
-Detailed performance by enumerator:
+##### Overview
 
-- Enumerator ID
-- First/Last submission dates
-- \# submissions (total, today, this week, this month)
-- \# unique dates active
-- \# null values in submissions
-- Duration stats (min, max, mean, median)
-- % consent rate
-- % completion rate
+Four figures, each with what it compares with:
 
-Today, this week and this month are counted from your computer's date, not the
-latest submission in the data, and so is "active in the past 7 days" in the
-Enumerator Overview. Weeks start on Monday. If fieldwork has paused or the data
-hasn't been refreshed, these counts can be 0. The note under the table shows
-the latest submission date ("Data as of").
+- **Active in the past 7 days**: enumerators with a submission in the 7 days
+  up to today, out of all enumerators. Submissions dated after today and rows
+  with no enumerator don't count. With **All teams** chosen it matches the
+  Enumerator Stats row on Summary; with one team chosen it counts only that
+  team, while Summary counts every team
+- **Submissions in the past 7 days**: against the 7 days before
+- **Submissions per enumerator**: the median of each enumerator's total, with
+  who has the fewest and the most
+- **Interview length**: the median, with the middle half of interviews (or
+  the number of teams, without a duration column)
 
-##### Enumerator Productivity
+"The past 7 days" and "today" count from your computer's date, not the latest
+submission in the data. If fieldwork has paused or the data hasn't been
+refreshed, these counts can be 0.
 
-Visualize productivity over time:
+##### Needs attention
 
-- Heatmap showing submissions per enumerator
-- Toggle: Day, Week, Month views
-- Identify high/low performers
+The enumerators that one or more checks single out, most flags first, with
+each reason in plain words. A **Flagged** reason is worth reviewing now; a
+**Watch** reason is worth keeping an eye on.
 
-##### Enumerator Statistics
+Three figures sit above the list: **Flagged enumerators** and **Watch
+enumerators** (with the number of flags and Watch reasons under each), and
+**Enumerators listed** out of all enumerators in view. An enumerator with both
+kinds of reason counts under both, so the first two can add up to more than
+the third. Turn off **Show Flagged** or **Show Watch** to list only the other
+kind; the figures still count both. The page remembers your choice.
 
-Compare statistics by enumerator:
+Each row lists its Flagged reasons first and is labelled with its counts, such
+as "2 flagged · 1 watch". Ten enumerators are shown; the rest are under
+**more**. The line under the list names what was checked.
 
-- Select column to analyze
-- Select statistics (count, mean, median, min, max, std, 25th, 75th percentile)
-- Table showing values per enumerator
-- Identify outlier enumerators
+Reasons compare the enumerator with the rest of the team (or the chosen
+team), so a project where everyone has a few outliers doesn't flag everyone.
+Rates need at least 5 submissions. When consent or outcome is set up, interview
+length and missing answers count only consented and completed interviews, since
+refusals and partial interviews are short and sparse by nature; their reasons
+say so ("over 20 completed interviews"), and missing answers can then differ
+from the summary table's **% Total Missing**, which counts every submission.
+Missing answers use **% Total Missing** when the project has missing codes,
+and **% Null values** (blank answers only) when it has none.
 
-##### Enumerator Statistics Over Time
+| Reason | Flagged | Watch |
+| --- | --- | --- |
+| Activity | | No submission for 3 or more days before the latest submission in the data, and for at least 3× their usual gap between working days (so someone who works once a week isn't marked after a quiet few days) |
+| Interview length | Median 60% or less of the rest of the team's median | 75% or less |
+| Missing answers | 10 points and 2× above the rest of the team's median share | 5 points and 1.5× |
+| Consent, Completion | 15 points or more below the rest of the team's median rate | 8 points |
+| Form version | Any submission on an older version more than a day after the newest version's first submission. Versions compare as numbers, so 10 is newer than 9 | Older-version submissions only within a day of it: 24 hours, or the next day if the date column has no times (the release day itself doesn't count) |
+| Response patterns | A High result | A Moderate result, or a High result on a low sample |
+| Duplicates | Any record holding an unresolved duplicate ID | |
+| GPS | 3 or more GPS outliers not yet accepted or corrected | 1 or 2 |
+| Outliers, Constraints | 3 or more, at 2× the rest of the team's rate per submission, or any rate when the rest of the team has none | 1.5× |
+| Backchecks | 3 or more mismatches, at 2× the rest of the team's rate per value compared, or any rate when the rest of the team has none | 1.5× |
 
-Temporal performance trends:
+Duplicates, Outliers, Constraints, GPS and Backchecks count only when those
+checks are set up on the page, and use their own settings, corrections and
+acceptances, so the numbers match their tabs. With a team chosen, they count
+only issues on that team's submissions, so an enumerator who also works in
+another team doesn't bring its issues along; a duplicate ID shared with
+another team still counts. Duplicates counts records, not
+IDs: an ID held by three records counts three times, so the enumerators'
+records add up to **Records involved** on the Duplicates tab rather than to
+its **Duplicate IDs**. Backcheck mismatches you attributed to the backchecker
+or the respondent don't count. Issues on a record with no enumerator can't
+appear on any row; a line under the list says how many each check has, so the
+numbers still add up. If a check's numbers, or one of this page's reasons
+(such as Activity or Response patterns), can't be computed, a message under
+the list names it, the reason and where to review its settings; it drops out
+of the **Checked** line, and the rest of the list still shows.
 
-- Select column
-- Select statistic
-- Toggle: Day, Week, Month
-- Line chart per enumerator
-- Track performance changes
+Changing the response pattern settings updates the list the next time the
+page reloads, for example when you change the period or open another tab and
+come back.
+
+##### Enumerator Summary
+
+Detailed performance by enumerator. Use the pills above the table to choose
+what it shows:
+
+- **Submissions**: first and last submission dates, submissions (total,
+  today, this week, this month) and days worked
+- **Missing Data**: the share of missing answers
+- **Duration**: shortest, longest, mean and median interview
+- **Form Version**: the form versions each enumerator used
+- **Consent & Outcome**: % consent and % completed
+
+Today, this week and this month are counted from your computer's date. Weeks
+start on Monday.
+
+##### Productivity
+
+Submissions per enumerator in each period of the page's **Period**.
+
+##### Column Statistics
+
+Choose numeric **Columns** and the **Statistics** to show for each
+enumerator (count, mean, median, min, max, std, 25th and 75th percentile).
+
+##### Statistics Over Time
+
+A table of one **Statistic** of one **Column** for each enumerator, period by
+period, using the page's **Period**.
 
 ##### Response Patterns
 

@@ -145,8 +145,10 @@ def enumerator_report_settings(
         User-configured settings from the UI.
     """
     with st.expander("settings", icon=":material/settings:"):
-        st.markdown("## Configure settings for enumerator report")
-        st.write("---")
+        st.caption(
+            "Choose the columns the enumerator report reads. Each column you "
+            "set adds its numbers and flags to the report."
+        )
 
         default_settings = load_default_enumerator_settings(settings_file, config)
 

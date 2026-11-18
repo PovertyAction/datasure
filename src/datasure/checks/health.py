@@ -437,6 +437,48 @@ def _row_headline(
     return _with_basis(slug, key, value), key
 
 
+def cached_headline(
+    ctx: CheckContext,
+    slug: str,
+    headline: Headline,
+    view_key: Callable[[CheckContext], Hashable] | None = None,
+) -> CheckHeadline | None:
+    """Return a check's headline with its basis, from Summary's cache if there.
+
+    Shares Summary's cache: the key is the check's slug, the page fingerprint
+    and its view key, as `health_rows` makes it, so a headline Summary
+    computed is reused and one computed here serves Summary. When the cached
+    headline's basis is no longer kept, the headline is computed again so
+    the caller gets the basis.
+
+    Raises
+    ------
+    Exception
+        Whatever ``headline`` raises; nothing is cached then.
+    """
+    value, _ = _row_headline(ctx, slug, headline, _fingerprint_or_none(ctx), view_key)
+    if value is not None and value.basis is None:
+        fresh = headline(ctx)
+        if fresh is not None and fresh.basis is not None:
+            return fresh
+    return value
+
+
+def cached_on_page(
+    ctx: CheckContext, name: Hashable, compute: Callable[[], object]
+) -> object:
+    """Return ``compute()``, cached with the headlines on the page's fingerprint.
+
+    For numbers derived from what headlines depend on, such as the issues
+    by enumerator other checks give the Enumerator page. ``name`` must set
+    the result apart from every headline and from other results. Not cached
+    when ``compute`` raises or the page cannot be fingerprinted.
+    """
+    fingerprint = _fingerprint_or_none(ctx)
+    key = None if fingerprint is None else ("page", name, fingerprint)
+    return _cached_or_computed(key, compute)
+
+
 def health_rows(
     ctx: CheckContext,
     items: Iterable[NavItem],

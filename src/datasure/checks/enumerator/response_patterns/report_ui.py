@@ -449,7 +449,7 @@ def _render_range_table(
 
 
 @st.cache_data(ttl=300)
-def _cached_response_patterns(
+def cached_response_patterns(
     data: pl.DataFrame,
     settings: ResponsePatternSettings,
     enumerator_col: str,
@@ -830,7 +830,7 @@ def _render_categorical(result: CategoricalResult, min_sample: int) -> None:
 # =============================================================================
 
 
-def _excluded_columns(enumerator_settings: EnumeratorSettings) -> list[str]:
+def excluded_columns(enumerator_settings: EnumeratorSettings) -> list[str]:
     """Return the configured ID, enumerator and report helper columns."""
     configured = [
         enumerator_settings.survey_key,
@@ -881,9 +881,9 @@ def render_response_patterns(
         return
 
     settings = response_pattern_settings(
-        settings_file, data, _excluded_columns(enumerator_settings), missing_codes
+        settings_file, data, excluded_columns(enumerator_settings), missing_codes
     )
-    results: ResponsePatternResults = _cached_response_patterns(
+    results: ResponsePatternResults = cached_response_patterns(
         data, settings, enumerator_col, missing_codes
     )
     if results.condition is not None:
