@@ -3,7 +3,7 @@
 import logging
 import re
 from collections.abc import Callable
-from dataclasses import dataclass, replace
+from dataclasses import dataclass
 from datetime import date as dt_date
 from typing import Literal
 
@@ -454,30 +454,48 @@ def _render_needs_attention(
         Flagged** and **Show Watch** to list only one kind.
         """
     )
-    if not rows:
+    if rows:
+        _render_attention_list(rows, setting_file, in_view)
+    else:
         st.success(
             "No enumerator stands out on the checks listed below.",
             icon=":material/check_circle:",
         )
-    else:
-        _render_attention_metrics(rows, in_view)
-        show_flagged, show_watch = _render_severity_toggles(setting_file)
-        shown = shown_rows(rows, flagged=show_flagged, watch=show_watch)
-        if not (show_flagged or show_watch):
-            st.info(
-                "Turn on Show Flagged or Show Watch to see enumerators.",
-                icon=":material/visibility_off:",
-            )
-        elif not shown:
-            kind = "Flagged" if show_flagged else "Watch"
-            st.info(f"No enumerator has a {kind} reason.", icon=":material/info:")
-        for row in shown[:ATTENTION_SHOWN]:
-            _render_attention_row(row, row_label(row))
-        rest = shown[ATTENTION_SHOWN:]
-        if rest:
-            with st.expander(f"{len(rest):,} more"):
-                for row in rest:
-                    _render_attention_row(row, row_label(row))
+    _render_attention_footer(attention, rules, other)
+
+
+def _render_attention_list(
+    rows: list[AttentionRow], setting_file: str, in_view: int
+) -> None:
+    """Draw the metrics, the severity toggles and the rows they let through."""
+    _render_attention_metrics(rows, in_view)
+    show_flagged, show_watch = _render_severity_toggles(setting_file)
+    shown = shown_rows(rows, flagged=show_flagged, watch=show_watch)
+    if not (show_flagged or show_watch):
+        st.info(
+            "Turn on Show Flagged or Show Watch to see enumerators.",
+            icon=":material/visibility_off:",
+        )
+    elif not shown:
+        kind = "Flagged" if show_flagged else "Watch"
+        st.info(f"No enumerator has a {kind} reason.", icon=":material/info:")
+    _render_attention_rows(shown[:ATTENTION_SHOWN])
+    rest = shown[ATTENTION_SHOWN:]
+    if rest:
+        with st.expander(f"{len(rest):,} more"):
+            _render_attention_rows(rest)
+
+
+def _render_attention_rows(rows: list[AttentionRow]) -> None:
+    """Draw each row under its label."""
+    for row in rows:
+        _render_attention_row(row, row_label(row))
+
+
+def _render_attention_footer(
+    attention: AttentionList, rules: list[str], other: OtherChecks
+) -> None:
+    """Caption what was checked and unattributed issues; name what was left out."""
     failed = {item.check.lower() for item in attention.left_out}
     checked = [rule for rule in rules if rule not in failed]
     if checked:
@@ -1229,9 +1247,9 @@ def enumerator_report(
         else None,
     )
     _render_needs_attention(
-        replace(
-            attention,
-            left_out=(*other.errors, *patterns_failed, *attention.left_out),
+        AttentionList(
+            attention.rows,
+            (*other.errors, *patterns_failed, *attention.left_out),
         ),
         _rules_in_use(settings, summary_df, patterns, other),
         other,

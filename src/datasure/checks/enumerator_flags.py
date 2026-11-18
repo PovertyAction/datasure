@@ -7,12 +7,19 @@ tuple when it has none to give. The check
 catalogue names one per check (``CheckEntry.by_enumerator``), and the
 Enumerator page lists them under "Needs attention".
 
+Each is written as a generator of the check's `IssueCounts` and wrapped by
+`_collected`, so every one returns a tuple, empty when the check is not set
+up or has nothing to give.
+
 Each starts from the check's headline, through Summary's cache
 (`health.cached_headline`), so the issues are those the check and its
 health row count, after corrections and acceptances, and opening the
 Enumerator page after Summary computes nothing again. Backchecks has no
 headline basis, so its numbers are cached on the page instead.
 """
+
+import functools
+from collections.abc import Callable, Iterator
 
 from datasure.checks.backchecks.report_ui import backcheck_mismatches_by_enumerator
 from datasure.checks.check_configs import (
@@ -42,8 +49,24 @@ from datasure.checks.outliers.report_ui import (
     outliers_headline,
 )
 
+_IssueSource = Callable[[CheckContext, EnumeratorScope], Iterator[IssueCounts]]
+_ByEnumerator = Callable[[CheckContext, EnumeratorScope], tuple[IssueCounts, ...]]
 
-def duplicates(ctx: CheckContext, scope: EnumeratorScope) -> tuple[IssueCounts, ...]:
+
+def _collected(source: _IssueSource) -> _ByEnumerator:
+    """Turn a generator of a check's issues into the tuple the catalogue wants."""
+
+    @functools.wraps(source)
+    def by_enumerator(
+        ctx: CheckContext, scope: EnumeratorScope
+    ) -> tuple[IssueCounts, ...]:
+        return tuple(source(ctx, scope))
+
+    return by_enumerator
+
+
+@_collected
+def duplicates(ctx: CheckContext, scope: EnumeratorScope) -> Iterator[IssueCounts]:
     """Records holding an unresolved duplicate ID; any one is worth a look."""
     config = ctx.config
     headline = cached_headline(
@@ -58,20 +81,19 @@ def duplicates(ctx: CheckContext, scope: EnumeratorScope) -> tuple[IssueCounts, 
         ),
     )
     if headline is None or headline.basis is None:
-        return ()
+        return
     records = duplicate_records_by_enumerator(headline.basis, scope)
-    return (
-        IssueCounts(
-            "Duplicates",
-            "record with a duplicate ID",
-            "records with a duplicate ID",
-            records.counts,
-            unattributed=records.unattributed,
-        ),
+    yield IssueCounts(
+        "Duplicates",
+        "record with a duplicate ID",
+        "records with a duplicate ID",
+        records.counts,
+        unattributed=records.unattributed,
     )
 
 
-def outliers(ctx: CheckContext, scope: EnumeratorScope) -> tuple[IssueCounts, ...]:
+@_collected
+def outliers(ctx: CheckContext, scope: EnumeratorScope) -> Iterator[IssueCounts]:
     """Outliers and constraint violations, flagged at a rate above the team's."""
     config = ctx.config
     headline = cached_headline(
@@ -88,25 +110,23 @@ def outliers(ctx: CheckContext, scope: EnumeratorScope) -> tuple[IssueCounts, ..
         ),
     )
     if headline is None or headline.basis is None:
-        return ()
+        return
     found, broken = outliers_by_enumerator(headline.basis, ctx.data.page_data, scope)
-    return (
-        IssueCounts(
-            "Outliers",
-            "outlier",
-            "outliers",
-            found.counts,
-            rule=CountRule.RELATIVE,
-            unattributed=found.unattributed,
-        ),
-        IssueCounts(
-            "Constraints",
-            "constraint violation",
-            "constraint violations",
-            broken.counts,
-            rule=CountRule.RELATIVE,
-            unattributed=broken.unattributed,
-        ),
+    yield IssueCounts(
+        "Outliers",
+        "outlier",
+        "outliers",
+        found.counts,
+        rule=CountRule.RELATIVE,
+        unattributed=found.unattributed,
+    )
+    yield IssueCounts(
+        "Constraints",
+        "constraint violation",
+        "constraint violations",
+        broken.counts,
+        rule=CountRule.RELATIVE,
+        unattributed=broken.unattributed,
     )
 
 
@@ -114,7 +134,8 @@ def _gps_view(ctx: CheckContext) -> object:
     return gpschecks_headline_view(ctx.project_id, ctx.config.page_name_id)
 
 
-def gps(ctx: CheckContext, scope: EnumeratorScope) -> tuple[IssueCounts, ...]:
+@_collected
+def gps(ctx: CheckContext, scope: EnumeratorScope) -> Iterator[IssueCounts]:
     """GPS points flagged as outliers and not yet reviewed; a few are Watch."""
     config = ctx.config
     headline = cached_headline(
@@ -130,26 +151,25 @@ def gps(ctx: CheckContext, scope: EnumeratorScope) -> tuple[IssueCounts, ...]:
         view_key=_gps_view,
     )
     if headline is None or headline.basis is None:
-        return ()
+        return
     points = headline.basis.unreviewed_by(scope)
-    return (
-        IssueCounts(
-            "GPS",
-            "GPS point far from the others",
-            "GPS points far from the others",
-            points.counts,
-            unattributed=points.unattributed,
-            flag_from=GPS_FLAG_POINTS,
-        ),
+    yield IssueCounts(
+        "GPS",
+        "GPS point far from the others",
+        "GPS points far from the others",
+        points.counts,
+        unattributed=points.unattributed,
+        flag_from=GPS_FLAG_POINTS,
     )
 
 
-def backchecks(ctx: CheckContext, scope: EnumeratorScope) -> tuple[IssueCounts, ...]:
+@_collected
+def backchecks(ctx: CheckContext, scope: EnumeratorScope) -> Iterator[IssueCounts]:
     """Backcheck mismatches, at a rate per value compared above the team's."""
     config = ctx.config
     backcheck_data = ctx.data.backcheck_data_with_rows
     if backcheck_data is None:
-        return ()
+        return
     result = cached_on_page(
         ctx,
         ("backchecks_by_enumerator", scope),
@@ -164,16 +184,14 @@ def backchecks(ctx: CheckContext, scope: EnumeratorScope) -> tuple[IssueCounts, 
         ),
     )
     if result is None:
-        return ()
-    return (
-        IssueCounts(
-            "Backchecks",
-            "backcheck mismatch",
-            "backcheck mismatches",
-            result.mismatches,
-            rule=CountRule.RELATIVE,
-            denominators=result.compared,
-            per="value compared",
-            unattributed=result.unattributed,
-        ),
+        return
+    yield IssueCounts(
+        "Backchecks",
+        "backcheck mismatch",
+        "backcheck mismatches",
+        result.mismatches,
+        rule=CountRule.RELATIVE,
+        denominators=result.compared,
+        per="value compared",
+        unattributed=result.unattributed,
     )
