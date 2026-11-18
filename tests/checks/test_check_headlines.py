@@ -643,6 +643,20 @@ class TestEnumeratorHeadline:
         assert of_total == "of 4 enumerators"
         assert headline.value == f"{active} / 4"
 
+    def test_matches_the_overview_with_future_dates_and_no_enumerator(
+        self, setting_file
+    ):
+        # e3's only submission is dated 2 days ahead, and one row has no
+        # enumerator: neither counts as active or in the total.
+        data = self._data(["e1", "e2", "e3", None], [1, 20, -2, 1])
+
+        headline = enumerator_headline(PROJECT_ID, data, setting_file, self.CONFIG)
+        active, of_total = self._report_overview(data, setting_file, self.CONFIG)[
+            "Active in the past 7 days"
+        ]
+        assert headline.value == "1 / 3"
+        assert (active, of_total) == ("1", "of 3 enumerators")
+
 
 class TestBackchecksHeadline:
     CONFIG = {  # noqa: RUF012

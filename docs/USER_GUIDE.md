@@ -1775,7 +1775,10 @@ submissions, enumerators and teams are in view.
 Four figures, each with what it compares with:
 
 - **Active in the past 7 days**: enumerators with a submission in the 7 days
-  up to today, out of all enumerators
+  up to today, out of all enumerators. Submissions dated after today and rows
+  with no enumerator don't count. With **All teams** chosen it matches the
+  Enumerator Stats row on Summary; with one team chosen it counts only that
+  team, while Summary counts every team
 - **Submissions in the past 7 days**: against the 7 days before
 - **Submissions per enumerator**: the median of each enumerator's total, with
   who has the fewest and the most
@@ -1799,11 +1802,11 @@ Rates need at least 5 submissions.
 
 | Reason | Flagged | Watch |
 | --- | --- | --- |
-| Activity | | No submission for 3 or more days before the latest submission in the data |
-| Interview length | Median 60% of the team's or less | 75% or less |
-| Missing answers | 10 points and 2× above the team's median share | 5 points and 1.5× |
-| Consent, Completion | 15 points or more below the team's median rate | 8 points |
-| Form version | Any submission on an older version after the newest came out | |
+| Activity | | No submission for 3 or more days before the latest submission in the data, and for at least 3× their usual gap between working days (so someone who works once a week isn't marked after a quiet few days) |
+| Interview length | Median 60% or less of the rest of the team's median | 75% or less |
+| Missing answers | 10 points and 2× above the rest of the team's median share | 5 points and 1.5× |
+| Consent, Completion | 15 points or more below the rest of the team's median rate | 8 points |
+| Form version | Any submission on an older version after the newest version's first submission (from the next day if the date column has no times). Versions compare as numbers, so 10 is newer than 9 | |
 | Response patterns | A High result | A Moderate result |
 | Duplicates | Any record holding an unresolved duplicate ID | |
 | GPS | Any GPS outlier not yet accepted or corrected | |
@@ -1812,9 +1815,19 @@ Rates need at least 5 submissions.
 
 Duplicates, Outliers, Constraints, GPS and Backchecks count only when those
 checks are set up on the page, and use their own settings, corrections and
-acceptances, so the numbers match their tabs. Backcheck mismatches you
-attributed to the backchecker or the respondent don't count. If a check's
-numbers can't be computed, a message under the list names it and the reason.
+acceptances, so the numbers match their tabs. With a team chosen, they count
+only issues on that team's submissions, so an enumerator who also works in
+another team doesn't bring its issues along; a duplicate ID shared with
+another team still counts. Duplicates counts records, not
+IDs: an ID held by three records counts three times, so the enumerators'
+records add up to **Records involved** on the Duplicates tab rather than to
+its **Duplicate IDs**. Backcheck mismatches you attributed to the backchecker
+or the respondent don't count. Issues on a record with no enumerator can't
+appear on any row; a line under the list says how many each check has, so the
+numbers still add up. If a check's numbers, or one of this page's reasons
+(such as Activity or Response patterns), can't be computed, a message under
+the list names it, the reason and where to review its settings; it drops out
+of the **Checked** line, and the rest of the list still shows.
 
 Changing the response pattern settings updates the list the next time the
 page reloads, for example when you change the period or open another tab and

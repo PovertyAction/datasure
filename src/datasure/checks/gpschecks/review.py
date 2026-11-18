@@ -28,6 +28,7 @@ from typing import Any
 import pandas as pd
 import polars as pl
 
+from datasure.checks.headline import ByEnumerator, EnumeratorScope
 from datasure.checks.outliers.review import (
     REVIEW_COLUMNS,
     REVIEW_REASON_COL,
@@ -452,17 +453,29 @@ class GPSOutlierSummary:
         )
         return self.outliers[flagged]
 
-    def unreviewed_by(self, column: str) -> dict[str, int]:
-        """Count the outstanding outliers by a column of the data, as text.
+    def unreviewed_by(self, scope: EnumeratorScope) -> ByEnumerator:
+        """Count the outstanding outliers by enumerator, as text.
 
-        For example by enumerator. Empty when the column is not in the data;
-        rows with no value are left out.
+        Only outliers in the scope's team count, when one is chosen. Rows
+        with no enumerator, or every row when the enumerator column is not
+        in the data, are counted as unattributed, so with all teams the
+        counts add up to `outstanding`.
         """
         unreviewed = self.unreviewed()
+        if scope.narrowed:
+            if scope.team_column not in unreviewed.columns:
+                return ByEnumerator()
+            in_team = unreviewed[scope.team_column].astype(str) == scope.team
+            unreviewed = unreviewed[in_team & unreviewed[scope.team_column].notna()]
+        column = scope.enumerator
         if column not in unreviewed.columns:
-            return {}
-        counts = unreviewed[column].dropna().astype(str).value_counts()
-        return {str(name): int(count) for name, count in counts.items()}
+            return ByEnumerator(unattributed=len(unreviewed))
+        values = unreviewed[column]
+        counts = values.dropna().astype(str).value_counts()
+        return ByEnumerator(
+            {str(name): int(count) for name, count in counts.items()},
+            unattributed=int(values.isna().sum()),
+        )
 
 
 _RESOLUTIONS_SCHEMA = {"KEY": pl.String, "date": pl.Datetime("us")}

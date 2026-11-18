@@ -20,7 +20,12 @@ import streamlit as st
 
 from datasure.checks.backchecks.models import TAB_NAME as BACKCHECKS_TAB_NAME
 from datasure.checks.backchecks.models import backcheck_id_columns
-from datasure.checks.headline import CheckDelta, CheckHeadline
+from datasure.checks.headline import (
+    ByEnumerator,
+    CheckDelta,
+    CheckHeadline,
+    EnumeratorScope,
+)
 from datasure.checks.health_period import DeltaWindow, dated_after, logged_after
 from datasure.checks.id_duplicates import find_duplicate_groups, resolved_ids
 from datasure.checks.id_duplicates_ui import (
@@ -2742,40 +2747,44 @@ def duplicates_delta(
 
 
 def duplicate_records_by_enumerator(
-    basis: DuplicatesBasis, enumerator: str
-) -> dict[str, int]:
+    basis: DuplicatesBasis, scope: EnumeratorScope
+) -> ByEnumerator:
     """Count each enumerator's records that hold an unresolved duplicate ID.
 
     Counted on the records `duplicates_headline` counts its IDs on
     (``basis.records``: corrected, filtered by the saved Records to Include),
-    so the numbers agree with the check. Records with no enumerator are left
-    out.
+    so with all teams the counts and the records with no enumerator add up
+    to the check's "Records involved". An ID shared by several records
+    counts once in the headline and once per record here. Duplicates are
+    found on all the records; only those in the scope's team are counted.
 
     Parameters
     ----------
     basis : DuplicatesBasis
         The duplicates headline's basis.
-    enumerator : str
-        The enumerator column.
+    scope : EnumeratorScope
+        The enumerator column, and the team to count in, if any.
 
     Returns
     -------
-    dict[str, int]
-        Records by enumerator, as text; enumerators with none are left out.
+    ByEnumerator
+        Records by enumerator, and the records with no enumerator. Empty
+        when the ID or enumerator column is not in the records.
     """
-    records, id_col = basis.records, basis.id_col
+    records, id_col, enumerator = basis.records, basis.id_col, scope.enumerator
     if not id_col or not {id_col, enumerator} <= set(records.columns):
-        return {}
+        return ByEnumerator()
     duplicated = find_duplicate_groups(records, id_col, None, None)["id"]
     if duplicated.is_empty():
-        return {}
-    held = records.filter(
-        pl.col(id_col).cast(pl.String).is_in(duplicated.cast(pl.String).implode())
+        return ByEnumerator()
+    names = (
+        scope.keep(records)
+        .filter(
+            pl.col(id_col).cast(pl.String).is_in(duplicated.cast(pl.String).implode())
+        )
+        .select(pl.col(enumerator).cast(pl.String).alias("enumerator"))
     )
-    counts = (
-        held.select(pl.col(enumerator).cast(pl.String).alias("enumerator"))
-        .drop_nulls()
-        .group_by("enumerator")
-        .len()
+    counts = names.drop_nulls().group_by("enumerator").len()
+    return ByEnumerator(
+        dict(counts.iter_rows()), unattributed=names["enumerator"].null_count()
     )
-    return dict(counts.iter_rows())

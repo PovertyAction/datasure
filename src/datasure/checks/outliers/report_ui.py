@@ -12,8 +12,10 @@ import streamlit as st
 from pydantic import BaseModel, ValidationError
 
 from datasure.checks.headline import (
+    ByEnumerator,
     CheckDelta,
     CheckHeadline,
+    EnumeratorScope,
     settings_no_longer_fit,
 )
 from datasure.checks.health_period import DeltaWindow, dated_after, logged_after
@@ -1722,13 +1724,14 @@ def _on_keys(flags: _ReviewedFlags, keys: pl.Series) -> _ReviewedFlags:
 
 
 def outliers_by_enumerator(
-    basis: OutliersBasis, data: pl.DataFrame, enumerator: str
-) -> tuple[dict[str, int], dict[str, int]]:
+    basis: OutliersBasis, data: pl.DataFrame, scope: EnumeratorScope
+) -> tuple[ByEnumerator, ByEnumerator]:
     """Count each enumerator's outstanding outliers and constraint violations.
 
     Counted as `outliers_headline` counts them, on the flags in ``basis``
     left after review, so the numbers agree with the check. Each flag's
-    submission is matched to its enumerator by the Survey KEY column.
+    submission is matched to its enumerator, and its team, by the Survey KEY
+    column. With a team chosen, only flags on that team's submissions count.
 
     Parameters
     ----------
@@ -1736,20 +1739,25 @@ def outliers_by_enumerator(
         The outliers headline's basis.
     data : pl.DataFrame
         The survey data the basis was computed on.
-    enumerator : str
-        The enumerator column.
+    scope : EnumeratorScope
+        The enumerator column, and the team to count in, if any.
 
     Returns
     -------
-    tuple[dict[str, int], dict[str, int]]
-        Outliers, then constraint violations, by enumerator as text;
-        enumerators with none are left out. Both empty when the Survey KEY
-        or enumerator column is not in the data.
+    tuple[ByEnumerator, ByEnumerator]
+        Outliers, then constraint violations, by enumerator. Flags on a
+        submission with no enumerator (or, with all teams, whose KEY is not
+        in the data) are unattributed, so with all teams each adds up to the
+        check's total. Both empty when the Survey KEY or enumerator column
+        is not in the data.
     """
     flags = basis.reviewed
-    key = flags.survey_key
+    key, enumerator = flags.survey_key, scope.enumerator
     if not key or not {key, enumerator} <= set(data.columns):
-        return {}, {}
+        return ByEnumerator(), ByEnumerator()
+    data = scope.keep(data)
+    if scope.narrowed:
+        flags = _on_keys(flags, data[key].cast(pl.String).drop_nulls())
     flagged = pl.concat(
         [
             frame.select(pl.col(key).cast(pl.String))
@@ -1774,7 +1782,11 @@ def outliers_by_enumerator(
             outliers[name] = found
         if broken:
             violations[name] = broken
-    return outliers, violations
+    all_found, all_broken = _outstanding(flags)
+    return (
+        ByEnumerator(outliers, unattributed=all_found - sum(outliers.values())),
+        ByEnumerator(violations, unattributed=all_broken - sum(violations.values())),
+    )
 
 
 def _plural(count: int, noun: str) -> str:

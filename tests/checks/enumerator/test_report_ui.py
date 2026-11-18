@@ -10,7 +10,9 @@ import polars as pl
 import pytest
 
 from datasure.checks.enumerator.attention import (
+    AttentionList,
     AttentionRow,
+    LeftOut,
     OtherChecks,
     Reason,
     Severity,
@@ -217,6 +219,24 @@ def test_render_overview_shows_four_figures_with_comparisons(
     assert metrics[3].args[1] == "1 h 4 min"
     assert metrics[2].kwargs["delta"] == "Range 1 to 3"
     assert "Fewest: E3 (1). Most: E1 (3)." in metrics[2].kwargs["help"]
+
+
+def test_render_overview_says_when_it_counts_one_team(
+    tracked_columns, sample_enumerator_data, sample_enumerator_settings
+):
+    """With a team chosen, the active figure says Summary counts every team."""
+
+    def active_help(team):
+        tracked_columns._made_columns.clear()
+        with patch.dict(sys.modules, {"streamlit": tracked_columns}):
+            _render_overview(sample_enumerator_data, sample_enumerator_settings, team)
+        first = _drawn_columns(tracked_columns)[0].metric.mock_calls[0]
+        return first.kwargs["help"]
+
+    assert active_help(None).endswith("as on Summary's Enumerator Stats row")
+    assert "in team T1. Summary's Enumerator Stats row counts every team" in (
+        active_help("T1")
+    )
 
 
 def test_render_overview_without_duration_shows_teams(
@@ -441,7 +461,9 @@ def _row(name, *severities, team="T1"):
 
 def test_needs_attention_with_no_rows_says_so(patched_enum):
     """An empty list is a success, with what was checked under it."""
-    _render_needs_attention([], ["activity", "duplicates"], OtherChecks())
+    _render_needs_attention(
+        AttentionList([]), ["activity", "duplicates"], OtherChecks()
+    )
 
     patched_enum.success.assert_called_once()
     assert patched_enum.caption.call_args.args[0] == "Checked: activity, duplicates."
@@ -451,7 +473,7 @@ def test_needs_attention_lists_rows_and_folds_the_rest(patched_enum):
     """The first rows show; the rest fold into an expander."""
     rows = [_row(f"E{i}", Severity.FLAG) for i in range(ATTENTION_SHOWN + 2)]
 
-    _render_needs_attention(rows, ["activity"], OtherChecks())
+    _render_needs_attention(AttentionList(rows), ["activity"], OtherChecks())
 
     patched_enum.expander.assert_called_once_with("2 more")
     first = patched_enum.caption.call_args_list[0].args[0]
@@ -459,14 +481,22 @@ def test_needs_attention_lists_rows_and_folds_the_rest(patched_enum):
 
 
 def test_needs_attention_shows_each_check_left_out_as_an_error(patched_enum):
-    """A check whose numbers failed is named with its reason."""
-    other = OtherChecks(errors=(("Outliers", "ValueError: bad settings"),))
+    """A rule or check whose numbers failed is named with its reason."""
+    left_out = (
+        LeftOut("Outliers", "ValueError: bad settings", "Open Outliers."),
+        LeftOut("Activity", "ValueError: bad dates"),
+    )
 
-    _render_needs_attention([], [], other)
+    _render_needs_attention(
+        AttentionList([], left_out), ["activity", "duplicates"], OtherChecks()
+    )
 
-    message = patched_enum.error.call_args.args[0]
-    assert message.startswith("Outliers is left out of this list")
-    assert "ValueError: bad settings" in message
+    messages = [c.args[0] for c in patched_enum.error.call_args_list]
+    assert messages == [item.message for item in left_out]
+    assert messages[0].startswith("Outliers is left out of this list")
+    assert "ValueError: bad settings" in messages[0]
+    # A rule that failed is not listed as checked.
+    assert patched_enum.caption.call_args.args[0] == "Checked: duplicates."
 
 
 def test_attention_row_shows_badges_and_escaped_findings(patched_enum):
@@ -670,7 +700,8 @@ def test_enumerator_report_with_data(
         other_checks=other_checks,
     )
 
-    other_checks.assert_called_once_with("enumerator")
+    (scope,) = other_checks.call_args.args
+    assert (scope.enumerator, scope.team) == ("enumerator", None)
     headers = [c.args[0] for c in enum_bc.st.subheader.call_args_list]
     assert headers[:5] == [
         ":material/flag: Needs attention",
@@ -679,6 +710,34 @@ def test_enumerator_report_with_data(
         ":material/functions: Column statistics",
         ":material/timeline: Statistics over time",
     ]
+
+
+def test_enumerator_report_still_lists_when_response_patterns_fail(
+    full_report, sample_enumerator_data, sample_enumerator_settings
+):
+    """Response Patterns failing is named under the list; the page goes on."""
+    enum_bc = full_report
+    enum_bc.enumerator_report_settings = MagicMock(
+        return_value=sample_enumerator_settings
+    )
+    enum_bc.cached_response_patterns.side_effect = ValueError("bad settings")
+    other = OtherChecks(errors=(LeftOut("GPS", "OSError: gone", "Open GPS."),))
+
+    enum_bc.enumerator_report(
+        "proj_id",
+        sample_enumerator_data,
+        "settings.json",
+        {"survey_id": "survey_id"},
+        ColumnByType(),
+        other_checks=MagicMock(return_value=other),
+    )
+
+    errors = [c.args[0] for c in enum_bc.st.error.call_args_list]
+    assert errors[0].startswith("GPS is left out of this list")
+    assert errors[1].startswith("Response patterns is left out of this list")
+    assert "ValueError: bad settings" in errors[1]
+    headers = [c.args[0] for c in enum_bc.st.subheader.call_args_list]
+    assert ":material/table_view: Enumerator summary" in headers
 
 
 def test_enumerator_report_narrows_every_section_to_the_chosen_team(

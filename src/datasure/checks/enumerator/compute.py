@@ -10,7 +10,7 @@ from datasure.checks import missing
 from datasure.checks.enumerator.attention import duration_minutes
 from datasure.checks.enumerator.models import (
     WEEKDAY_OFFSET_TO_NUMERIC,
-    EnumeratorOverviewMetrics,
+    ActiveEnumerators,
     OverviewFigures,
 )
 from datasure.utils.duckdb_utils import load_missing_codes_from_db
@@ -159,86 +159,47 @@ def _add_time_period_column(
 # =============================================================================
 
 
-def compute_enumerator_overview(
-    data: pl.DataFrame,
-    date: str,
-    enumerator: str,
-    team: str | None,
-    today: dt_date | None = None,
-) -> EnumeratorOverviewMetrics:
-    """Compute enumerator overview metrics.
+def _past_week(today: dt_date) -> pl.Expr:
+    """True for a ``day`` dated in the 7 days up to and including `today`."""
+    return pl.col("day").is_between(today - timedelta(days=6), today)
 
-    Calculates key metrics including total submissions, active enumerators,
-    team counts, and submission statistics.
 
-    Cached for 5 minutes to improve performance for repeated calls.
+def _enumerator_days(data: pl.DataFrame, date: str, enumerator: str) -> pl.DataFrame:
+    """Return each submission's enumerator, as text, and its local day."""
+    return data.select(
+        pl.col(enumerator).cast(pl.String).alias("enumerator"),
+        pl.col(date).dt.date().alias("day"),
+    )
+
+
+def count_active_enumerators(
+    data: pl.DataFrame, date: str, enumerator: str, today: dt_date | None = None
+) -> ActiveEnumerators:
+    """Count the enumerators active in the past 7 days, out of all.
+
+    Active: a submission dated in the 7 days up to and including `today`;
+    later dates do not count. Rows with no enumerator are left out of both
+    counts. Datetimes count on their local day, as the summary table does.
+    The overview's "Active in the past 7 days" and Summary's Enumerator Stats
+    health row both use this, so they agree on the same data.
 
     Parameters
     ----------
     data : pl.DataFrame
-        DataFrame containing survey data.
+        Survey data.
     date : str
         Date column name.
     enumerator : str
         Enumerator column name.
-    team : str | None
-        Team column name (optional).
     today : date | None
-        Reference date for the "active in the past 7 days" count. Defaults
-        to the system clock.
-
-    Returns
-    -------
-    EnumeratorOverviewMetrics
-        Overview metrics for enumerators including counts and statistics.
+        The day the past 7 days count back from. Defaults to the system clock.
     """
-    if data.is_empty():
-        raise ValueError(
-            "Input data is empty. Cannot compute enumerator overview metrics."
-        )
-    data = data.sort([enumerator, date])
-
-    all_submissions = data.height
-
-    # Calculate daily submissions
-    data = data.with_row_index(name="TOKEN KEY")
-    daily_submissions_sum = data.group_by([date, enumerator]).agg(
-        pl.col("TOKEN KEY").count().alias("count")
-    )
-
-    # Calculate active enumerators (past 7 days)
     if today is None:
         today = dt_date.today()
-    active_date_cut_off = today - timedelta(weeks=1)
-
-    # Cut to the local day, as compute_enumerator_summary does.
-    daily_submissions_sum = daily_submissions_sum.with_columns(
-        (pl.col(date).dt.date() > active_date_cut_off).alias("active")
-    )
-
-    num_active_enumerators = (
-        daily_submissions_sum.filter(pl.col("active"))
-        .select(pl.col(enumerator).n_unique())
-        .item()
-    )
-
-    num_enumerators = data[enumerator].n_unique()
-    num_teams = data[team].n_unique() if team else "n/a"
-    min_submissions = int(daily_submissions_sum["count"].min())
-    max_submissions = int(daily_submissions_sum["count"].max())
-    avg_submissions = int(daily_submissions_sum["count"].mean())
-
-    pct_active_enumerators = f"{(num_active_enumerators / num_enumerators) * 100:.0f}%"
-
-    return EnumeratorOverviewMetrics(
-        all_submissions=all_submissions,
-        num_active_enumerators=num_active_enumerators,
-        num_enumerators=num_enumerators,
-        num_teams=num_teams,
-        min_submissions=min_submissions,
-        max_submissions=max_submissions,
-        avg_submissions=avg_submissions,
-        pct_active_enumerators=pct_active_enumerators,
+    named = _enumerator_days(data, date, enumerator).drop_nulls("enumerator")
+    return ActiveEnumerators(
+        active=named.filter(_past_week(today))["enumerator"].n_unique(),
+        total=named["enumerator"].n_unique(),
     )
 
 
@@ -285,14 +246,9 @@ def compute_overview_figures(
         raise ValueError("Input data is empty. Cannot compute the overview figures.")
     if today is None:
         today = dt_date.today()
-    days = data.select(
-        pl.col(enumerator).cast(pl.String).alias("enumerator"),
-        pl.col(date).dt.date().alias("day"),
-    )
-    week_start = today - timedelta(days=6)
-    before_start = week_start - timedelta(days=7)
-    in_week = pl.col("day").is_between(week_start, today)
-    in_before = pl.col("day").is_between(before_start, week_start - timedelta(days=1))
+    days = _enumerator_days(data, date, enumerator)
+    week_before = _past_week(today - timedelta(days=7))
+    active = count_active_enumerators(data, date, enumerator, today)
 
     totals = (
         days.drop_nulls("enumerator")
@@ -315,11 +271,11 @@ def compute_overview_figures(
             )
 
     return OverviewFigures(
-        num_enumerators=totals.height,
-        num_active=days.filter(in_week)["enumerator"].drop_nulls().n_unique(),
+        num_enumerators=active.total,
+        num_active=active.active,
         num_teams=data[team].n_unique() if team and team in data.columns else None,
-        submissions_past_week=days.filter(in_week).height,
-        submissions_week_before=days.filter(in_before).height,
+        submissions_past_week=days.filter(_past_week(today)).height,
+        submissions_week_before=days.filter(week_before).height,
         median_per_enumerator=float(totals["len"].median()),
         fewest=(fewest[0], int(fewest[1])),
         most=(most[0], int(most[1])),

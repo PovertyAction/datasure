@@ -1,8 +1,9 @@
 """Other checks' outstanding issues by enumerator, for the Enumerator page.
 
-Each function here takes the check page's context and the page's enumerator
-column and returns the check's outstanding issues by enumerator
-(`IssueCounts`), or an empty tuple when it has none to give. The check
+Each function here takes the check page's context and the scope (the page's
+enumerator column and the team chosen on the Enumerator page) and returns
+the check's outstanding issues by enumerator (`IssueCounts`), or an empty
+tuple when it has none to give. The check
 catalogue names one per check (``CheckEntry.by_enumerator``), and the
 Enumerator page lists them under "Needs attention".
 
@@ -30,6 +31,7 @@ from datasure.checks.gpschecks.report_ui import (
     gpschecks_headline,
     gpschecks_headline_view,
 )
+from datasure.checks.headline import EnumeratorScope
 from datasure.checks.health import cached_headline, cached_on_page
 from datasure.checks.outliers.report_ui import (
     outliers_by_enumerator,
@@ -37,7 +39,7 @@ from datasure.checks.outliers.report_ui import (
 )
 
 
-def duplicates(ctx: CheckContext, enumerator: str) -> tuple[IssueCounts, ...]:
+def duplicates(ctx: CheckContext, scope: EnumeratorScope) -> tuple[IssueCounts, ...]:
     """Records holding an unresolved duplicate ID; any one is worth a look."""
     config = ctx.config
     headline = cached_headline(
@@ -53,18 +55,19 @@ def duplicates(ctx: CheckContext, enumerator: str) -> tuple[IssueCounts, ...]:
     )
     if headline is None or headline.basis is None:
         return ()
-    counts = duplicate_records_by_enumerator(headline.basis, enumerator)
+    records = duplicate_records_by_enumerator(headline.basis, scope)
     return (
         IssueCounts(
             "Duplicates",
             "record with a duplicate ID",
             "records with a duplicate ID",
-            counts,
+            records.counts,
+            unattributed=records.unattributed,
         ),
     )
 
 
-def outliers(ctx: CheckContext, enumerator: str) -> tuple[IssueCounts, ...]:
+def outliers(ctx: CheckContext, scope: EnumeratorScope) -> tuple[IssueCounts, ...]:
     """Outliers and constraint violations, flagged at a rate above the team's."""
     config = ctx.config
     headline = cached_headline(
@@ -82,17 +85,23 @@ def outliers(ctx: CheckContext, enumerator: str) -> tuple[IssueCounts, ...]:
     )
     if headline is None or headline.basis is None:
         return ()
-    found, broken = outliers_by_enumerator(
-        headline.basis, ctx.data.page_data, enumerator
-    )
+    found, broken = outliers_by_enumerator(headline.basis, ctx.data.page_data, scope)
     return (
-        IssueCounts("Outliers", "outlier", "outliers", found, rule=CountRule.RELATIVE),
+        IssueCounts(
+            "Outliers",
+            "outlier",
+            "outliers",
+            found.counts,
+            rule=CountRule.RELATIVE,
+            unattributed=found.unattributed,
+        ),
         IssueCounts(
             "Constraints",
             "constraint violation",
             "constraint violations",
-            broken,
+            broken.counts,
             rule=CountRule.RELATIVE,
+            unattributed=broken.unattributed,
         ),
     )
 
@@ -101,7 +110,7 @@ def _gps_view(ctx: CheckContext) -> object:
     return gpschecks_headline_view(ctx.project_id, ctx.config.page_name_id)
 
 
-def gps(ctx: CheckContext, enumerator: str) -> tuple[IssueCounts, ...]:
+def gps(ctx: CheckContext, scope: EnumeratorScope) -> tuple[IssueCounts, ...]:
     """GPS points flagged as outliers and not yet reviewed."""
     config = ctx.config
     headline = cached_headline(
@@ -118,17 +127,19 @@ def gps(ctx: CheckContext, enumerator: str) -> tuple[IssueCounts, ...]:
     )
     if headline is None or headline.basis is None:
         return ()
+    points = headline.basis.unreviewed_by(scope)
     return (
         IssueCounts(
             "GPS",
             "GPS point far from the others",
             "GPS points far from the others",
-            headline.basis.unreviewed_by(enumerator),
+            points.counts,
+            unattributed=points.unattributed,
         ),
     )
 
 
-def backchecks(ctx: CheckContext, enumerator: str) -> tuple[IssueCounts, ...]:
+def backchecks(ctx: CheckContext, scope: EnumeratorScope) -> tuple[IssueCounts, ...]:
     """Backcheck mismatches, at a rate per value compared above the team's."""
     config = ctx.config
     backcheck_data = ctx.data.backcheck_data_with_rows
@@ -136,7 +147,7 @@ def backchecks(ctx: CheckContext, enumerator: str) -> tuple[IssueCounts, ...]:
         return ()
     result = cached_on_page(
         ctx,
-        ("backchecks_by_enumerator", enumerator),
+        ("backchecks_by_enumerator", scope),
         lambda: backcheck_mismatches_by_enumerator(
             ctx.project_id,
             config.page_name_id,
@@ -144,7 +155,7 @@ def backchecks(ctx: CheckContext, enumerator: str) -> tuple[IssueCounts, ...]:
             backcheck_data,
             config.setting_file,
             backcheck_config(ctx),
-            enumerator,
+            scope,
         ),
     )
     if result is None:
@@ -158,5 +169,6 @@ def backchecks(ctx: CheckContext, enumerator: str) -> tuple[IssueCounts, ...]:
             rule=CountRule.RELATIVE,
             denominators=result.compared,
             per="value compared",
+            unattributed=result.unattributed,
         ),
     )

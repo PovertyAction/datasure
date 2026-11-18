@@ -11,8 +11,8 @@ from datasure.checks.enumerator.models import (
     WEEKDAY_NAMES,
     WEEKDAY_OFFSET_MAP,
     WEEKDAY_OFFSET_TO_NUMERIC,
+    ActiveEnumerators,
     ConsentOutcomeSettings,
-    EnumeratorOverviewMetrics,
     EnumeratorSettings,
     ProductivitySettings,
     StatisticsOvertimeSettings,
@@ -214,53 +214,13 @@ def test_statistics_overtime_settings_defaults():
     assert settings.statscol is None
 
 
-def test_enumerator_overview_metrics_model():
-    """Test EnumeratorOverviewMetrics model."""
-    metrics = EnumeratorOverviewMetrics(
-        all_submissions=100,
-        num_active_enumerators=5,
-        num_enumerators=10,
-        num_teams=3,
-        min_submissions=5,
-        max_submissions=25,
-        avg_submissions=15,
-        pct_active_enumerators="50%",
-    )
-    assert metrics.all_submissions == 100
-    assert metrics.num_active_enumerators == 5
-    assert metrics.num_enumerators == 10
-    assert metrics.num_teams == 3
-    assert metrics.min_submissions == 5
-    assert metrics.max_submissions == 25
-    assert metrics.avg_submissions == 15
-    assert metrics.pct_active_enumerators == "50%"
+def test_active_enumerators_model():
+    """ActiveEnumerators holds the active count and the total."""
+    counted = ActiveEnumerators(active=5, total=10)
+    assert (counted.active, counted.total) == (5, 10)
 
 
-def test_enumerator_overview_metrics_validation():
-    """Test EnumeratorOverviewMetrics validation for non-negative integers."""
+def test_active_enumerators_validation():
+    """Counts cannot be negative."""
     with pytest.raises(ValidationError):
-        EnumeratorOverviewMetrics(
-            all_submissions=-1,
-            num_active_enumerators=5,
-            num_enumerators=10,
-            num_teams=3,
-            min_submissions=5,
-            max_submissions=25,
-            avg_submissions=15,
-            pct_active_enumerators="50%",
-        )
-
-
-def test_enumerator_overview_metrics_num_teams_string():
-    """Test EnumeratorOverviewMetrics allows string for num_teams."""
-    metrics = EnumeratorOverviewMetrics(
-        all_submissions=100,
-        num_active_enumerators=5,
-        num_enumerators=10,
-        num_teams="n/a",
-        min_submissions=5,
-        max_submissions=25,
-        avg_submissions=15,
-        pct_active_enumerators="50%",
-    )
-    assert metrics.num_teams == "n/a"
+        ActiveEnumerators(active=-1, total=10)

@@ -37,7 +37,7 @@ from datasure.checks.duplicates import (
     duplicates_report,
     duplicates_status,
 )
-from datasure.checks.enumerator.attention import IssueCounts, OtherChecks
+from datasure.checks.enumerator.attention import IssueCounts, LeftOut, OtherChecks
 from datasure.checks.enumerator.report_ui import (
     enumerator_headline,
     enumerator_report,
@@ -50,7 +50,7 @@ from datasure.checks.gpschecks.report_ui import (
     gpschecks_settings_section,
     gpschecks_status,
 )
-from datasure.checks.headline import CheckHeadline
+from datasure.checks.headline import CheckHeadline, EnumeratorScope
 from datasure.checks.health import (
     Delta,
     cached_on_page,
@@ -88,6 +88,7 @@ from datasure.utils.nav_ui import (
 )
 from datasure.utils.navigation import (
     READY,
+    CheckStatus,
     NavItem,
     StatusResult,
     rows_status,
@@ -157,11 +158,11 @@ class CheckEntry:
         check's Auto-Clustering sliders. Summary's cached numbers are keyed
         on page data and settings without view state, so these are added to
         the check's key. None for headlines that ignore view state.
-    by_enumerator : ByEnumerator | None
+    by_enumerator : CountIssues | None
         The check's outstanding issues by enumerator, from the context and
-        the page's enumerator column, for the Enumerator page's "Needs
-        attention" list (see `enumerator_flags`). None for checks whose
-        issues are not counted by enumerator.
+        the scope (the page's enumerator column and chosen team), for the
+        Enumerator page's "Needs attention" list (see `enumerator_flags`).
+        None for checks whose issues are not counted by enumerator.
     """
 
     slug: str
@@ -176,10 +177,10 @@ class CheckEntry:
     setup_hint: str = SET_UP_BELOW
     delta: Delta | None = None
     headline_view: Callable[[CheckContext], Hashable] | None = None
-    by_enumerator: "ByEnumerator | None" = None
+    by_enumerator: "CountIssues | None" = None
 
 
-ByEnumerator = Callable[[CheckContext, str], tuple[IssueCounts, ...]]
+CountIssues = Callable[[CheckContext, EnumeratorScope], tuple[IssueCounts, ...]]
 
 
 def _render_summary(ctx: CheckContext) -> None:
@@ -320,20 +321,28 @@ def _render_enumerator(ctx: CheckContext) -> None:
     )
 
 
-def enumerator_other_checks(ctx: CheckContext, enumerator: str) -> OtherChecks:
+def enumerator_other_checks(ctx: CheckContext, scope: EnumeratorScope) -> OtherChecks:
     """Return the other checks' outstanding issues by enumerator.
+
+    Counted in the scope's team, when one is chosen.
 
     Only checks that are ready (set up, with data) are asked, in catalogue
     order. A check whose numbers cannot be computed is left out and named
     in ``errors`` with the reason, which the Enumerator page shows under its
-    "Needs attention" list; the other checks still count.
+    "Needs attention" list; the other checks still count. So is a check
+    whose status could not be computed.
     """
     counts: list[IssueCounts] = []
-    errors: list[tuple[str, str]] = []
+    errors: list[LeftOut] = []
     for entry in CHECK_CATALOGUE:
         if entry.by_enumerator is None:
             continue
-        status, _ = guarded_status(entry.slug, lambda e=entry: e.status(ctx))
+        hint = f"Open {entry.label} to review its settings."
+        status, reason = guarded_status(entry.slug, lambda e=entry: e.status(ctx))
+        if status is CheckStatus.ERROR:
+            # guarded_status has logged it; the page shows it under the list.
+            errors.append(LeftOut(entry.label, reason, hint))
+            continue
         if status is not READY.status:
             continue
         try:
@@ -341,8 +350,8 @@ def enumerator_other_checks(ctx: CheckContext, enumerator: str) -> OtherChecks:
             counts.extend(
                 cached_on_page(
                     ctx,
-                    ("by_enumerator", entry.slug, enumerator, view),
-                    lambda e=entry: e.by_enumerator(ctx, enumerator),
+                    ("by_enumerator", entry.slug, scope, view),
+                    lambda e=entry: e.by_enumerator(ctx, scope),
                 )
             )
         # UI boundary: one check's numbers must not stop the list or the
@@ -351,7 +360,7 @@ def enumerator_other_checks(ctx: CheckContext, enumerator: str) -> OtherChecks:
         # Conventions").
         except Exception as exc:
             logger.exception("Could not count %r issues by enumerator", entry.slug)
-            errors.append((entry.label, f"{type(exc).__name__}: {exc}"))
+            errors.append(LeftOut.from_exception(entry.label, exc, hint))
     return OtherChecks(tuple(counts), tuple(errors))
 
 

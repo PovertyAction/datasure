@@ -14,15 +14,25 @@ import polars as pl
 import pytest
 
 from datasure.checks import health
-from datasure.checks.catalogue import enumerator_other_checks, get_check
+from datasure.checks.catalogue import (
+    CHECK_CATALOGUE,
+    enumerator_other_checks,
+    get_check,
+)
 from datasure.checks.context import CheckContext, CheckData, PageConfig
-from datasure.checks.enumerator.attention import CountRule, IssueCounts
+from datasure.checks.enumerator.attention import CountRule, IssueCounts, LeftOut
+from datasure.checks.headline import EnumeratorScope
+from datasure.checks.id_duplicates import find_duplicate_groups
 from datasure.processing.correction_log import CORRECTION_LOG_SCHEMA
 from datasure.utils.dataframe_utils import get_df_columns
 from datasure.utils.duckdb_utils import duckdb_save_table
+from datasure.utils.navigation import CheckStatus, StatusResult
 
 PROJECT_ID = "enumflags01"
 PAGE = "hfcs"
+ALL_TEAMS = EnumeratorScope("enum")
+TEAM_1 = EnumeratorScope("enum", "team", "T1")
+TEAM_2 = EnumeratorScope("enum", "team", "T2")
 
 
 @pytest.fixture(autouse=True)
@@ -83,8 +93,10 @@ def _ctx(config: PageConfig, data: pl.DataFrame, backcheck=None) -> CheckContext
     )
 
 
-def _by_check(ctx: CheckContext) -> dict[str, IssueCounts]:
-    other = enumerator_other_checks(ctx, "enum")
+def _by_check(
+    ctx: CheckContext, scope: EnumeratorScope = ALL_TEAMS
+) -> dict[str, IssueCounts]:
+    other = enumerator_other_checks(ctx, scope)
     assert other.errors == ()
     return {issues.check: issues for issues in other.counts}
 
@@ -107,6 +119,51 @@ class TestDuplicates:
         assert issues.counts == {"e1": 1, "e2": 1}
         assert issues.rule is CountRule.ANY
 
+    def test_records_add_up_to_the_checks_records_involved(self, tmp_path):
+        # h3 is held by three records, one of them with no enumerator.
+        survey = pl.DataFrame(
+            {
+                "key": ["k1", "k2", "k3", "k4", "k5", "k6"],
+                "hhid": ["h1", "h2", "h3", "h3", "h3", "h4"],
+                "enum": ["e1", "e2", "e1", "e2", None, "e3"],
+            }
+        )
+        duckdb_save_table(PROJECT_ID, survey, "survey", "prep")
+        ctx = _ctx(_config(tmp_path), survey)
+
+        headline = get_check("duplicates").headline(ctx)
+        issues = _by_check(ctx)["Duplicates"]
+
+        # The headline counts IDs; the list counts the records holding them,
+        # which the Duplicates tab shows as "Records involved".
+        records_involved = int(
+            find_duplicate_groups(survey, "hhid", None, None)["n_records"].sum()
+        )
+        assert headline.outstanding == 1
+        assert issues.counts == {"e1": 1, "e2": 1}
+        assert issues.unattributed == 1
+        assert sum(issues.counts.values()) + issues.unattributed == records_involved
+
+    def test_a_chosen_team_counts_only_its_records(self, tmp_path):
+        # h1 is held by k1 (e1, T1) and k2 (e1, T2); h2 by k3 and k4 in T1.
+        survey = pl.DataFrame(
+            {
+                "key": ["k1", "k2", "k3", "k4", "k5"],
+                "hhid": ["h1", "h1", "h2", "h2", "h3"],
+                "enum": ["e1", "e1", "e2", "e3", "e1"],
+                "team": ["T1", "T2", "T1", "T1", "T1"],
+            }
+        )
+        duckdb_save_table(PROJECT_ID, survey, "survey", "prep")
+        ctx = _ctx(_config(tmp_path, team="team"), survey)
+
+        everyone = _by_check(ctx)["Duplicates"]
+        team_1 = _by_check(ctx, TEAM_1)["Duplicates"]
+
+        assert everyone.counts == {"e1": 2, "e2": 1, "e3": 1}
+        # k2 is in T2, but h1 is still a duplicate, so k1 still counts.
+        assert team_1.counts == {"e1": 1, "e2": 1, "e3": 1}
+
     def test_a_check_that_is_not_set_up_is_left_out(self, tmp_path):
         ctx = _ctx(_config(tmp_path, survey_id=None), self.SURVEY)
 
@@ -120,9 +177,30 @@ class TestDuplicates:
             "datasure.checks.enumerator_flags.duplicate_records_by_enumerator",
             side_effect=ValueError("bad filter"),
         ):
-            other = enumerator_other_checks(ctx, "enum")
+            other = enumerator_other_checks(ctx, ALL_TEAMS)
 
-        assert other.errors == (("Duplicates", "ValueError: bad filter"),)
+        assert other.errors == (
+            LeftOut(
+                "Duplicates",
+                "ValueError: bad filter",
+                "Open Duplicates to review its settings.",
+            ),
+        )
+
+    def test_a_check_whose_status_fails_is_named_with_the_reason(self, tmp_path):
+        ctx = _ctx(_config(tmp_path), self.SURVEY)
+
+        with patch(
+            "datasure.checks.catalogue.guarded_status",
+            return_value=StatusResult(CheckStatus.ERROR, "OSError: locked"),
+        ):
+            other = enumerator_other_checks(ctx, ALL_TEAMS)
+
+        assert [item.check for item in other.errors] == [
+            entry.label for entry in CHECK_CATALOGUE if entry.by_enumerator is not None
+        ]
+        assert other.errors[0].reason == "OSError: locked"
+        assert other.counts == ()
 
 
 class TestOutliers:
@@ -153,7 +231,9 @@ class TestOutliers:
         }
     )
 
-    def _by_check(self, tmp_path, log_entries: list[dict]):
+    def _by_check(
+        self, tmp_path, log_entries: list[dict], scope: EnumeratorScope = ALL_TEAMS
+    ):
         duckdb_save_table(PROJECT_ID, self.COLUMNS, f"outliers_{PAGE}", "logs")
         log = pl.DataFrame(
             [{"status": "Successful", **entry} for entry in log_entries],
@@ -165,7 +245,7 @@ class TestOutliers:
             patch(f"{processor}.get_corrected_data", lambda _self, _a: self.DATA),
             patch(f"{processor}.get_uncorrected_data", lambda _self, _a: self.DATA),
         ):
-            return _by_check(_ctx(_config(tmp_path), self.DATA))
+            return _by_check(_ctx(_config(tmp_path), self.DATA), scope)
 
     def test_flags_count_for_the_enumerator_of_their_submission(self, tmp_path):
         found = self._by_check(tmp_path, [])
@@ -173,6 +253,35 @@ class TestOutliers:
         assert found["Outliers"].counts == {"e2": 1}
         assert found["Constraints"].counts == {"e2": 1}
         assert found["Outliers"].rule is CountRule.RELATIVE
+
+    def test_flags_with_no_enumerator_are_unattributed(self, tmp_path):
+        self.DATA = self.DATA.with_columns(
+            pl.when(pl.col("key") == "k4")
+            .then(None)
+            .otherwise(pl.col("enum"))
+            .alias("enum")
+        )
+
+        found = self._by_check(tmp_path, [])
+
+        for check in ("Outliers", "Constraints"):
+            assert found[check].counts == {}
+            assert found[check].unattributed == 1
+
+    def test_a_chosen_team_counts_only_its_flags(self, tmp_path):
+        # k4, the flagged submission, is the only one in T2.
+        self.DATA = self.DATA.with_columns(
+            team=pl.when(pl.col("key") == "k4")
+            .then(pl.lit("T2"))
+            .otherwise(pl.lit("T1"))
+        )
+
+        team_1 = self._by_check(tmp_path, [], TEAM_1)
+        team_2 = self._by_check(tmp_path, [], TEAM_2)
+
+        for check in ("Outliers", "Constraints"):
+            assert (team_1[check].counts, team_1[check].unattributed) == ({}, 0)
+            assert (team_2[check].counts, team_2[check].unattributed) == ({"e2": 1}, 0)
 
     def test_accepted_flags_no_longer_count(self, tmp_path):
         accepted = [
@@ -241,7 +350,59 @@ class TestGPS:
             issues = _by_check(ctx)["GPS"]
 
         assert issues.counts == {"e2": 1, "e3": 1}
+        assert issues.unattributed == 0
         assert sum(issues.counts.values()) == headline.outstanding
+
+    def test_points_with_no_enumerator_are_unattributed(self, tmp_path):
+        duckdb_save_table(PROJECT_ID, self.GPS_COLUMNS, f"gps_columns_{PAGE}", "logs")
+        processor = MagicMock()
+        processor.get_active_acceptances.return_value = pl.DataFrame()
+        processor.get_correction_log.return_value = pl.DataFrame()
+        processor.get_active_corrections.return_value = pl.DataFrame()
+        data = self.DATA.with_columns(
+            pl.when(pl.col("key") == "k10")
+            .then(None)
+            .otherwise(pl.col("enum"))
+            .alias("enum")
+        )
+        ctx = _ctx(_config(tmp_path), data)
+
+        with patch(
+            "datasure.checks.gpschecks.report_ui.CorrectionProcessor",
+            return_value=processor,
+        ):
+            headline = get_check("gps").headline(ctx)
+            issues = _by_check(ctx)["GPS"]
+
+        assert issues.counts == {"e2": 1}
+        assert issues.unattributed == 1
+        assert sum(issues.counts.values()) + issues.unattributed == (
+            headline.outstanding
+        )
+
+    def test_a_chosen_team_counts_only_its_points(self, tmp_path):
+        duckdb_save_table(PROJECT_ID, self.GPS_COLUMNS, f"gps_columns_{PAGE}", "logs")
+        processor = MagicMock()
+        processor.get_active_acceptances.return_value = pl.DataFrame()
+        processor.get_correction_log.return_value = pl.DataFrame()
+        processor.get_active_corrections.return_value = pl.DataFrame()
+        # k10 (e3) is the only submission in T2.
+        data = self.DATA.with_columns(
+            team=pl.when(pl.col("key") == "k10")
+            .then(pl.lit("T2"))
+            .otherwise(pl.lit("T1"))
+        )
+        ctx = _ctx(_config(tmp_path, team="team"), data)
+
+        with patch(
+            "datasure.checks.gpschecks.report_ui.CorrectionProcessor",
+            return_value=processor,
+        ):
+            team_1 = _by_check(ctx, TEAM_1)["GPS"]
+            team_2 = _by_check(ctx, TEAM_2)["GPS"]
+
+        assert (team_1.counts, team_1.unattributed) == ({"e2": 1}, 0)
+        assert (team_2.counts, team_2.unattributed) == ({"e3": 1}, 0)
 
 
 class TestBackchecks:
@@ -289,6 +450,34 @@ class TestBackchecks:
         assert issues.counts == {"e1": 0, "e2": 1}
         assert issues.denominators == {"e1": 1, "e2": 2}
         assert issues.per == "value compared"
+        assert issues.unattributed == 0
+
+    def test_mismatches_with_no_enumerator_are_unattributed(self, tmp_path):
+        self.SURVEY = self.SURVEY.with_columns(
+            pl.when(pl.col("key") == "k2")
+            .then(None)
+            .otherwise(pl.col("enum"))
+            .alias("enum")
+        )
+
+        issues = _by_check(self._ctx(tmp_path))["Backchecks"]
+
+        assert issues.counts == {"e1": 0, "e2": 0}
+        assert issues.unattributed == 1
+
+    def test_a_chosen_team_counts_only_its_comparisons(self, tmp_path):
+        # k2, with the mismatch, is the only submission in T2.
+        self.SURVEY = self.SURVEY.with_columns(
+            team=pl.when(pl.col("key") == "k2")
+            .then(pl.lit("T2"))
+            .otherwise(pl.lit("T1"))
+        )
+
+        issues = _by_check(self._ctx(tmp_path), TEAM_1)["Backchecks"]
+
+        assert issues.counts == {"e1": 0, "e2": 0}
+        assert issues.denominators == {"e1": 1, "e2": 1}
+        assert issues.unattributed == 0
 
     def test_no_backcheck_data_gives_nothing(self, tmp_path):
         ctx = _ctx(_config(tmp_path), self.SURVEY)
@@ -303,12 +492,12 @@ def test_counts_are_cached_on_the_page(tmp_path):
     ctx = _ctx(_config(tmp_path), data)
     # The first call creates the logs database, which the page fingerprint
     # stamps; on a real project it already exists.
-    enumerator_other_checks(ctx, "enum")
-    enumerator_other_checks(ctx, "enum")
+    enumerator_other_checks(ctx, ALL_TEAMS)
+    enumerator_other_checks(ctx, ALL_TEAMS)
     with patch(
         "datasure.checks.enumerator_flags.duplicate_records_by_enumerator"
     ) as counted:
-        enumerator_other_checks(ctx, "enum")
+        enumerator_other_checks(ctx, ALL_TEAMS)
 
     counted.assert_not_called()
 

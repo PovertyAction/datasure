@@ -1,6 +1,6 @@
 """Tests for datasure.checks.enumerator.attention: who needs attention, and why."""
 
-from datetime import date, datetime, timedelta
+from datetime import date, datetime, time, timedelta
 
 import polars as pl
 import pytest
@@ -10,6 +10,7 @@ from datasure.checks.enumerator.attention import (
     ColumnRoles,
     CountRule,
     IssueCounts,
+    LeftOut,
     Reason,
     Severity,
     activity_reasons,
@@ -25,6 +26,7 @@ from datasure.checks.enumerator.attention import (
     rate_reasons,
     submissions_by_enumerator,
     teams_by_enumerator,
+    unattributed_notes,
 )
 from datasure.checks.enumerator.response_patterns.models import (
     Badge,
@@ -154,9 +156,30 @@ def test_short_interviews_are_flagged_against_the_team_median():
     reasons = duration_reasons(data, ROLES)
 
     assert reasons["fast"][0].severity is Severity.FLAG
-    assert reasons["fast"][0].finding == "Median 10 min against 40 min for the team"
+    assert reasons["fast"][0].finding == (
+        "Median 10 min against 40 min for the rest of the team"
+    )
     assert reasons["brisk"][0].severity is Severity.WATCH
     assert set(reasons) == {"fast", "brisk"}
+
+
+def test_short_interviews_compare_with_the_rest_of_the_team():
+    """An enumerator with most of the interviews can't set their own benchmark."""
+    data = _frame(_rows("fast", 20, dur=10.0), _rows("a", 6, dur=40.0))
+
+    reasons = duration_reasons(data, ROLES)
+
+    assert set(reasons) == {"fast"}
+    assert reasons["fast"][0].severity is Severity.FLAG
+    assert reasons["fast"][0].finding == (
+        "Median 10 min against 40 min for the rest of the team"
+    )
+
+
+def test_a_lone_enumerator_has_no_team_to_compare_with():
+    data = _frame(_rows("solo", 10, dur=10.0))
+
+    assert duration_reasons(data, ROLES) == {}
 
 
 def test_short_interviews_need_enough_submissions():
@@ -189,10 +212,22 @@ def test_a_much_larger_share_of_missing_answers_is_flagged():
 
     assert reasons["gaps"][0].severity is Severity.FLAG
     assert reasons["gaps"][0].finding == (
-        "15% of answers missing against 4.0% for the team"
+        "15% of answers missing against 3.5% for the rest of the team"
     )
     assert reasons["some"][0].severity is Severity.WATCH
     assert "few" not in reasons
+
+
+def test_missing_answers_compare_with_the_rest_of_the_team():
+    """In a small team, an enumerator's own share can't hide them."""
+    summary = _summary([("a", 10, 2.0, 0.9), ("gaps", 10, 30.0, 0.9)])
+
+    reasons = missing_reasons(summary, "enum")
+
+    assert set(reasons) == {"gaps"}
+    assert reasons["gaps"][0].finding == (
+        "30% of answers missing against 2.0% for the rest of the team"
+    )
 
 
 def test_low_consent_is_flagged_in_points_below_the_team():
@@ -200,17 +235,30 @@ def test_low_consent_is_flagged_in_points_below_the_team():
         [
             ("a", 10, 0.0, 0.95),
             ("b", 10, 0.0, 0.93),
+            ("ok", 10, 0.0, 0.91),
             ("low", 10, 0.0, 0.71),
-            ("lowish", 10, 0.0, 0.84),
+            ("lowish", 10, 0.0, 0.85),
         ]
     )
 
     reasons = rate_reasons(summary, "enum", "% consent", "Consent", "consent")
 
     assert reasons["low"][0] == Reason(
-        "Consent", "71% consent against 88% for the team", Severity.FLAG
+        "Consent",
+        "71% consent against 92% for the rest of the team",
+        Severity.FLAG,
     )
     assert "lowish" not in reasons
+
+
+def test_rates_compare_with_the_rest_of_the_team():
+    """In a small team, an enumerator's own rate can't hide them."""
+    summary = _summary([("a", 10, 0.0, 0.95), ("low", 10, 0.0, 0.80)])
+
+    reasons = rate_reasons(summary, "enum", "% consent", "Consent", "consent")
+
+    assert set(reasons) == {"low"}
+    assert reasons["low"][0].severity is Severity.FLAG
 
 
 def test_rates_need_their_column():
@@ -242,6 +290,78 @@ def test_old_versions_after_the_newest_came_out_are_flagged():
     assert reasons["b"][0].finding == (
         "1 submission on version 1 after 2 came out on Fri 13 Nov"
     )
+
+
+def test_versions_stored_as_text_compare_as_numbers():
+    """Version "10" is newer than "9", though "9" sorts after it as text."""
+    data = pl.DataFrame(
+        {
+            "enum": ["a", "a", "b"],
+            "version": ["9", "10", "9"],
+            "day": [
+                LATEST - timedelta(days=9),
+                LATEST - timedelta(days=3),
+                LATEST - timedelta(days=1),
+            ],
+        }
+    )
+
+    reasons = form_version_reasons(data, ROLES)
+
+    assert list(reasons) == ["b"]
+    assert reasons["b"][0].finding == (
+        "1 submission on version 9 after 10 came out on Fri 13 Nov"
+    )
+
+
+def test_versions_that_are_not_numbers_compare_as_text():
+    data = pl.DataFrame(
+        {
+            "enum": ["a", "b"],
+            "version": ["v2", "v1"],
+            "day": [LATEST - timedelta(days=3), LATEST - timedelta(days=1)],
+        }
+    )
+
+    reasons = form_version_reasons(data, ROLES)
+
+    assert list(reasons) == ["b"]
+
+
+def test_submissions_before_the_update_on_its_day_are_not_flagged():
+    """With times, only submissions after the newest version's first one count."""
+    release_day = LATEST - timedelta(days=3)
+    data = pl.DataFrame(
+        {
+            "enum": ["a", "b", "c"],
+            "version": [2, 1, 1],
+            "day": [
+                datetime.combine(release_day, time(14)),
+                datetime.combine(release_day, time(9)),
+                datetime.combine(release_day, time(16)),
+            ],
+        }
+    )
+
+    reasons = form_version_reasons(data, ROLES)
+
+    assert list(reasons) == ["c"]
+
+
+def test_with_dates_only_the_release_day_itself_is_not_flagged():
+    """Without times the order on the release day is unknown, so it is left out."""
+    release_day = LATEST - timedelta(days=3)
+    data = pl.DataFrame(
+        {
+            "enum": ["a", "b", "c"],
+            "version": [2, 1, 1],
+            "day": [release_day, release_day, release_day + timedelta(days=1)],
+        }
+    )
+
+    reasons = form_version_reasons(data, ROLES)
+
+    assert list(reasons) == ["c"]
 
 
 # --- Response patterns -------------------------------------------------------
@@ -406,6 +526,19 @@ def test_the_relative_rule_can_use_its_own_denominators():
     )
 
 
+def test_issues_with_no_enumerator_are_noted_per_check():
+    counts = [
+        IssueCounts("Duplicates", "record", "records", {"a": 2}, unattributed=3),
+        IssueCounts("GPS", "point", "points", {"a": 1}, unattributed=1),
+        IssueCounts("Outliers", "outlier", "outliers", {"a": 4}),
+    ]
+
+    assert unattributed_notes(counts) == [
+        "Duplicates: 3 records have no enumerator, so no row above shows them.",
+        "GPS: 1 point has no enumerator, so no row above shows it.",
+    ]
+
+
 # --- The list ----------------------------------------------------------------
 
 
@@ -418,8 +551,10 @@ def test_attention_rows_merge_reasons_and_put_most_flags_first():
     )
     duplicates = IssueCounts("Duplicates", "record", "records", {"a": 2, "c": 1})
 
-    rows = attention_rows(data, ROLES, pl.DataFrame(), None, [duplicates])
+    attention = attention_rows(data, ROLES, pl.DataFrame(), None, [duplicates])
+    rows = attention.rows
 
+    assert attention.left_out == ()
     assert [row.enumerator for row in rows] == ["a", "c", "b"]
     assert rows[0].team == "North"
     assert [r.check for r in rows[0].reasons] == ["Interview length", "Duplicates"]
@@ -430,9 +565,50 @@ def test_attention_rows_leave_out_enumerators_not_in_view():
     data = _frame(_rows("a", 6, day=LATEST), _rows("b", 6, day=LATEST))
     other = IssueCounts("GPS", "point", "points", {"elsewhere": 4, "a": 1})
 
-    rows = attention_rows(data, ColumnRoles("enum"), pl.DataFrame(), None, [other])
+    attention = attention_rows(data, ColumnRoles("enum"), pl.DataFrame(), None, [other])
 
-    assert [row.enumerator for row in rows] == ["a"]
+    assert [row.enumerator for row in attention.rows] == ["a"]
+
+
+def test_a_failing_rule_is_left_out_and_the_others_still_count(monkeypatch):
+    data = _frame(
+        _rows("a", 6, day=LATEST, dur=10.0),
+        _rows("b", 6, day=LATEST, dur=40.0),
+        _rows("c", 6, day=LATEST, dur=41.0),
+    )
+    duplicates = IssueCounts("Duplicates", "record", "records", {"b": 1})
+
+    def broken(*_args):
+        raise ValueError("bad dates")
+
+    monkeypatch.setattr("datasure.checks.enumerator.attention.activity_reasons", broken)
+
+    attention = attention_rows(data, ROLES, pl.DataFrame(), None, [duplicates])
+
+    assert attention.left_out == (
+        LeftOut(
+            "Activity", "ValueError: bad dates", "Review this page's settings above."
+        ),
+    )
+    assert {row.enumerator for row in attention.rows} == {"a", "b"}
+
+
+def test_a_failing_check_names_where_to_review_it(monkeypatch):
+    data = _frame(_rows("a", 6, day=LATEST))
+    outliers = IssueCounts("Outliers", "outlier", "outliers", {"a": 9})
+
+    def broken(*_args):
+        raise KeyError("rate")
+
+    monkeypatch.setattr("datasure.checks.enumerator.attention.count_reasons", broken)
+
+    attention = attention_rows(data, ROLES, pl.DataFrame(), None, [outliers])
+
+    (left_out,) = attention.left_out
+    assert left_out.message == (
+        "Outliers is left out of this list: its numbers could not be computed "
+        "(KeyError: 'rate'). Open Outliers to review its settings."
+    )
 
 
 def test_counts_and_teams_by_enumerator_read_names_as_text():

@@ -244,37 +244,19 @@ class StatisticsOvertimeSettings(BaseModel):
         return v
 
 
-class EnumeratorOverviewMetrics(BaseModel):
-    """Metrics for enumerator overview.
+class ActiveEnumerators(BaseModel):
+    """Enumerators active in the past 7 days, out of all.
 
     Attributes
     ----------
-    all_submissions : int
-        Total number of submissions.
-    num_active_enumerators : int
-        Number of enumerators active in past 7 days.
-    num_enumerators : int
-        Total number of enumerators.
-    num_teams : int | str
-        Number of teams or 'n/a' if not available.
-    min_submissions : int
-        Minimum daily submissions.
-    max_submissions : int
-        Maximum daily submissions.
-    avg_submissions : int
-        Average daily submissions.
-    pct_active_enumerators : str
-        Percentage of active enumerators formatted as string.
+    active : int
+        Enumerators with a submission dated in the 7 days up to today.
+    total : int
+        Enumerators in the data.
     """
 
-    all_submissions: int = Field(ge=0)
-    num_active_enumerators: int = Field(ge=0)
-    num_enumerators: int = Field(ge=0)
-    num_teams: int | str
-    min_submissions: int = Field(ge=0)
-    max_submissions: int = Field(ge=0)
-    avg_submissions: int = Field(ge=0)
-    pct_active_enumerators: str
+    active: int = Field(ge=0)
+    total: int = Field(ge=0)
 
 
 class OverviewFigures(BaseModel):

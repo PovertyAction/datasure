@@ -1,8 +1,9 @@
 """Report-rendering UI for the enumerator performance report."""
 
+import logging
 import re
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from datetime import date as dt_date
 from typing import Literal
 
@@ -10,26 +11,30 @@ import polars as pl
 import streamlit as st
 
 from datasure.checks.enumerator.attention import (
+    REVIEW_RESPONSE_PATTERNS,
+    AttentionList,
     AttentionRow,
     ColumnRoles,
+    LeftOut,
     OtherChecks,
     Severity,
     attention_rows,
     flag_counts,
     format_minutes,
+    unattributed_notes,
 )
 from datasure.checks.enumerator.compute import (
     COMPLETED_FLAG,
     CONSENT_FLAG,
     DISPLAY_DATE_FORMAT,
     add_consent_outcome_flags,
-    compute_enumerator_overview,
     compute_enumerator_productivity,
     compute_enumerator_statistics,
     compute_enumerator_statistics_overtime,
     compute_enumerator_summary,
     compute_latest_submission_date,
     compute_overview_figures,
+    count_active_enumerators,
 )
 from datasure.checks.enumerator.models import (
     ALLOWED_STATISTICS,
@@ -56,7 +61,7 @@ from datasure.checks.enumerator.settings_ui import (
     enumerator_report_settings,
     load_default_enumerator_settings,
 )
-from datasure.checks.headline import CheckHeadline
+from datasure.checks.headline import CheckHeadline, EnumeratorScope
 from datasure.utils.dataframe_utils import ColumnByType
 from datasure.utils.duckdb_utils import load_missing_codes_from_db
 from datasure.utils.navigation import READY, CheckStatus, StatusResult
@@ -70,6 +75,8 @@ from datasure.utils.view_state import (
     reset_filters_beside,
     view_factory,
 )
+
+logger = logging.getLogger(__name__)
 
 # Saved view state scope: the check's catalogue slug. The report's periods,
 # columns and statistics are personal view state; older versions saved them in
@@ -123,14 +130,24 @@ def _md(text: object) -> str:
     return re.sub(r"([\\`*_\[\]<>|~$#])", r"\\\1", str(text))
 
 
-def _render_overview(data: pl.DataFrame, settings: EnumeratorSettings) -> None:
+def _render_overview(
+    data: pl.DataFrame, settings: EnumeratorSettings, team: str | None = None
+) -> None:
     """Show the four overview figures, each with what it is compared with.
 
     Active enumerators out of all, the past 7 days' submissions against the
     7 days before, the median submissions per enumerator with who has the
     fewest and the most, and the median interview length with its middle
-    half (or the teams, without a duration column).
+    half (or the teams, without a duration column). ``team`` is the team
+    the data is narrowed to, if any, which the active figure's help names.
     """
+    active_help = "Enumerators with a submission dated in the 7 days up to today"
+    if team is None:
+        active_help += ", as on Summary's Enumerator Stats row"
+    else:
+        active_help += (
+            f" in team {team}. Summary's Enumerator Stats row counts every team"
+        )
     figures = compute_overview_figures(
         data,
         settings.survey_date,
@@ -145,7 +162,7 @@ def _render_overview(data: pl.DataFrame, settings: EnumeratorSettings) -> None:
         (
             "Active in the past 7 days",
             f"{figures.num_active:,}",
-            "Enumerators with a submission dated in the 7 days up to today",
+            active_help,
             f"of {figures.num_enumerators:,} enumerators",
         ),
         (
@@ -348,9 +365,14 @@ def _rules_in_use(
 
 
 def _render_needs_attention(
-    rows: list[AttentionRow], rules: list[str], other: OtherChecks
+    attention: AttentionList, rules: list[str], other: OtherChecks
 ) -> None:
-    """Draw the enumerators the checks single out, most flags first."""
+    """Draw the enumerators the checks single out, most flags first.
+
+    Each rule or check in ``attention.left_out`` is named under the list
+    with its reason, and left out of the "Checked" caption.
+    """
+    rows = attention.rows
     section_header("Needs attention", icon=":material/flag:")
     demo_callout(
         """
@@ -383,13 +405,38 @@ def _render_needs_attention(
             with st.expander(f"{len(rest):,} more"):
                 for row in rest:
                     _render_attention_row(row, labels[row.enumerator])
-    if rules:
-        st.caption(f"Checked: {', '.join(rules)}.")
-    for label, reason in other.errors:
-        st.error(
-            f"{label} is left out of this list: its numbers could not be "
-            f"computed ({reason}). Open {label} to review its settings.",
-            icon=":material/error:",
+    failed = {item.check.lower() for item in attention.left_out}
+    checked = [rule for rule in rules if rule not in failed]
+    if checked:
+        st.caption(f"Checked: {', '.join(checked)}.")
+    for note in unattributed_notes(other.counts):
+        st.caption(note)
+    for item in attention.left_out:
+        st.error(item.message, icon=":material/error:")
+
+
+def _list_patterns(
+    data: pl.DataFrame,
+    setting_file: str,
+    enumerator: str,
+    missing_codes: pl.DataFrame | None,
+) -> tuple[ResponsePatternResults | None, tuple[LeftOut, ...]]:
+    """Return Response Patterns' results for the list, or why there are none."""
+    try:
+        return cached_response_patterns(
+            data,
+            load_response_pattern_settings(setting_file),
+            enumerator,
+            missing_codes,
+        ), ()
+    # UI boundary: Response Patterns failing must not stop the list. The
+    # error is shown under the "Needs attention" list by
+    # _render_needs_attention (deferred display, see CONTRIBUTING "Error
+    # Handling Conventions").
+    except Exception as exc:
+        logger.exception("Could not compute response patterns for the list")
+        return None, (
+            LeftOut.from_exception("Response patterns", exc, REVIEW_RESPONSE_PATTERNS),
         )
 
 
@@ -967,7 +1014,7 @@ def enumerator_report(
     setting_file: str,
     config: dict,
     survey_columns: ColumnByType,
-    other_checks: Callable[[str], OtherChecks] | None = None,
+    other_checks: Callable[[EnumeratorScope], OtherChecks] | None = None,
 ) -> None:
     """Draw the enumerator report, the enumerators needing attention first.
 
@@ -988,10 +1035,10 @@ def enumerator_report(
         The page configuration the check starts from.
     survey_columns : ColumnByType
         The survey data's columns by type.
-    other_checks : Callable[[str], OtherChecks] | None
-        Returns, for the page's enumerator column, the outstanding issues
-        other checks on the page count by enumerator, which the "Needs
-        attention" list adds. None leaves them out.
+    other_checks : Callable[[EnumeratorScope], OtherChecks] | None
+        Returns, for the page's enumerator column and chosen team, the
+        outstanding issues other checks on the page count by enumerator,
+        which the "Needs attention" list adds. None leaves them out.
     """
     st.title("Enumerator Report")
 
@@ -1063,7 +1110,7 @@ def enumerator_report(
             and the median interview length.
             """
         )
-        _render_overview(report_data, settings)
+        _render_overview(report_data, settings, controls.team)
 
     # Missing codes such as -99 are missing, not values, in the statistics
     missing_codes = load_missing_codes_from_db(project_id)
@@ -1080,27 +1127,29 @@ def enumerator_report(
         if survey_date
         else pl.DataFrame()
     )
-    patterns = cached_response_patterns(
-        report_data,
-        load_response_pattern_settings(setting_file),
-        enumerator,
-        missing_codes,
+    patterns, patterns_failed = _list_patterns(
+        report_data, setting_file, enumerator, missing_codes
     )
-    other = other_checks(enumerator) if other_checks else OtherChecks()
+    scope = EnumeratorScope(enumerator, settings.team, controls.team)
+    other = other_checks(scope) if other_checks else OtherChecks()
+    attention = attention_rows(
+        report_data,
+        ColumnRoles(
+            enumerator,
+            settings.team,
+            survey_date,
+            settings.duration,
+            settings.duration_unit,
+            settings.formversion,
+        ),
+        summary_df,
+        patterns,
+        other.counts,
+    )
     _render_needs_attention(
-        attention_rows(
-            report_data,
-            ColumnRoles(
-                enumerator,
-                settings.team,
-                survey_date,
-                settings.duration,
-                settings.duration_unit,
-                settings.formversion,
-            ),
-            summary_df,
-            patterns,
-            other.counts,
+        replace(
+            attention,
+            left_out=(*other.errors, *patterns_failed, *attention.left_out),
         ),
         _rules_in_use(settings, summary_df, patterns, other),
         other,
@@ -1257,9 +1306,11 @@ def enumerator_headline(
 ) -> CheckHeadline | None:
     """Return the enumerator headline for Summary's check health row.
 
-    The active enumerators (past 7 days) out of all enumerators, as the
-    check's overview shows them. Informational: the check has no
-    flagged-enumerator count, so the headline does not invent one.
+    The active enumerators (past 7 days) out of all enumerators, counted by
+    `count_active_enumerators` as the overview's "Active in the past 7 days"
+    is, so the two agree with the Team filter on All teams. Informational:
+    the check has no flagged-enumerator count, so the headline does not
+    invent one.
 
     Parameters
     ----------
@@ -1287,12 +1338,12 @@ def enumerator_headline(
     )
     if not (settings.enumerator and settings.survey_date) or data.is_empty():
         return None
-    metrics = compute_enumerator_overview(
-        data, settings.survey_date, settings.enumerator, settings.team, today=today
+    counted = count_active_enumerators(
+        data, settings.survey_date, settings.enumerator, today
     )
     return CheckHeadline(
-        f"{metrics.num_active_enumerators:,} / {metrics.num_enumerators:,}",
+        f"{counted.active:,} / {counted.total:,}",
         "active in the past 7 days",
         informational=True,
-        count=metrics.num_active_enumerators,
+        count=counted.active,
     )

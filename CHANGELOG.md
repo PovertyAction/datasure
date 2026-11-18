@@ -22,12 +22,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     (Duplicates, Outliers & Constraints, GPS Checks, Backchecks), named by
     the new `CheckEntry.by_enumerator` field. `catalogue.enumerator_other_checks`
     asks the ready checks, caches each on the page fingerprint and returns
-    a failing check as an error the list shows
+    a failing check, or one whose status errors, as an `attention.LeftOut`
+    the list shows
+  - Each rule runs on its own: `attention_rows` returns an `AttentionList`
+    whose `left_out` names a rule that raised (logged), and
+    `report_ui._list_patterns` does the same for Response Patterns, so one
+    failure names itself under the list and the other reasons still show
   - New per-check counters: `duplicates.duplicate_records_by_enumerator`,
     `outliers.report_ui.outliers_by_enumerator`,
     `GPSOutlierSummary.unreviewed_by`,
     `backchecks.report_ui.backcheck_mismatches_by_enumerator` (mismatches
-    attributed to the backchecker or respondent left out)
+    attributed to the backchecker or respondent left out). Each also counts
+    the issues on records with no enumerator (`headline.ByEnumerator`,
+    `EnumeratorMismatches.unattributed`), which `IssueCounts.unattributed`
+    carries and `attention.unattributed_notes` names under the list, so
+    each check's numbers add up to its own total. Duplicates counts records,
+    so they add up to the tab's "Records involved", not its duplicate IDs
   - `health.cached_headline` returns a headline with its basis from Summary's
     cache; `health.cached_on_page` caches other page-level results with it
 - **Enumerator Report: page controls**: one Period, Week starts on and Team
@@ -380,6 +390,51 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Enumerator Summary**: % Consent and % Completed showed the 0 to 1 rate
   with a % sign (0.94%); they now use the `percent` format (94%)
+- **Summary's Enumerator Stats row**: it could disagree with the Enumerator
+  Report's "Active in the past 7 days". Root cause: the row used
+  `compute.compute_enumerator_overview`, which counted any submission after
+  the cut-off as active (including dates after today) and counted rows with
+  no enumerator as an enumerator, while the overview used its own rule.
+  Both now call `compute.count_active_enumerators` (in
+  `checks/enumerator/compute.py`): the 7 days up to and including today,
+  rows with no enumerator left out. `compute_enumerator_overview` and
+  `models.EnumeratorOverviewMetrics` are removed; `report_ui.enumerator_headline`
+  uses the new function, and the overview's help says when a chosen team
+  makes it differ from Summary
+- **Needs attention: Form version**: `attention.form_version_reasons` took
+  the newest version as the text maximum, so with versions stored as text
+  "9" beat "10" and the enumerators on the real newest version were
+  flagged. It also compared by day, so older-version submissions made
+  earlier on the update day counted as outdated. Versions now compare as
+  numbers when they all are (as text otherwise); with a datetime date
+  column only submissions after the newest version's first one count, and
+  with a date-only column only those from the next day
+- **Needs attention: Interview length**: `attention.duration_reasons`
+  compared each enumerator with the median over every submission,
+  including their own, so an enumerator who did most of the interviews set
+  their own benchmark and was never flagged. Each is now compared with the
+  median of the rest of the team's submissions, and the finding says "for
+  the rest of the team"
+- **Needs attention: Missing answers, Consent, Completion**:
+  `attention.missing_reasons` and `rate_reasons` took the team median over
+  every enumerator, including the one being judged, so in a small team an
+  enumerator's own share pulled the benchmark towards them (two
+  enumerators at 2% and 30% missing gave a 16% median, and 30% was not
+  flagged). Each is now compared with the median of the other enumerators
+  (`_rest_of_team_median`), and the finding says "for the rest of the
+  team". The rate gap is rounded, so a 15-point gap is not read as 14.99
+- **Needs attention: Team filter**: with a team chosen, other checks still
+  counted each enumerator's issues across every team, against that team's
+  submissions only, so an enumerator who worked in two teams brought the
+  other team's issues along. The per-enumerator counters
+  (`duplicate_records_by_enumerator`, `outliers_by_enumerator`,
+  `GPSOutlierSummary.unreviewed_by`, `backcheck_mismatches_by_enumerator`)
+  now take a `headline.EnumeratorScope` (enumerator column, team column,
+  chosen team) in place of the enumerator column, and count only the
+  chosen team's records; checks still find their issues on all records.
+  `catalogue.enumerator_other_checks` caches on the scope, and the
+  catalogue's `ByEnumerator` callable alias is renamed `CountIssues` so it
+  no longer shares a name with `headline.ByEnumerator`
 - **Progress targets**: Targets entered on the Progress page did not load
   back, so the page config's survey target always won on reload
   - Root cause: `progress_report_settings` saved the targets under `target`

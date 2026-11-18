@@ -9,58 +9,22 @@ from polars.exceptions import ColumnNotFoundError
 
 from datasure.checks.enumerator.compute import (
     compute_enumerator_missing_table,
-    compute_enumerator_overview,
     compute_enumerator_productivity,
     compute_enumerator_statistics,
     compute_enumerator_statistics_overtime,
     compute_enumerator_summary,
     compute_latest_submission_date,
     compute_overview_figures,
+    count_active_enumerators,
 )
 
 # ============================================
-# COMPUTE_ENUMERATOR_OVERVIEW TESTS
+# COUNT_ACTIVE_ENUMERATORS TESTS
 # ============================================
 
 
-def test_compute_enumerator_overview_basic(sample_enumerator_data):
-    """Test basic enumerator overview computation."""
-    result = compute_enumerator_overview(
-        sample_enumerator_data, "submission_date", "enumerator", "team"
-    )
-
-    assert result.all_submissions == 6
-    assert result.num_enumerators == 3
-    assert result.num_teams == 2
-    assert result.num_active_enumerators >= 0
-    assert result.min_submissions > 0
-    assert result.max_submissions > 0
-    assert result.avg_submissions > 0
-
-
-def test_compute_enumerator_overview_without_team(sample_enumerator_data):
-    """Test enumerator overview without team column."""
-    result = compute_enumerator_overview(
-        sample_enumerator_data, "submission_date", "enumerator", None
-    )
-
-    assert result.all_submissions == 6
-    assert result.num_enumerators == 3
-    assert result.num_teams == "n/a"
-
-
-def test_compute_enumerator_overview_empty_data():
-    """Test enumerator overview with empty data."""
-    empty_data = pl.DataFrame(
-        schema={"submission_date": pl.Date, "enumerator": pl.Utf8}
-    )
-
-    with pytest.raises(ValueError, match="Input data is empty"):
-        compute_enumerator_overview(empty_data, "submission_date", "enumerator", None)
-
-
-def test_compute_enumerator_overview_active_enumerators():
-    """Test active enumerators calculation."""
+def test_count_active_enumerators_counts_the_past_7_days():
+    """Only enumerators with a submission in the past 7 days are active."""
     today = date.today()
     data = pl.DataFrame(
         {
@@ -70,15 +34,55 @@ def test_compute_enumerator_overview_active_enumerators():
                 today,
             ],
             "enumerator": ["E1", "E2", "E1"],
-            "team": ["T1", "T1", "T1"],
         }
     )
 
-    result = compute_enumerator_overview(data, "submission_date", "enumerator", "team")
+    result = count_active_enumerators(data, "submission_date", "enumerator")
 
-    # Only E1 should be active (has submissions in past 7 days)
-    assert result.num_active_enumerators == 1
-    assert result.num_enumerators == 2
+    assert (result.active, result.total) == (1, 2)
+
+
+def test_count_active_enumerators_on_empty_data():
+    """No rows: no enumerators, none active."""
+    empty_data = pl.DataFrame(
+        schema={"submission_date": pl.Date, "enumerator": pl.Utf8}
+    )
+
+    result = count_active_enumerators(empty_data, "submission_date", "enumerator")
+
+    assert (result.active, result.total) == (0, 0)
+
+
+def test_count_active_enumerators_leaves_out_future_dates():
+    """A submission dated after today does not make its enumerator active."""
+    data = pl.DataFrame(
+        {
+            "submission_date": [date(2026, 10, 14), date(2026, 10, 20)],
+            "enumerator": ["E1", "E2"],
+        }
+    )
+
+    result = count_active_enumerators(
+        data, "submission_date", "enumerator", today=date(2026, 10, 14)
+    )
+
+    assert (result.active, result.total) == (1, 2)
+
+
+def test_count_active_enumerators_leaves_out_rows_with_no_enumerator():
+    """A row with no enumerator is neither active nor counted in the total."""
+    data = pl.DataFrame(
+        {
+            "submission_date": [date(2026, 10, 14), date(2026, 10, 14)],
+            "enumerator": ["E1", None],
+        }
+    )
+
+    result = count_active_enumerators(
+        data, "submission_date", "enumerator", today=date(2026, 10, 14)
+    )
+
+    assert (result.active, result.total) == (1, 1)
 
 
 # ============================================
@@ -600,9 +604,8 @@ def test_edge_case_single_enumerator():
         }
     )
 
-    result = compute_enumerator_overview(data, "submission_date", "enumerator", None)
-    assert result.num_enumerators == 1
-    assert result.all_submissions == 2
+    result = count_active_enumerators(data, "submission_date", "enumerator")
+    assert (result.active, result.total) == (1, 1)
 
 
 def test_edge_case_all_null_values():
@@ -639,9 +642,8 @@ def test_edge_case_single_submission():
         }
     )
 
-    result = compute_enumerator_overview(data, "submission_date", "enumerator", "team")
-    assert result.all_submissions == 1
-    assert result.num_enumerators == 1
+    result = count_active_enumerators(data, "submission_date", "enumerator")
+    assert (result.active, result.total) == (1, 1)
 
 
 def test_edge_case_date_ranges():
@@ -674,11 +676,11 @@ def test_full_enumerator_workflow(mock_load_missing, sample_enumerator_data):
     """Test complete enumerator workflow from overview to statistics."""
     mock_load_missing.return_value = pl.DataFrame()
 
-    # Step 1: Compute overview
-    overview = compute_enumerator_overview(
-        sample_enumerator_data, "submission_date", "enumerator", "team"
+    # Step 1: Count the enumerators
+    overview = count_active_enumerators(
+        sample_enumerator_data, "submission_date", "enumerator"
     )
-    assert overview.num_enumerators == 3
+    assert overview.total == 3
 
     # Step 2: Compute summary
     summary = compute_enumerator_summary(
@@ -732,9 +734,9 @@ def test_enumerator_workflow_with_missing_data():
         }
     )
 
-    # Overview should work with missing data
-    overview = compute_enumerator_overview(data, "submission_date", "enumerator", None)
-    assert overview.all_submissions == 2
+    # Counting enumerators should work with missing data
+    overview = count_active_enumerators(data, "submission_date", "enumerator")
+    assert overview.total == 2
 
     # Statistics should handle missing values
     with patch("streamlit.cache_data", lambda ttl: lambda f: f):
@@ -980,7 +982,7 @@ def test_compute_enumerator_summary_timezone_aware_uses_local_day(mock_load_miss
     assert row["# submissions today"] == 1
 
 
-def test_compute_enumerator_overview_active_uses_injected_today():
+def test_count_active_enumerators_uses_injected_today():
     """The active cut-off counts back 7 days from the injected date."""
     data = pl.DataFrame(
         {
@@ -989,15 +991,15 @@ def test_compute_enumerator_overview_active_uses_injected_today():
         }
     )
 
-    result = compute_enumerator_overview(
-        data, "submission_date", "enumerator", None, today=date(2026, 10, 14)
+    result = count_active_enumerators(
+        data, "submission_date", "enumerator", today=date(2026, 10, 14)
     )
 
     # 7 Oct is exactly one week before 14 Oct, so E2 is not active.
-    assert result.num_active_enumerators == 1
+    assert result.active == 1
 
 
-def test_compute_enumerator_overview_timezone_aware_uses_local_day():
+def test_count_active_enumerators_timezone_aware_uses_local_day():
     """The active cut-off uses the local day, as the summary table does."""
     data = pl.DataFrame(
         {
@@ -1009,11 +1011,11 @@ def test_compute_enumerator_overview_timezone_aware_uses_local_day():
         }
     )
 
-    result = compute_enumerator_overview(
-        data, "submission_date", "enumerator", None, today=date(2026, 10, 14)
+    result = count_active_enumerators(
+        data, "submission_date", "enumerator", today=date(2026, 10, 14)
     )
 
-    assert result.num_active_enumerators == 1
+    assert result.active == 1
 
 
 def test_compute_latest_submission_date_cuts_datetimes_to_day():
