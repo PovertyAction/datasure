@@ -1880,50 +1880,213 @@ period, using the page's **Period**.
 
 ##### Response Patterns
 
-Compare each enumerator's answers with the rest of the team (every other
-enumerator) to spot patterns such as rounding.
+The last section of the report. It compares each enumerator's answers with
+the rest of the team (every other enumerator in view) to spot rounding,
+answers anchored on a typical value, or one answer option dominating. With a
+**Team** chosen, the rest of the team is the other enumerators in that team.
 
-**Response pattern settings** (expander):
+The section has three sub-tabs, one per check: **Digit Preference**, **Range
+Compression** and **Categorical Response Patterns**. It needs the
+**Enumerator** column and at least 2 enumerators.
 
-- **Variables**: tick the survey questions to check. None are ticked at
-  first. The ID, enumerator and team columns aren't listed.
-- **Type**: each variable's inferred type (integer, continuous or
-  categorical). Change it if it's wrong. A text column of numbers can be set
-  to integer or continuous; answers in it that aren't numbers are left out.
-- **Minimum responses**: enumerators with fewer non-missing answers than
-  **Hide results below** (15 by default) get no result (N/A). Results below
-  **Warn below** (30 by default) carry a low-sample warning.
-- **Flag sensitivity**: how readily Digit Preference flags an enumerator.
+###### Response pattern settings
 
-Your choices are saved with the project. Missing codes are left out before
-anything is checked.
+The **Response pattern settings** expander at the top of the section holds
+the settings all three checks share. Your choices are saved with the project.
 
-**Digit Preference** checks whether an enumerator's numeric answers end in 0
-or 5 more often than the rest of the team's. The last digit of the whole-number
-part of each answer is counted across the selected integer and continuous
-variables. Variables whose answers span less than 10, or don't vary, are
-skipped with a note.
+- **Include**: tick each survey question to check. None are ticked at first.
+  The ID, enumerator and team columns, date columns and GPS coordinates
+  (names containing latitude, longitude, altitude or geopoint, a word lat,
+  lon or lng, or ending in `-Accuracy`) aren't listed. A GPS-measured answer
+  such as `plot_area_gps` is listed.
+- **Inferred type**: integer if every answer is a whole number, otherwise
+  continuous. Text columns are categorical.
+- **Type**: the type the checks use. Change it if the inferred one is wrong,
+  for example to categorical for a single-choice question stored as numeric
+  codes. A text column of numbers can be set to integer or continuous;
+  answers in it that aren't numbers are left out.
 
-The **ratio** is the enumerator's share of answers ending in 0 or 5 divided by
-the rest of the team's: 1.5× means half as often again.
+Each check uses the ticked variables of its type: **Digit Preference** and
+**Range Compression** use integer and continuous variables, and
+**Categorical Response Patterns** uses categorical ones. Check single-choice
+questions: a question that allows several answers is compared one
+combination of answers at a time.
+
+**Minimum responses** sets how many non-missing answers a result needs:
+
+- **Hide results below** (15 by default): enumerators with fewer answers get
+  no result (N/A). Digit Preference's High sensitivity raises this to 100.
+- **Warn below** (30 by default): results with fewer answers carry "Low
+  sample size — treat results with caution."
+
+Digit Preference counts an enumerator's answers across all the checked
+variables together. Range Compression and Categorical Response Patterns
+count each variable on its own, so a question an enumerator answered too
+few times is skipped for that enumerator only, and their other questions are
+still checked.
+
+**Flag sensitivity** has one setting per check: **Digit Preference
+sensitivity**, **Range Compression sensitivity** and **Categorical Response
+Patterns sensitivity**. Each is High, Medium (the default) or Low. Higher
+sensitivity flags smaller differences from the rest of the team. The line
+under each setting, and at the top of each sub-tab, says what the current
+level flags.
+
+Missing codes, such as -99, are left out before types are inferred and
+before anything is checked.
+
+###### Reading the results
+
+Each sub-tab lists the enumerators, the most notable first, with a **Flag**
+for each:
+
+- **High**: flagged at the chosen sensitivity. Consider reviewing their
+  interviews.
+- **Moderate**: one level higher sensitivity would flag them. Keep an eye on
+  them. At High sensitivity there is no Moderate.
+- **Low**: consistent with the rest of the team.
+- **N/A**: too few answers, or nothing to compare with.
+
+The first enumerator is selected. Select another row to see that
+enumerator's detail, headed by their score and flag: a verdict in plain
+words and a chart of the enumerator (dark green) against the **Rest of
+team** (grey). Digit Preference and Range Compression also show figures;
+Categorical Response Patterns shows a verdict and chart for each question.
+Charts are always on a 0–100% scale, so they compare at a glance across
+enumerators.
+
+High and Moderate results also appear in [Needs attention](#needs-attention)
+as **Flagged** and **Watch** reasons. A High result with fewer answers than
+**Warn below** appears under **Watch** instead, marked "(low sample)".
+
+###### Digit Preference
+
+Checks whether an enumerator's numeric answers end in 0 or 5 more often than
+the rest of the team's. The last digit of the whole-number part of each
+answer is counted across the ticked integer and continuous variables
+together, so each enumerator gets one result.
+
+The **Ratio** is the enumerator's share of answers ending in 0 or 5 divided
+by the rest of the team's: 1× is the same rate, and 1.5× means half as often
+again.
 
 | Sensitivity | Flagged (High) at | Responses needed |
 | --- | --- | --- |
 | High | 1.25× or more | 100 |
-| Medium (default) | 1.5× or more | the minimum (15) |
-| Low | 2× or more | the minimum (15) |
+| Medium (default) | 1.5× or more | **Hide results below** (15) |
+| Low | 2× or more | **Hide results below** (15) |
 
-- **High**: flagged at the chosen sensitivity. Consider reviewing their
-  interviews.
-- **Moderate**: one level higher sensitivity would flag them, including its
-  response minimum. Keep an eye on them.
-- **Low**: consistent with the rest of the team.
-- **N/A**: too few responses, or none of the rest of the team's answers end
-  in 0 or 5.
+Moderate also needs the next level's responses: at Medium, a ratio of 1.25×
+is Moderate only with at least 100 responses.
 
-The table lists enumerators highest ratio first. Select a row to see that
-enumerator's shares, verdict and a chart of how often their answers end in
-each digit 0–9 against the rest of the team.
+The table shows **Interviews**, **Responses**, **Ending in 0 or 5 (%)**,
+**Rest of team (%)**, **Ratio** and **Flag**, highest ratio first. The detail
+shows how often the enumerator's answers end in each digit 0–9 against the
+rest of the team. When the enumerator is flagged, their 0 and 5 bars are
+red-orange where they are above the rest of the team.
+
+###### Range Compression
+
+Checks whether an enumerator's numeric answers are spread much less widely
+than the rest of the team's, as when an enumerator records a typical value
+instead of asking. Each ticked integer and continuous variable is compared
+on its own.
+
+The **SD ratio** is the enumerator's standard deviation divided by the rest
+of the team's: 1 is the same spread, and 0.5 is half as wide. Before the
+standard deviations are taken, each side's answers are capped at its own 5th
+and 95th percentiles, so one extreme answer can't dominate. An enumerator's
+result is their lowest SD ratio on any variable, so one problem question is
+never averaged away.
+
+| Sensitivity | Flagged (High) at an SD ratio of |
+| --- | --- |
+| High | 0.65 or less |
+| Medium (default) | 0.5 or less |
+| Low | 0.35 or less |
+
+The check looks at spread only. An enumerator whose answers are all higher
+or lower than the rest of the team's, but spread as widely, isn't flagged.
+
+The table shows **Interviews**, **Top variable** (the variable with the
+narrowest spread compared with the rest of the team), **SD ratio** and
+**Flag**, lowest SD ratio first. The detail's verdict names every flagged
+variable. Choose a **Variable** (listed lowest SD ratio first) to see its
+**Mean**, **Standard deviation** and **SD ratio**, and a histogram of the
+enumerator's answers against the rest of the team's. The histogram spans the
+rest of the team's 1st to 99th percentile; answers beyond it count in the end
+buckets. The enumerator's bars are amber when that variable is flagged.
+Whole-number answers get whole-number buckets, such as "10 to 19"; other
+buckets read "1.50 to <3.50", up to but not including the upper value.
+
+###### Categorical Response Patterns
+
+Checks whether one answer option dominates an enumerator's answers compared
+with the rest of the team's. Each ticked categorical question is compared on
+its own.
+
+For each option, the enumerator's share of answers is compared with the rest
+of the team's. The gap is the difference in percentage points (pp). An
+option only one side chose counts as 0% on the other side, so both
+never-used and only-used options show up. A question's result is its largest
+gap on any option, whether the enumerator chose it more or less often than
+the rest of the team. An enumerator's result is their largest gap on any
+question, so one badly asked question is enough to flag them.
+
+| Sensitivity | Flagged (High) at a gap of |
+| --- | --- |
+| High | 15 pp or more |
+| Medium (default) | 25 pp or more |
+| Low | 35 pp or more |
+
+The table shows **Interviews**, **Top question** (the question with the
+largest gap), **Most over-chosen option** (on that question),
+**Largest gap (pp)** and **Flag**, largest gap first. The detail shows one
+card per question, largest gap first. A flagged question is labelled
+**ANOMALY** and its verdict suggests checking how the enumerator asks it;
+when the largest gap is on an option the enumerator avoids, the verdict also
+names the option they chose instead. Each card's chart shows every option's
+share for the enumerator and the rest of the team, with options in the order
+of their values (codes 1, 2, 10). The enumerator's bars are red-orange on
+options whose gap reaches the sensitivity's. Options show the values stored
+in the data, such as numeric codes, not their labels.
+
+###### When results don't show
+
+Messages across the section:
+
+| Message | What to do |
+| --- | --- |
+| Response patterns require an enumerator column | Choose the **Enumerator** column in the settings at the top of the page |
+| Select one or more variables in the response pattern settings above to run these checks | Tick **Include** for one or more variables |
+| Response patterns compare each enumerator with the rest of the team, so they need at least 2 enumerators | Choose **All teams**, or a team with more than one enumerator, or wait for more data |
+
+Messages in a sub-tab, where *type* is numeric or categorical:
+
+| Message | What to do |
+| --- | --- |
+| None of the selected variables are *type*, so the check has nothing to check | Tick variables of the check's type, or change their **Type** |
+| None of the selected *type* variables can be checked for the check. See the notes above | Read the skipped-variable notes above the message |
+| Every enumerator has fewer than *N* responses on the selected variables, so the check can't run yet | Lower **Hide results below** (or, for Digit Preference, the sensitivity), or wait for more data |
+
+A variable that can't be checked is named in a note, "Skipped
+**variable**: reason". Notes for the whole check sit at the top of the
+sub-tab; notes for one enumerator sit under their detail.
+
+| Reason | Meaning |
+| --- | --- |
+| no answers are numbers | A text column set to integer or continuous has no numbers in it |
+| no responses | Every answer is blank or a missing code |
+| no variation across the project | Everyone in view (the chosen team, if any) gave the same answer |
+| observed range under 10 | Digit Preference only: the answers span less than 10 (such as number of children), so endings in 0 or 5 say little about rounding |
+| fewer responses than the minimum | Range Compression and Categorical Response Patterns: the enumerator has fewer answers on this variable than **Hide results below** |
+| no variation in the rest of the team's responses | Range Compression: the rest of the team's answers don't vary, so there is no spread to compare with |
+| no responses from the rest of the team | Categorical Response Patterns: only this enumerator answered the question |
+
+An enumerator without a result (N/A) gets a message in place of their
+detail: they don't have enough responses, none of their variables could be
+compared, or, for Digit Preference, none of the rest of the team's answers
+end in 0 or 5.
 
 ---
 
