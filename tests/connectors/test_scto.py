@@ -2136,6 +2136,29 @@ class TestSurveyCTOUIRendering:
         assert result == len(FARM_ROWS)
 
 
+# A form whose choice list is filtered with normalize-space(), which the
+# expression evaluator does not implement.
+_UNSUPPORTED_FILTER_XML = b"""<?xml version="1.0"?>
+<h:html xmlns="http://www.w3.org/2002/xforms" xmlns:h="http://www.w3.org/1999/xhtml">
+  <h:head><model>
+    <instance><farm id="farm" version="3"><size/></farm></instance>
+    <instance id="sizes"><root>
+      <item><label>Small</label><name>1</name><band>a</band></item>
+      <item><label>Large</label><name>2</name><band>b</band></item>
+    </root></instance>
+    <bind nodeset="/farm/size" type="select1"/>
+  </model></h:head>
+  <h:body>
+    <select1 ref="/farm/size"><label>Size</label>
+      <itemset nodeset="instance('sizes')/root/item[normalize-space(band) = 'a']">
+        <value ref="name"/><label ref="label"/>
+      </itemset>
+    </select1>
+  </h:body>
+</h:html>
+"""
+
+
 class TestTypedImport:
     """The SurveyCTO import types submissions from the form's compiled XML."""
 
@@ -2185,6 +2208,23 @@ class TestTypedImport:
         client._import_regular_form(form_config)
 
         assert mock_save.call_args[0][1].schema["formdef_version"] == pl.Int64
+
+    @patch("datasure.connectors.scto.save_form_definition")
+    @patch("datasure.connectors.scto.duckdb_save_table")
+    def test_a_choice_filter_the_evaluator_cannot_run_still_imports(
+        self, mock_save, mock_save_definition, client, form_config
+    ):
+        # normalize-space() is valid XPath the evaluator does not implement; it
+        # must not make the form XML unusable.
+        client._scto_client.download_form_xml.return_value = _UNSUPPORTED_FILTER_XML
+        client._scto_client.download_form_data_json.return_value = [
+            {"KEY": "uuid:a", "formdef_version": "3", "size": "2"}
+        ]
+
+        assert client.import_data(form_config) == 1
+
+        client._scto_client.list_datasets.assert_not_called()
+        assert mock_save.call_args[0][1]["size"].to_list() == [2]
 
     @patch("datasure.connectors.scto.save_form_definition")
     @patch("datasure.connectors.scto.duckdb_save_table")

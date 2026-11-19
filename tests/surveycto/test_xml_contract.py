@@ -892,3 +892,19 @@ def test_search_items_split_into_literal_choices_and_columns(tmp_path):
     assert village.choice_columns == {"value": "id", "label": "name"}
     assert village.choices_per_submission
     assert not village.choices_known
+
+
+def test_a_static_filter_the_evaluator_cannot_run_keeps_every_item(tmp_path):
+    # normalize-space() is valid XPath the evaluator does not implement: the form
+    # must still parse, with every item kept and the list read per submission.
+    xml = _XML_ITEMSET.replace(
+        "instance('sizes')/root/item[filter &lt; 3]",
+        "instance('sizes')/root/item[normalize-space(filter) = '1']",
+    )
+    path = tmp_path / "shop.xml"
+    path.write_text(xml, encoding="utf-8")
+    size = parse_contract(path).nodes["size"]
+    assert [c["value"] for c in size.choice_items] == ["1", "2", "-66"]
+    assert size.choice_filter["unresolved"] is True
+    assert size.choice_filter["per_submission"] is False
+    assert size.choices_per_submission

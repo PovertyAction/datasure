@@ -476,3 +476,28 @@ def test_search_binaries_of_equal_integer_codes_have_a_fixed_order(search_contra
     rows = [{"KEY": "k1", "village_1": "1", "village_01": "1"}]
     names = cast_wide(rows, search_contract).schema.names
     assert [n for n in names if n.startswith("village_")] == ["village_01", "village_1"]
+
+
+def test_a_raw_select_multiple_nobody_answered_keeps_its_binaries_as_missing(contract):
+    # `tools` exported raw and blank in every row: its known choices must still
+    # appear, all missing, instead of the question disappearing.
+    rows = [
+        {k: v for k, v in row.items() if not k.startswith("tools_")} | {"tools": ""}
+        for row in _ROWS
+    ]
+    table = cast_wide(rows, contract)
+    assert "tools" not in table.schema.names
+    for name in ("tools_1", "tools_2", "tools_77"):
+        assert table.schema.field(name).type == pa.int8()
+        assert _col(table, name) == [None, None]
+
+
+def test_a_blank_raw_select_multiple_filtered_per_submission_is_kept(tmp_path):
+    # Its choices are only known when picked, so there are no binaries to build:
+    # the raw column stays, all missing, so the question is still there.
+    path = tmp_path / "shop.xml"
+    path.write_text(_FILTERED_XML, encoding="utf-8")
+    rows = [{"KEY": "uuid:a", "n": "1", "pick": ""}, {"KEY": "uuid:b", "n": "2"}]
+    table = cast_wide(rows, parse_contract(path))
+    assert _col(table, "pick") == [None, None]
+    assert not [c for c in table.schema.names if c.startswith("pick_")]

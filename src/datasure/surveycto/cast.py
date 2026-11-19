@@ -182,11 +182,22 @@ def _system_type(name: str) -> pa.DataType:
     return pa.string()
 
 
-def _columns(names: list[str], contract: FormContract) -> list[_Column]:
-    """Resolve every column, adding the binaries of choices nobody picked."""
+def _columns(
+    names: list[str],
+    contract: FormContract,
+    raw_instances: set[tuple[str, tuple[int, ...]]] = frozenset(),
+) -> list[_Column]:
+    """Resolve every column, adding the binaries of choices nobody picked.
+
+    ``raw_instances`` are the (select path, repeat instance) of select_multiples
+    exported raw: each gets its binaries even when nobody picked a choice there,
+    so an unanswered question shows as missing instead of disappearing.
+    """
     order = {path: i for i, path in enumerate(contract.nodes)}
     columns: dict[str, _Column] = {}
     picks = _Picks()
+    for path, iterations in raw_instances:
+        picks.instances.setdefault(path, set()).add(iterations)
     for position, name in enumerate(names):
         column = _column(name, position, contract, order, picks)
         if column is not None:
@@ -347,15 +358,32 @@ def _raw_multiples(
     return raw
 
 
-def _split_raw_multiples(rows: list[dict], contract: FormContract) -> list[dict]:
+def _split_raw_multiples(
+    rows: list[dict], contract: FormContract
+) -> tuple[list[dict], set[tuple[str, tuple[int, ...]]]]:
     """Return ``rows`` with each select_multiple exported raw (one column, the codes
     separated by spaces) rewritten as its per-choice binaries, as the export writes
-    the others. The contract resolves each column, since a select's own name can end
-    in ``_<digits>`` like a repeat instance.
+    the others, and the (select path, repeat instance) of every raw column split.
+    The contract resolves each column, since a select's own name can end in
+    ``_<digits>`` like a repeat instance.
+
+    A raw column blank in every row, of a select whose choices are only known
+    when picked (a per-submission filter or a `search()` dataset), is kept as is:
+    with nothing picked there are no binaries to replace it, and dropping it would
+    hide an unanswered question.
     """
-    raw = _raw_multiples(dict.fromkeys(name for row in rows for name in row), contract)
+    names = dict.fromkeys(name for row in rows for name in row)
+    raw = {
+        name: (node, iterations)
+        for name, (node, iterations) in _raw_multiples(names, contract).items()
+        if not (
+            node.choices_per_submission
+            and all(not str(row.get(name) or "").strip() for row in rows)
+        )
+    }
+    seen = {(node.path, iterations) for node, iterations in raw.values()}
     if not raw:
-        return rows
+        return rows, seen
     split = []
     for row in rows:
         row = dict(row)
@@ -363,16 +391,16 @@ def _split_raw_multiples(rows: list[dict], contract: FormContract) -> list[dict]
             for code in row.pop(name, "").split():
                 row[_binary_name(node, code, iterations)] = "1"
         split.append(row)
-    return split
+    return split, seen
 
 
 def cast_wide(rows: list[dict], contract: FormContract) -> pa.Table:
     """Return the submissions as a typed table: system columns, then form order."""
-    rows = _split_raw_multiples(rows, contract)
+    rows, raw_instances = _split_raw_multiples(rows, contract)
     names = list(dict.fromkeys(name for row in rows for name in row))
     if not rows:
         names = list(SUBMISSION_COLUMNS)
-    columns = _columns(names, contract)
+    columns = _columns(names, contract, raw_instances)
     groups: dict[tuple, list[str]] = {}
     for c in columns:
         if c.binary_group is not None:

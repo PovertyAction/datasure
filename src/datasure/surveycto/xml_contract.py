@@ -32,7 +32,7 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
-from datasure.surveycto.xpath import compile_expression
+from datasure.surveycto.xpath import UnsupportedExpression, compile_expression
 
 _SELECT_CONTROL = {"select": "select_multiple", "select1": "select_one"}
 
@@ -181,6 +181,8 @@ class Node:
     choices_per_submission: bool = False
     # The itemset's filter: {"expression", "per_submission", "items"}, the expression
     # as compiled and items the list's length before a static filter applies.
+    # "unresolved": True marks a static filter the evaluator cannot run: every item
+    # is kept, and the list is treated as filtered per submission.
     choice_filter: dict | None = None
 
     @property
@@ -672,20 +674,11 @@ def _itemset_choices(
         & columns
     )
     listed = len(items)
+    unresolved = False
     if predicate and not per_submission:
-        # Columns become ${column} refs, outside quoted literals. A column an item
-        # lacks reads as empty, as a path to no node does on the device.
-        parts = _QUOTED.split(predicate)
-        bare = {n for p in parts[::2] for n in _BARE_NAME.findall(p)} - _XPATH_WORDS
-        names = sorted(
-            {k for item in items for k in item} | bare, key=len, reverse=True
-        )
-        word = re.compile(r"(?<![\w$'{-])(" + "|".join(names) + r")(?![\w(-])")
-        expr = "".join(
-            p if i % 2 else word.sub(r"${\1}", p) for i, p in enumerate(parts)
-        )
-        keep = compile_expression(expr)
-        items = [item for item in items if keep(_Item(item))]
+        kept = _apply_static_filter(items, predicate)
+        unresolved = kept is None
+        items = items if kept is None else kept
     refs = {_ln(c.tag): c.get("ref") for c in itemset}
     label_id = re.fullmatch(r"jr:itext\((\w+)\)", refs["label"])
     choices = [
@@ -700,11 +693,35 @@ def _itemset_choices(
     ]
     if not predicate:
         return choices, None
-    return choices, {
+    choice_filter = {
         "expression": predicate,
         "per_submission": per_submission,
         "items": listed,
     }
+    if unresolved:
+        choice_filter["unresolved"] = True
+    return choices, choice_filter
+
+
+def _apply_static_filter(items: list[dict], predicate: str) -> list[dict] | None:
+    """Return the items a static itemset filter keeps.
+
+    Returns None when the filter uses XPath the evaluator does not implement
+    (``normalize-space(...)``): which items it keeps is then unknown, and the
+    form must still import.
+    """
+    # Columns become ${column} refs, outside quoted literals. A column an item
+    # lacks reads as empty, as a path to no node does on the device.
+    parts = _QUOTED.split(predicate)
+    bare = {n for p in parts[::2] for n in _BARE_NAME.findall(p)} - _XPATH_WORDS
+    names = sorted({k for item in items for k in item} | bare, key=len, reverse=True)
+    word = re.compile(r"(?<![\w$'{-])(" + "|".join(names) + r")(?![\w(-])")
+    expr = "".join(p if i % 2 else word.sub(r"${\1}", p) for i, p in enumerate(parts))
+    try:
+        keep = compile_expression(expr)
+    except UnsupportedExpression:
+        return None
+    return [item for item in items if keep(_Item(item))]
 
 
 def _default_itext(model) -> dict[str, str]:
@@ -900,7 +917,10 @@ class _Body:
             items += choices
             if choice_filter:
                 self.choice_filters[rel] = choice_filter
-                if choice_filter["per_submission"]:
+                # A filter that cannot be run keeps every item, so like a
+                # per-submission filter only the codes someone picked are known
+                # to have been offered.
+                if choice_filter["per_submission"] or choice_filter.get("unresolved"):
                     self.filtered.add(rel)
         self.items[rel] = items
 

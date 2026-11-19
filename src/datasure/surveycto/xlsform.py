@@ -30,8 +30,10 @@ FIELD_COLUMNS = [
     "constraint message",
     "calculation",
     "appearance",
+    "choice_filter",
     "repeat_count",
 ]
+# The choices sheet also gets one column per item column a choice filter reads.
 CHOICE_COLUMNS = ["list_name", "name", "label"]
 _COLUMN_KEYS = {column.replace(" ", "_"): column for column in FIELD_COLUMNS}
 
@@ -82,11 +84,14 @@ def design_from_xml(xml: bytes) -> dict:
         ``rebuilt_from_xml`` (always True).
     """
     contract = parse_contract(xml)
-    survey, choices = _rows(contract)
+    survey, choice_cells = _rows(contract)
+    filter_columns = sorted({k for cells in choice_cells for k in cells})
+    header = [*CHOICE_COLUMNS, *(k for k in filter_columns if k not in CHOICE_COLUMNS)]
+    choices = [[cells.get(column, "") for column in header] for cells in choice_cells]
     return {
         "title": _title(xml) or contract.formid,
         "fieldsRowsAndColumns": [FIELD_COLUMNS, *survey],
-        "choicesRowsAndColumns": [CHOICE_COLUMNS, *choices],
+        "choicesRowsAndColumns": [header, *choices],
         "rebuilt_from_xml": True,
     }
 
@@ -99,12 +104,12 @@ def _title(xml: bytes) -> str | None:
     return None
 
 
-def _rows(contract: FormContract) -> tuple[list[list[str]], list[list[str]]]:
-    """Return the survey rows and choice rows, in form order."""
+def _rows(contract: FormContract) -> tuple[list[list[str]], list[dict[str, str]]]:
+    """Return the survey rows, and the choice rows as cells by column, in form order."""
     references = _references(contract.formid)
     repeats = {token for node in contract.nodes.values() for token in node.repeat_path}
     survey: list[list[str]] = []
-    choices: list[list[str]] = []
+    choices: list[dict[str, str]] = []
     open_groups: list[tuple[str, str]] = []  # (path, "group" | "repeat")
 
     def close_until(parent: str) -> None:
@@ -131,30 +136,37 @@ def _rows(contract: FormContract) -> tuple[list[list[str]], list[list[str]]]:
             open_groups.append((path, kind))
             continue
         list_name = node.name if node.control else ""
-        survey.append(
-            _row(
-                _field_type(node, list_name),
-                node.name,
-                label=node.label,
-                hint=node.hint,
-                required="yes" if node.required else "",
-                relevance=references(node.relevant),
-                constraint=references(node.constraint),
-                constraint_message=node.constraint_message,
-                calculation=references(node.calculate),
-                appearance=node.appearance,
-            )
-        )
+        survey.append(_field_row(node, list_name, references))
         choices.extend(_choice_rows(node, list_name))
     close_until("")
     return survey, choices
 
 
-def _choice_rows(node: Node, list_name: str) -> list[list[str]]:
-    """Return a select's choice rows; none for a field that is not a select.
+def _field_row(node: Node, list_name: str, references) -> list[str]:
+    """Return a leaf field's survey row, its expressions as ${field} references."""
+    choice_filter = node.choice_filter["expression"] if node.choice_filter else None
+    return _row(
+        _field_type(node, list_name),
+        node.name,
+        label=node.label,
+        hint=node.hint,
+        required="yes" if node.required else "",
+        relevance=references(node.relevant),
+        constraint=references(node.constraint),
+        constraint_message=node.constraint_message,
+        calculation=references(node.calculate),
+        appearance=node.appearance,
+        choice_filter=references(choice_filter),
+    )
+
+
+def _choice_rows(node: Node, list_name: str) -> list[dict[str, str]]:
+    """Return a select's choice rows as cells by column; none for a non-select.
 
     A `search()` select's list is the row naming its dataset columns, then any
-    literal extras. A select prefilled by `pulldata()` keeps its plain list.
+    literal extras. A select prefilled by `pulldata()` keeps its plain list. A
+    choice also carries the item columns its list's filter reads, so the filter
+    can be checked against the choices.
     """
     if not list_name:
         return []
@@ -162,7 +174,13 @@ def _choice_rows(node: Node, list_name: str) -> list[list[str]]:
     if node.choice_columns:
         items = [node.choice_columns, *items]
     return [
-        [list_name, str(item["value"]), str(item.get("label") or "")] for item in items
+        {column: str(value) for column, value in item.get("filter_columns", {}).items()}
+        | {
+            "list_name": list_name,
+            "name": str(item["value"]),
+            "label": str(item.get("label") or ""),
+        }
+        for item in items
     ]
 
 

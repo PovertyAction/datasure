@@ -32,7 +32,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   literal (`concat(...)`, `if(...)`) is left unknown (`data_source["dataset"]`
   is `None`, `dataset_field` names the field) instead of failing the parse.
   XPath `round` takes a halfway value toward positive infinity
-  (`round(2.5)` is 3), not to the even neighbour
+  (`round(2.5)` is 3), not to the even neighbour. A static choice filter
+  using XPath the evaluator does not implement (`normalize-space(...)`) keeps
+  every item and is marked `"unresolved"` in `Node.choice_filter`, with the
+  list read per submission, instead of failing the import
 - **`SurveyCTOAPIError.status_code`**: the HTTP status, or `None` when there
   was no response. Every HTTP error from `SurveyCTOAPIClient` also includes up
   to 500 characters of the response body, where SurveyCTO explains statuses
@@ -290,7 +293,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   A `search()` select takes its codes from a dataset, so its select_one stays
   `String` and its select_multiple gets binaries only for the codes someone
   picked. A choice binary whose choice cannot be recovered
-  (`ambiguous_choice`) stays `String` under its own name. Prep or correction
+  (`ambiguous_choice`) stays `String` under its own name. A select_multiple
+  exported raw and blank in every row keeps its binaries, all missing; one
+  whose choices are only known when picked keeps its raw column, all
+  missing, so an unanswered question stays visible. Prep or correction
   steps that relied on the old types report `Failed` on the next replay
 - **Form or dataset routing** (#397): `import_data` imports an ID as a server
   dataset only when its form XML cannot be downloaded or parsed and the ID is
@@ -402,7 +408,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     begin/end group and repeat rows, `${field}` references outside quoted
     string literals, one choice list per select named after it, default
     language only; a `search()` select's list keeps the row naming its
-    dataset columns and a `pulldata()` select its choices) and marks it
+    dataset columns and a `pulldata()` select its choices; a filtered list
+    keeps its `choice_filter`, and the choices sheet the item columns the
+    filter reads) and marks it
     `rebuilt_from_xml`; the Replication page says the questionnaire was
     rebuilt. `Node.bind_appearance` keeps the bind's appearance, which names
     comments and audit fields. A 430 from `download_form_definition` itself

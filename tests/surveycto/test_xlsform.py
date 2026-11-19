@@ -164,3 +164,53 @@ class TestSourcedSelectsAndLiterals:
         }
 
         assert rows["tag"]["calculation"] == "concat('/f/hh', ' = ', ${hh} )"
+
+
+FILTERED_XML = """<?xml version="1.0"?>
+<h:html xmlns="http://www.w3.org/2002/xforms" xmlns:h="http://www.w3.org/1999/xhtml">
+  <h:head><model>
+    <instance><shop id="shop" version="1"><n/><pick/></shop></instance>
+    <instance id="towns"><root>
+      <item><label>North</label><name>11</name><zone>1</zone></item>
+      <item><label>South</label><name>21</name><zone>2</zone></item>
+    </root></instance>
+    <bind nodeset="/shop/n" type="int"/>
+    <bind nodeset="/shop/pick" type="select"/>
+  </model></h:head>
+  <h:body>
+    <input ref="/shop/n"><label>N</label></input>
+    <select ref="/shop/pick"><label>Towns</label>
+      <itemset nodeset="instance('towns')/root/item[zone &lt;=  /shop/n ]">
+        <value ref="name"/><label ref="label"/>
+      </itemset>
+    </select>
+  </h:body>
+</h:html>
+"""
+
+
+class TestChoiceFilters:
+    def test_the_filter_is_kept_with_field_references(self):
+        """A list filtered per submission says which options were offered."""
+        rows = {
+            r["name"]: r
+            for r in _rows(
+                design_from_xml(FILTERED_XML.encode()), "fieldsRowsAndColumns"
+            )
+        }
+
+        assert rows["pick"]["choice_filter"] == "zone <= ${n}"
+        assert rows["n"]["choice_filter"] == ""
+
+    def test_choices_carry_the_columns_the_filter_reads(self):
+        design = design_from_xml(FILTERED_XML.encode())
+
+        assert design["choicesRowsAndColumns"][0] == [
+            "list_name",
+            "name",
+            "label",
+            "zone",
+        ]
+        assert [
+            (c["name"], c["zone"]) for c in _rows(design, "choicesRowsAndColumns")
+        ] == [("11", "1"), ("21", "2")]
