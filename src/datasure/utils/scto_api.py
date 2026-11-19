@@ -7,6 +7,8 @@ import openpyxl
 import requests
 from requests.auth import HTTPBasicAuth
 
+from datasure.surveycto.xlsform import design_from_xml
+
 
 @dataclass
 class SurveyCTOAPIConfig:
@@ -475,14 +477,25 @@ class SurveyCTOAPIClient:
         -----
             SurveyCTO does not expose a public API endpoint for downloading the
             raw XLS form file.  This method instead calls ``download_form_definition``
-            (the same CSRF-authenticated endpoint used by ``get_form_definition`` in
-            the connector) and converts the returned JSON to a standards-compliant
-            XLSForm XLSX in memory.
+            (the CSRF-authenticated design endpoint) and converts the returned JSON
+            to a standards-compliant XLSForm XLSX in memory.
+
+            SurveyCTO refuses the design endpoint with HTTP 430 for a form it has
+            not optimized. The definition is then rebuilt from the compiled form
+            XML (``datasure.surveycto.xlsform.design_from_xml``), and carries
+            ``rebuilt_from_xml: True`` so callers can say so.
         """
         try:
             form_def = self.download_form_definition(form_id)
-        except SurveyCTOAPIError:
-            raise
+        except SurveyCTOAPIError as exc:
+            if exc.status_code != _NOT_OPTIMIZED_STATUS:
+                raise
+            self.logger.warning(
+                "Design of form %s is not available until SurveyCTO optimizes it; "
+                "rebuilding the questionnaire from the compiled form XML",
+                form_id,
+            )
+            form_def = design_from_xml(self.download_form_xml(form_id))
         except Exception as exc:
             raise SurveyCTOAPIError(
                 f"Could not retrieve form definition for '{form_id}': {exc}"

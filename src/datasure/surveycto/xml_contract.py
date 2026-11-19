@@ -146,6 +146,9 @@ class Node:
     label: str | None = None
     mediatype: str | None = None  # <upload mediatype>, e.g. "image/*"
     appearance: str | None = None  # body control appearance
+    # Bind appearance; SurveyCTO marks the fields it fills itself here, such as
+    # "class=comments" or "class=textAudit;p=100".
+    bind_appearance: str | None = None
     repeat_count: str | None = None  # <repeat jr:count>, on the repeat's node
     # Where the field's content/options come from, parsed from search()/pulldata():
     #   {kind:"search", dataset, mode, filter, match}
@@ -889,6 +892,7 @@ def parse_contract(xml_path) -> FormContract:
             constraint_message=message_text(b.get("constraintMsg")),
             mediatype=mediatypes.get(path),
             appearance=ap,
+            bind_appearance=b.get("appearance"),
             repeat_count=counts.get(path),
         )
 

@@ -1,5 +1,6 @@
 """Tests for the SurveyCTO API client module."""
 
+from typing import ClassVar
 from unittest.mock import MagicMock, Mock, patch  # noqa: F401
 
 import pytest
@@ -630,6 +631,71 @@ class TestFormEndpoints:
         ):
             with pytest.raises(SurveyCTOAPIError, match="Unexpected error"):
                 api_client.download_form_data_json("form1", private_key=b"test_key")
+
+
+class TestDownloadFormXlsx:
+    """The questionnaire XLSX, from the design or, on a 430, the form XML."""
+
+    DESIGN: ClassVar[dict] = {
+        "title": "Farm",
+        "fieldsRowsAndColumns": [["type", "name", "label"], ["text", "owner", "Owner"]],
+        "choicesRowsAndColumns": [["list_name", "name", "label"]],
+    }
+
+    @staticmethod
+    def _survey_types(xlsx: bytes) -> list[str]:
+        import io
+
+        import openpyxl
+
+        sheet = openpyxl.load_workbook(io.BytesIO(xlsx))["survey"]
+        return [row[0] for row in sheet.iter_rows(min_row=2, values_only=True)]
+
+    def test_uses_the_design(self, api_client):
+        """A form SurveyCTO serves is built from its design."""
+        with (
+            patch.object(
+                api_client, "download_form_definition", return_value=self.DESIGN
+            ),
+            patch.object(api_client, "download_form_xml") as mock_xml,
+        ):
+            xlsx, form_def = api_client.download_form_xlsx("farm")
+
+        assert form_def is self.DESIGN
+        assert self._survey_types(xlsx) == ["text"]
+        mock_xml.assert_not_called()
+
+    def test_not_optimized_rebuilds_from_the_form_xml(self, api_client):
+        """A 430 (form not optimized) falls back to the compiled form XML."""
+        from tests.surveycto.farm_form import XML as FARM_XML
+
+        not_optimized = SurveyCTOAPIError("not optimized", status_code=430)
+        with (
+            patch.object(
+                api_client, "download_form_definition", side_effect=not_optimized
+            ),
+            patch.object(
+                api_client, "download_form_xml", return_value=FARM_XML.encode()
+            ),
+        ):
+            xlsx, form_def = api_client.download_form_xlsx("farm")
+
+        assert form_def["rebuilt_from_xml"] is True
+        assert "select_one crop" in self._survey_types(xlsx)
+
+    def test_other_errors_propagate(self, api_client):
+        """Any other design error is raised, without trying the XML."""
+        server_error = SurveyCTOAPIError("boom", status_code=500)
+        with (
+            patch.object(
+                api_client, "download_form_definition", side_effect=server_error
+            ),
+            patch.object(api_client, "download_form_xml") as mock_xml,
+            pytest.raises(SurveyCTOAPIError, match="boom"),
+        ):
+            api_client.download_form_xlsx("farm")
+
+        mock_xml.assert_not_called()
 
 
 class TestFormXml:
