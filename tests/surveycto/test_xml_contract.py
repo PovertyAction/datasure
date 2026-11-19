@@ -839,3 +839,56 @@ def test_media_only_choice_label_is_empty_text(tmp_path):
     path.write_text(_XML_MEDIA_LABEL, encoding="utf-8")
     items = parse_contract(path).nodes["fruit"].choice_items
     assert [(c["value"], c["label"]) for c in items] == [("1", "Apple"), ("2", "")]
+
+
+# search() datasets named through a field: a literal calculate names the dataset,
+# any other calculate picks it per submission.
+_XML_SEARCH_BY_FIELD = """<?xml version="1.0"?>
+<h:html xmlns="http://www.w3.org/2002/xforms" xmlns:h="http://www.w3.org/1999/xhtml">
+  <h:head><model>
+    <instance><f id="f" version="1">
+      <region/><fixed_ds/><dyn_ds/><village/><town/>
+    </f></instance>
+    <bind nodeset="/f/region" type="string"/>
+    <bind nodeset="/f/fixed_ds" type="string" calculate="'villages.csv'"/>
+    <bind nodeset="/f/dyn_ds" type="string" calculate="concat('villages_',  /f/region )"/>
+    <bind nodeset="/f/village" type="select1"/>
+    <bind nodeset="/f/town" type="select1"/>
+  </model></h:head>
+  <h:body>
+    <input ref="/f/region"><label>Region</label></input>
+    <select1 ref="/f/village" appearance="search( /f/fixed_ds )"><label>Village</label>
+      <item><label>name</label><value>id</value></item>
+    </select1>
+    <select1 ref="/f/town" appearance="search( /f/dyn_ds )"><label>Town</label>
+      <item><label>name</label><value>id</value></item>
+    </select1>
+  </h:body>
+</h:html>
+"""
+
+
+def test_search_dataset_named_by_a_field(tmp_path):
+    path = tmp_path / "f.xml"
+    path.write_text(_XML_SEARCH_BY_FIELD, encoding="utf-8")
+    nodes = parse_contract(path).nodes
+    assert nodes["village"].data_source["dataset"] == "villages"
+    assert "dataset_field" not in nodes["village"].data_source
+    # concat(...) is not a literal: the form still parses, the dataset stays unknown.
+    assert nodes["town"].data_source["dataset"] is None
+    assert nodes["town"].data_source["dataset_field"] == "dyn_ds"
+
+
+def test_search_items_split_into_literal_choices_and_columns(tmp_path):
+    xml = _XML_SEARCH_BY_FIELD.replace(
+        "<item><label>name</label><value>id</value></item>",
+        "<item><label>name</label><value>id</value></item>"
+        "<item><label>Other</label><value>-88</value></item>",
+    )
+    path = tmp_path / "f.xml"
+    path.write_text(xml, encoding="utf-8")
+    village = parse_contract(path).nodes["village"]
+    assert village.choice_items == [{"label": "Other", "value": "-88"}]
+    assert village.choice_columns == {"value": "id", "label": "name"}
+    assert village.choices_per_submission
+    assert not village.choices_known

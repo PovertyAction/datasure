@@ -11,6 +11,7 @@ import functools
 import math
 import re
 from collections.abc import Callable
+from decimal import ROUND_FLOOR, Decimal
 
 Value = str | float | bool | None
 
@@ -130,6 +131,23 @@ def _at(items: list[str], index: Value) -> str:
     return items[i] if 0 <= i < len(items) else ""
 
 
+def _round(value: Value, places: Value = 0.0) -> float:
+    """Round as XPath does: a halfway value goes toward positive infinity.
+
+    Python's ``round`` goes to the even neighbour (``round(2.5) == 2``). The
+    decimal arithmetic keeps ``1.005`` at two places from rounding down through
+    its binary float error.
+    """
+    x, n = _number(value), _number(places)
+    if math.isnan(n):
+        return math.nan
+    if not math.isfinite(x):
+        return x
+    digits = int(n)
+    scaled = Decimal(repr(x)).scaleb(digits) + Decimal("0.5")
+    return float(scaled.to_integral_value(rounding=ROUND_FLOOR).scaleb(-digits))
+
+
 _FUNCTIONS: dict[str, tuple[int, int, Callable[..., Value]]] = {
     # name: (min args, max args, implementation on evaluated args)
     "selected": (2, 2, lambda a, b: _string(b) in _codes(a)),
@@ -147,7 +165,7 @@ _FUNCTIONS: dict[str, tuple[int, int, Callable[..., Value]]] = {
             float(math.trunc(_number(a))) if not math.isnan(_number(a)) else math.nan
         ),
     ),
-    "round": (1, 2, lambda a, n=0: round(_number(a), int(_number(n)))),
+    "round": (1, 2, _round),
     "string-length": (1, 1, lambda a: float(len(_string(a)))),
     "concat": (1, 99, lambda *xs: "".join(_string(x) for x in xs)),
     "contains": (2, 2, lambda a, b: _string(b) in _string(a)),

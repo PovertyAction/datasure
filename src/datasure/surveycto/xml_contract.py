@@ -153,17 +153,21 @@ class Node:
     # Where the field's content/options come from, parsed from search()/pulldata():
     #   {kind:"search", dataset, mode, filter, match}
     #   | {kind:"pulldata", dataset, value, key, match}
+    # A search() dataset named by a field whose calculate is not a literal is None,
+    # with `dataset_field` set to that field's path.
     data_source: dict | None = None
     # The select's `<item>` pairs verbatim from the body. For a plain select these
     # are literal choices; for a `search()` select the value/label instead NAME the
     # CSV COLUMNS holding the real universe, and only the extras are literal (a
     # `-88` "Other" alongside a column reference). Needed to build the choice index
     # that de-sanitises a wide column's choice token back to its declared value.
+    # For a `search()` select only the literal extras stay here; the item naming
+    # the columns goes to `choice_columns`.
     choice_items: list[dict] = field(default_factory=list)
     # Why a `search()` select's dataset choices were left out, e.g. ["presidio:PERSON"].
     choices_withheld: list[str] | None = None
     # A `search()` select's value and label columns in its dataset, from the item
-    # that names them.
+    # that names them: {"value": <value column>, "label": <label column>}.
     choice_columns: dict | None = None
     # The question's hint and constraint message, from the default translation.
     hint: str | None = None
@@ -185,6 +189,33 @@ class Node:
         return (
             self.choice_items if self.choice_universe is None else self.choice_universe
         )
+
+    @property
+    def choices_known(self) -> bool:
+        """Whether `all_choices` is every code the select can take.
+
+        A `search()` select takes its codes from a dataset; until they are read
+        into `choice_universe`, only its literal extras are known.
+        """
+        searched = bool(self.data_source and self.data_source["kind"] == "search")
+        return self.choice_universe is not None or not searched
+
+
+_INTEGER_VALUE = re.compile(r"-?\d+")
+
+
+def _split_search_items(items: list[dict]) -> tuple[list[dict], dict | None]:
+    """Split a `search()` select's items into literal choices and its columns.
+
+    As in ODK Collect, an item with an integer value is a static choice (an
+    "Other" of -88); any other item names the dataset columns that hold the
+    values and labels. Returns the literal items and the first such item.
+    """
+    literal = [i for i in items if _INTEGER_VALUE.fullmatch(str(i["value"] or ""))]
+    columns = next((i for i in items if i not in literal), None)
+    if columns is None:
+        return literal, None
+    return literal, {"value": columns["value"], "label": columns["label"]}
 
 
 # search('dataset','mode','col','val'[,'col2','val2'...]) on a select's appearance.
@@ -856,11 +887,10 @@ def parse_contract(xml_path) -> FormContract:
         select_multiple = ctl == "select" or b.get("type") == "select"
         calculate = b.get("calculate") or body_calculates.get(path)
         source = _parse_data_source(ap, calculate)
-        searched_by_field = bool(
-            source
-            and source["kind"] == "search"
-            and any(v is None for v in source["filter"].values())
-        )
+        searched = bool(source and source["kind"] == "search")
+        choice_items, choice_columns = items.get(path, []), None
+        if searched:
+            choice_items, choice_columns = _split_search_items(choice_items)
         nodes[path] = Node(
             path=path,
             name=toks[-1],
@@ -871,7 +901,8 @@ def parse_contract(xml_path) -> FormContract:
             xml_type=b.get("type"),
             control=_SELECT_CONTROL.get(ctl, ctl),
             is_select_multiple=select_multiple,
-            choice_items=items.get(path, []),
+            choice_items=choice_items,
+            choice_columns=choice_columns,
             calculate=calculate,
             calculation_is_default=not b.get("calculate") and path in body_calculates,
             relevant=b.get("relevant"),
@@ -883,7 +914,9 @@ def parse_contract(xml_path) -> FormContract:
             preload=b.get("preload"),
             preload_params=b.get("preloadParams"),
             data_source=source,
-            choices_per_submission=path in filtered or searched_by_field,
+            # A search() select's dataset codes are unknown here, so its binaries
+            # are only the codes someone picked.
+            choices_per_submission=path in filtered or searched,
             choice_filter=choice_filters.get(path),
             original=b.get("original"),
             field_type=b.get("fieldType"),
@@ -897,18 +930,22 @@ def parse_contract(xml_path) -> FormContract:
         )
 
     # A dataset named through a field (`search(${list_name})`) is that field's
-    # literal calculate, `string('roster')` or `'roster'`.
+    # literal calculate, `string('roster')` or `'roster'`. Any other calculate
+    # (`concat(...)`, `if(...)`) picks the dataset per submission, so the
+    # dataset stays unknown (None) and `dataset_field` names the field. The
+    # form still imports: nothing downstream needs the dataset's name.
     for node in nodes.values():
         source = node.data_source
         if source and source["dataset"].startswith(prefix):
-            named_by = nodes[source["dataset"][len(prefix) :]]
-            literal = _STRING_LITERAL.match((named_by.calculate or "").strip())
-            if not literal:
-                raise ValueError(
-                    f"{node.path} reads a dataset named by {named_by.path}, whose "
-                    f"calculate is not a string literal: {named_by.calculate!r}"
-                )
-            source["dataset"] = literal.group(2).removesuffix(".csv")
+            field_path = source["dataset"][len(prefix) :]
+            named_by = nodes.get(field_path)
+            calculate = named_by.calculate if named_by else None
+            literal = _STRING_LITERAL.match((calculate or "").strip())
+            if literal:
+                source["dataset"] = literal.group(2).removesuffix(".csv")
+            else:
+                source["dataset"] = None
+                source["dataset_field"] = field_path
 
     encrypted = any(
         _ln(el.tag) == "submission" and el.get("base64RsaPublicKey")

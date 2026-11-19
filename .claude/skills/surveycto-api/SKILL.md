@@ -54,7 +54,10 @@ rebuilds the design-shaped definition from the XML
    with `cast_wide` and converts with `typed_frame`. That gives form types (int ->
    Int64, decimal -> Float64, date -> Date, select_multiple binaries -> Int8,
    numeric select_one -> Int64), naive UTC timestamps and an Int64
-   `formdef_version`.
+   `formdef_version`. A `search()` select's codes live in its dataset, which
+   the import does not read: only its integer-valued items are choices, the
+   item naming the dataset columns is `Node.choice_columns`, its select_one
+   stays String and its select_multiple binaries are the codes someone picked.
 3. It saves the frame to `raw.duckdb`, then stores the XML with
    `save_form_definition` (one row per alias and form version). `load_form_definition(alias)`
    returns the latest version's XML, or `None`.

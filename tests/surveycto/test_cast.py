@@ -365,3 +365,106 @@ def test_no_submissions_is_the_columns_every_submission_carries(contract):
         ("SubmissionDate", pa.timestamp("ms", tz="UTC")),
         ("formdef_version", pa.string()),
     ]
+
+
+_STRING_BIND_XML = """<?xml version="1.0"?>
+<h:html xmlns="http://www.w3.org/2002/xforms" xmlns:h="http://www.w3.org/1999/xhtml">
+  <h:head><model>
+    <instance><f id="f" version="1"><level/></f></instance>
+    <bind nodeset="/f/level" type="string"/>
+  </model></h:head>
+  <h:body>
+    <select1 ref="/f/level"><label>Level</label>
+      <item><label>None</label><value>0</value></item><item><label>High</label><value>3</value></item>
+    </select1>
+  </h:body>
+</h:html>
+"""
+
+
+def test_select_one_on_a_string_bind_with_integer_codes_is_int64(tmp_path):
+    path = tmp_path / "f.xml"
+    path.write_text(_STRING_BIND_XML, encoding="utf-8")
+    table = cast_wide([{"KEY": "k1", "level": "3"}], parse_contract(path))
+    assert table.schema.field("level").type == pa.int64()
+    assert table.column("level").to_pylist() == [3]
+
+
+_AMBIGUOUS_XML = """<?xml version="1.0"?>
+<h:html xmlns="http://www.w3.org/2002/xforms" xmlns:h="http://www.w3.org/1999/xhtml"
+        xmlns:jr="http://openrosa.org/javarosa">
+  <h:head><model>
+    <instance><f id="f" version="1"><r jr:template=""><tags/></r></f></instance>
+    <bind nodeset="/f/r/tags" type="select"/>
+  </model></h:head>
+  <h:body>
+    <group ref="/f/r"><repeat nodeset="/f/r">
+      <select ref="/f/r/tags"><label>Tags</label>
+        <item><label>a</label><value>1</value></item><item><label>b</label><value>2</value></item>
+      </select>
+    </repeat></group>
+  </h:body>
+</h:html>
+"""
+
+
+def test_an_ambiguous_choice_binary_is_kept_as_text_not_split(tmp_path):
+    # tags_1_1_2 carries one index too many for a depth-1 repeat, so which choice
+    # it is cannot be recovered: it must not be read as a raw answer for choice 1.
+    path = tmp_path / "f.xml"
+    path.write_text(_AMBIGUOUS_XML, encoding="utf-8")
+    table = cast_wide([{"KEY": "k1", "tags_1_1_2": "1"}], parse_contract(path))
+    assert "tags_1_2" not in table.schema.names
+    assert table.column("tags_1_1_2").to_pylist() == ["1"]
+    assert _fallback(table, "tags_1_1_2") == "a choice binary whose choice is ambiguous"
+
+
+# A static search(): the item with a text value names the dataset's columns; only
+# the integer -88 "Other" is a literal choice.
+_SEARCH_XML = """<?xml version="1.0"?>
+<h:html xmlns="http://www.w3.org/2002/xforms" xmlns:h="http://www.w3.org/1999/xhtml">
+  <h:head><model>
+    <instance><f id="f" version="1"><village/><home/></f></instance>
+    <bind nodeset="/f/village" type="select"/>
+    <bind nodeset="/f/home" type="select1"/>
+  </model></h:head>
+  <h:body>
+    <select ref="/f/village" appearance="search('villages')"><label>Villages</label>
+      <item><label>village_name</label><value>village_id</value></item>
+      <item><label>Other</label><value>-88</value></item>
+    </select>
+    <select1 ref="/f/home" appearance="search('villages')"><label>Home</label>
+      <item><label>village_name</label><value>village_id</value></item>
+      <item><label>Other</label><value>-88</value></item>
+    </select1>
+  </h:body>
+</h:html>
+"""
+
+
+@pytest.fixture
+def search_contract(tmp_path):
+    path = tmp_path / "f.xml"
+    path.write_text(_SEARCH_XML, encoding="utf-8")
+    return parse_contract(path)
+
+
+def test_search_select_invents_no_choice_from_its_column_names(search_contract):
+    rows = [
+        {"KEY": "k1", "village_101": "1"},
+        {"KEY": "k2", "village__88": "1"},
+    ]
+    table = cast_wide(rows, search_contract)
+    assert "village_village_id" not in table.schema.names
+    # The dataset's code someone picked is a typed binary, not a text fallback.
+    assert table.schema.field("village_101").type == pa.int8()
+    assert _fallback(table, "village_101") == ""
+    assert (_col(table, "village_101"), _col(table, "village__88")) == ([1, 0], [0, 1])
+
+
+def test_search_select_one_stays_text_when_its_codes_are_unknown(search_contract):
+    # Only -88 is in the form; the dataset's codes may be text.
+    table = cast_wide([{"KEY": "k1", "home": "V7"}], search_contract)
+    assert table.schema.field("home").type == pa.string()
+    assert _col(table, "home") == ["V7"]
+    assert _fallback(table, "home") == ""

@@ -575,6 +575,10 @@ class SurveyCTOAPIClient:
             response.raise_for_status()
             return response.json()
 
+        except SurveyCTOAPIError:
+            # `_make_request` has already built it, with the HTTP status.
+            raise
+
         except requests.exceptions.HTTPError as e:
             error = _http_error("Failed to download form data", e)
             self.logger.exception(

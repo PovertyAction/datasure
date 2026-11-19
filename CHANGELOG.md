@@ -24,11 +24,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `xpath`) and the typed cast (`cast`), adapted from surveycto_python_dict at
   `d6f54f9` and maintained in DataSure from now on; `parse_contract` also
   reads XML bytes. Upstream's offline tests for them are in
-  `tests/surveycto/`
+  `tests/surveycto/`. Changes from upstream: a `search()` select's items are
+  split into its literal choices (integer values, as in ODK Collect) and
+  `Node.choice_columns`, the item naming its dataset's value and label
+  columns, and `Node.choices_known` is False until its dataset's codes are
+  read. A `search()` dataset named by a field whose calculate is not a
+  literal (`concat(...)`, `if(...)`) is left unknown (`data_source["dataset"]`
+  is `None`, `dataset_field` names the field) instead of failing the parse.
+  XPath `round` takes a halfway value toward positive infinity
+  (`round(2.5)` is 3), not to the even neighbour
 - **`SurveyCTOAPIError.status_code`**: the HTTP status, or `None` when there
   was no response. Every HTTP error from `SurveyCTOAPIClient` also includes up
   to 500 characters of the response body, where SurveyCTO explains statuses
-  such as its non-standard 430
+  such as its non-standard 430. A failed submission download keeps the
+  status instead of becoming an "Unexpected error"
 
 - **Progress tracking-file and master-list modes**: new pure module
   `checks/progress_tracking.py`. `TrackingSettings` (mixed into
@@ -274,11 +283,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **Breaking, SurveyCTO column types** (#397): columns take the form's types
   instead of `DataProcessor`'s. Integers are `Int64` (were `Float64`), dates
-  `Date` (were `Datetime`), numeric select_one codes `Int64` and
-  select_multiple binaries `Int8` with 0 for unchosen options of an answered
-  question (both were `String`), `duration` `Int64` (was `Float64`). A field
-  the cast cannot parse in every row stays `String`. Prep or correction steps
-  that relied on the old types report `Failed` on the next replay
+  `Date` (were `Datetime`), numeric select_one codes `Int64` (on a `select1`
+  or a `string` bind) and select_multiple binaries `Int8` with 0 for unchosen
+  options of an answered question (both were `String`), `duration` `Int64`
+  (was `Float64`). A field the cast cannot parse in every row stays `String`.
+  A `search()` select takes its codes from a dataset, so its select_one stays
+  `String` and its select_multiple gets binaries only for the codes someone
+  picked. A choice binary whose choice cannot be recovered
+  (`ambiguous_choice`) stays `String` under its own name. Prep or correction
+  steps that relied on the old types report `Failed` on the next replay
 - **Form or dataset routing** (#397): `import_data` imports an ID as a server
   dataset only when its form XML cannot be downloaded or parsed and the ID is
   on `list_datasets()`. The status SurveyCTO answers for a dataset ID's form
@@ -386,8 +399,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     uploads as well as comments, text and audio audits and sensor streams.
     On a 430, `download_form_xlsx` rebuilds the design-shaped definition from
     the XML with the new `surveycto.xlsform.design_from_xml` (XLSForm types,
-    begin/end group and repeat rows, `${field}` references, one choice list
-    per select named after it, default language only) and marks it
+    begin/end group and repeat rows, `${field}` references outside quoted
+    string literals, one choice list per select named after it, default
+    language only; a `search()` select's list keeps the row naming its
+    dataset columns and a `pulldata()` select its choices) and marks it
     `rebuilt_from_xml`; the Replication page says the questionnaire was
     rebuilt. `Node.bind_appearance` keeps the bind's appearance, which names
     comments and audit fields. A 430 from `download_form_definition` itself

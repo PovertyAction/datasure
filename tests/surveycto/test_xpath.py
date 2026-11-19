@@ -77,6 +77,31 @@ def test_evaluates(expr, values, expected):
     assert ev(expr, **values) is expected
 
 
+@pytest.mark.parametrize(
+    ("expr", "expected"),
+    [
+        # XPath 1.0 rounds a halfway value toward positive infinity, not to even.
+        ("round(2.5)", 3.0),
+        ("round(3.5)", 4.0),
+        ("round(-2.5)", -2.0),
+        ("round(-2.6)", -3.0),
+        ("round(2.4)", 2.0),
+        ("round(1.005, 2)", 1.01),
+        ("round(1234, -2)", 1200.0),
+    ],
+)
+def test_round_is_xpath_rounding(expr, expected):
+    assert ev(expr) == expected
+
+
+def test_round_filters_a_halfway_score():
+    assert ev("round(${s}) = 3", s="2.5") is True
+
+
+def test_round_of_text_is_nan():
+    assert math.isnan(ev("round(${a})", a="abc"))
+
+
 def test_index_is_the_repeat_instance():
     fn = compile_expression("index() > 1")
     assert fn(Row({}, iteration=1)) is False

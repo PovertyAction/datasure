@@ -604,6 +604,21 @@ class TestFormEndpoints:
             with pytest.raises(SurveyCTOAPIError, match="Failed to download form data"):
                 api_client.download_form_data_json("form1", private_key=b"test_key")
 
+    def test_download_form_data_json_unencrypted_http_error_keeps_status(
+        self, api_client
+    ):
+        """An unencrypted download failure keeps the HTTP status from the request."""
+        response = Mock(status_code=403, text="Permission denied")
+        error = requests.exceptions.HTTPError("403 Forbidden", response=response)
+        with patch.object(api_client.session, "request") as mock_request:
+            mock_request.return_value.raise_for_status.side_effect = error
+            with pytest.raises(SurveyCTOAPIError) as excinfo:
+                api_client.download_form_data_json("form1")
+
+        assert excinfo.value.status_code == 403
+        assert "Unexpected error" not in str(excinfo.value)
+        assert "Permission denied" in str(excinfo.value)
+
     def test_download_form_data_json_encrypted_connection_error(self, api_client):
         """Test downloading encrypted form data with connection error."""
         with patch.object(  # noqa: SIM117

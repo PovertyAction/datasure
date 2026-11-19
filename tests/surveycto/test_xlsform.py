@@ -115,3 +115,52 @@ class TestDesignFromXml:
     def test_title_falls_back_to_form_id(self):
         """A form without a title uses its form ID."""
         assert design_from_xml(FARM_XML.encode())["title"] == "farm"
+
+
+SOURCED_XML = """<?xml version="1.0"?>
+<h:html xmlns="http://www.w3.org/2002/xforms" xmlns:h="http://www.w3.org/1999/xhtml">
+  <h:head><model>
+    <instance><f id="f" version="1"><hh/><village/><status/><tag/></f></instance>
+    <bind nodeset="/f/hh" type="string"/>
+    <bind nodeset="/f/village" type="select1"/>
+    <bind nodeset="/f/status" type="select1"
+          calculate="pulldata('households', 'status', 'hhid',  /f/hh )"/>
+    <bind nodeset="/f/tag" type="string"
+          calculate="concat('/f/hh', ' = ',  /f/hh )"/>
+  </model></h:head>
+  <h:body>
+    <input ref="/f/hh"><label>Household</label></input>
+    <select1 ref="/f/village" appearance="search('villages')"><label>Village</label>
+      <item><label>village_name</label><value>village_id</value></item>
+      <item><label>Other</label><value>-88</value></item>
+    </select1>
+    <select1 ref="/f/status"><label>Status</label>
+      <item><label>Active</label><value>1</value></item>
+      <item><label>Moved</label><value>2</value></item>
+    </select1>
+  </h:body>
+</h:html>
+"""
+
+
+class TestSourcedSelectsAndLiterals:
+    def test_search_and_pulldata_selects_keep_their_choice_lists(self):
+        """A search() list names its dataset columns; pulldata() keeps its choices."""
+        choices = _rows(design_from_xml(SOURCED_XML.encode()), "choicesRowsAndColumns")
+
+        assert [(c["list_name"], c["name"], c["label"]) for c in choices] == [
+            ("village", "village_id", "village_name"),
+            ("village", "-88", "Other"),
+            ("status", "1", "Active"),
+            ("status", "2", "Moved"),
+        ]
+
+    def test_paths_inside_quoted_literals_are_left_as_written(self):
+        rows = {
+            r["name"]: r
+            for r in _rows(
+                design_from_xml(SOURCED_XML.encode()), "fieldsRowsAndColumns"
+            )
+        }
+
+        assert rows["tag"]["calculation"] == "concat('/f/hh', ' = ', ${hh} )"

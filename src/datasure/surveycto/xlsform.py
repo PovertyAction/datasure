@@ -145,13 +145,25 @@ def _rows(contract: FormContract) -> tuple[list[list[str]], list[list[str]]]:
                 appearance=node.appearance,
             )
         )
-        if list_name and not node.data_source:
-            choices.extend(
-                [list_name, str(item["value"]), str(item.get("label") or "")]
-                for item in node.choice_items
-            )
+        choices.extend(_choice_rows(node, list_name))
     close_until("")
     return survey, choices
+
+
+def _choice_rows(node: Node, list_name: str) -> list[list[str]]:
+    """Return a select's choice rows; none for a field that is not a select.
+
+    A `search()` select's list is the row naming its dataset columns, then any
+    literal extras. A select prefilled by `pulldata()` keeps its plain list.
+    """
+    if not list_name:
+        return []
+    items = node.choice_items
+    if node.choice_columns:
+        items = [node.choice_columns, *items]
+    return [
+        [list_name, str(item["value"]), str(item.get("label") or "")] for item in items
+    ]
 
 
 def _is_within(path: str, group: str) -> bool:
@@ -201,13 +213,26 @@ def _binary_type(node: Node) -> str:
     return _BINARY_CLASSES.get(match.group(1), "file") if match else "file"
 
 
+# A quoted XPath string literal; the split keeps it as its own part.
+_QUOTED = re.compile(r"""('[^']*'|"[^"]*")""")
+
+
 def _references(formid: str):
-    """Return a function that writes absolute paths as ${field} references."""
+    """Return a function that writes absolute paths as ${field} references.
+
+    Text inside a quoted string literal is a value, not a path, and is left as
+    written: ``concat('/f/a', /f/a)`` becomes ``concat('/f/a', ${a})``.
+    """
     absolute = re.compile(rf"\s*/{re.escape(formid)}/(?:[\w-]+/)*([\w-]+)\s*")
 
     def rewrite(expression: str | None) -> str | None:
         if expression is None:
             return None
-        return absolute.sub(lambda m: f" ${{{m.group(1)}}} ", expression).strip()
+        # re.split with a group puts the quoted literals at the odd indexes.
+        parts = _QUOTED.split(expression)
+        return "".join(
+            part if i % 2 else absolute.sub(lambda m: f" ${{{m.group(1)}}} ", part)
+            for i, part in enumerate(parts)
+        ).strip()
 
     return rewrite
