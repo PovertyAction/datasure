@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
+from xml.etree.ElementTree import ParseError
 
 import polars as pl
 import polars.selectors as cs
@@ -21,7 +22,6 @@ from datasure.utils.duckdb_utils import (
     save_form_definition,
 )
 from datasure.utils.scto_api import (
-    FormNotFoundError,
     SurveyCTOAPIClient,
     SurveyCTOAPIConfig,
     SurveyCTOAPIError,
@@ -38,6 +38,11 @@ from datasure.utils.secure_credentials import (
 SCTO_KEY_IMPORT_OPTIONS = ("Import from File", "Paste private key text")
 
 logger = logging.getLogger(__name__)
+
+
+class _FormXMLUnavailableError(SurveyCTOAPIError):
+    """The form XML could not be downloaded or parsed; ``__cause__`` says why."""
+
 
 # --- Configuration and Models --- #
 
@@ -225,10 +230,24 @@ def typed_frame(table: pa.Table) -> pl.DataFrame:
     )
 
 
-def get_repeat_columns(field: str, data_cols: list[str]) -> list[str]:
-    """Get all columns that belong to a repeat group."""
-    pattern = rf"{re.escape(field)}_[0-9]+_{{,1}}[0-9]*_{{,1}}[0-9]*"
-    return [col for col in data_cols if re.fullmatch(pattern, col)] or [field]
+def media_columns(contract: FormContract, data_cols: list[str]) -> list[str]:
+    """Return the data columns that hold a media field's attachment URL.
+
+    A column counts only when the contract resolves it to a ``binary`` leaf,
+    so a repeat media field's ``voice_1``, ``voice_2`` are kept and a sibling
+    field that merely shares the prefix (``photo_1`` beside ``photo``) is not.
+    Only columns present in the data are returned: a form with no new
+    submissions, or a repeat with no instances, has none.
+    """
+    columns = []
+    for col in data_cols:
+        mapped = contract.map_column(col)
+        if mapped["kind"] != "matched":
+            continue
+        node = contract.nodes[mapped["node_path"]]
+        if node.xml_type == "binary" and node.is_leaf:
+            columns.append(col)
+    return columns
 
 
 def media_field_names(contract: FormContract) -> list[str]:
@@ -258,54 +277,54 @@ class MediaDownloader:
 
     def download_media_files(
         self,
-        media_fields: list[str],
+        media_columns: list[str],
         data: pl.DataFrame,
         media_folder: Path,
         encryption_key: str | None = None,
     ) -> None:
-        """Download all media files for the given data."""
+        """Download the attachments in the given media columns of the data."""
         media_folder.mkdir(parents=True, exist_ok=True)
 
-        for field in media_fields:
-            self._download_field_media(field, data, media_folder, encryption_key)
+        for col in media_columns:
+            self._download_field_media(col, data, media_folder, encryption_key)
 
     def _download_field_media(
         self,
-        field: str,
+        col: str,
         data: pl.DataFrame,
         media_folder: Path,
         encryption_key: str | None,
     ) -> None:
-        """Download media files for a specific field."""
-        cols = get_repeat_columns(field, data.columns)
+        """Download the attachments in one media column."""
+        # A column can be absent (no submissions, an empty repeat), and a media
+        # URL is always a string; anything else cannot hold an attachment.
+        if col not in data.columns or data.schema[col] != pl.String:
+            self.logger.info(f"No media column '{col}' to download")
+            return
 
-        for col in cols:
-            media_data = (
-                data.filter(pl.col(col).is_not_null())
-                .select(["KEY", col])
-                .filter(pl.col(col).str.strip_chars() != "")
-            )
+        media_data = (
+            data.filter(pl.col(col).is_not_null())
+            .select(["KEY", col])
+            .filter(pl.col(col).str.strip_chars() != "")
+        )
 
-            if media_data.is_empty():
-                self.logger.info(f"No media files found for field '{col}'")
-                continue
+        if media_data.is_empty():
+            self.logger.info(f"No media files found for field '{col}'")
+            return
 
-            if len(media_data) > 0:
-                progress_bar = st.progress(0, text=f"Downloading {col} media files...")
+        progress_bar = st.progress(0, text=f"Downloading {col} media files...")
 
-                for idx, row in enumerate(media_data.iter_rows(named=True)):
-                    try:
-                        self._download_single_file(
-                            row[col], row["KEY"], col, media_folder, encryption_key
-                        )
-                        progress_bar.progress(
-                            (idx + 1) / len(media_data),
-                            text=f"Downloading {col}... {idx + 1}/{len(media_data)}",
-                        )
-                    except (SurveyCTOAPIError, OSError):
-                        self.logger.exception(
-                            f"Failed to download {col} for {row['KEY']}"
-                        )
+        for idx, row in enumerate(media_data.iter_rows(named=True)):
+            try:
+                self._download_single_file(
+                    row[col], row["KEY"], col, media_folder, encryption_key
+                )
+                progress_bar.progress(
+                    (idx + 1) / len(media_data),
+                    text=f"Downloading {col}... {idx + 1}/{len(media_data)}",
+                )
+            except (SurveyCTOAPIError, OSError):
+                self.logger.exception(f"Failed to download {col} for {row['KEY']}")
 
     def _download_single_file(
         self,
@@ -456,9 +475,26 @@ class SurveyCTOClient:
             )
 
     def _handle_api_error(self, api_err: SurveyCTOAPIError, server: str) -> None:
-        """Handle API errors with user-friendly messages."""
+        """Handle API errors with user-friendly messages.
+
+        An HTTP error is classified by its status. The message also carries
+        SurveyCTO's response body, so its words could match a keyword for an
+        unrelated cause. Keywords classify only errors with no status
+        (connection errors, timeouts).
+        """
         self._scto_client = None
         error_msg = str(api_err)
+
+        status_messages = {
+            401: "🔐 Invalid credentials. Please check your username and password.",
+            403: "🚫 Access forbidden. Your account may not have permission to access this server.",
+            404: f"🔍 Server '{server}' not found. Please verify the server name.",
+        }
+        if api_err.status_code is not None:
+            message = status_messages.get(
+                api_err.status_code, f"❌ API error: {api_err}"
+            )
+            raise ConnectionError(message) from api_err
 
         error_mapping = {
             (
@@ -541,12 +577,44 @@ class SurveyCTOClient:
                 raise ConnectionError(f"Not connected to server: {e}") from e
         try:
             return self._import_regular_form(form_config)
-        except FormNotFoundError:
-            # A server dataset has no form XML. Any other ID raises.
-            dataset_ids = {d["id"] for d in self._scto_client.list_datasets()}
-            if form_config.form_id not in dataset_ids:
-                raise
-            return self._import_server_dataset(form_config)
+        except _FormXMLUnavailableError as unavailable:
+            # A server dataset has no form XML. Which status SurveyCTO answers
+            # for a dataset ID is not documented, so any failure to get or
+            # parse the XML checks the dataset list. Any other ID raises the
+            # XML error itself.
+            if self._is_server_dataset(form_config.form_id):
+                return self._import_server_dataset(form_config)
+            raise unavailable.__cause__ from unavailable.__cause__.__cause__
+
+    def _is_server_dataset(self, form_id: str) -> bool:
+        """Return whether the ID is on the server's dataset list.
+
+        A failed listing (an account without dataset access, a 5xx) answers
+        False, so the caller raises the form's own error rather than a
+        dataset-list error unrelated to the cause.
+        """
+        try:
+            datasets = self._scto_client.list_datasets()
+        except SurveyCTOAPIError:
+            self.logger.warning(
+                "Could not list server datasets to check %r", form_id, exc_info=True
+            )
+            return False
+        return form_id in {d["id"] for d in datasets}
+
+    def _download_contract(self, form_id: str) -> tuple[bytes, FormContract]:
+        """Download and parse the deployed form's compiled XML.
+
+        Raises ``_FormXMLUnavailableError``, caused by the original error,
+        when the XML cannot be downloaded or parsed.
+        """
+        try:
+            xml = self._scto_client.download_form_xml(form_id)
+            return xml, parse_contract(xml)
+        except (SurveyCTOAPIError, ParseError, ValueError) as err:
+            raise _FormXMLUnavailableError(
+                str(err), getattr(err, "status_code", None)
+            ) from err
 
     def _import_server_dataset(self, form_config: FormConfig) -> int:
         """Import from server dataset."""
@@ -593,8 +661,7 @@ class SurveyCTOClient:
             private_key = self._import_private_key(form_config.private_key)
 
         # The deployed form's compiled XML types the submissions
-        xml = self._scto_client.download_form_xml(form_config.form_id)
-        contract = parse_contract(xml)
+        xml, contract = self._download_contract(form_config.form_id)
 
         # Get new data
         new_data_json = self._scto_client.download_form_data_json(
@@ -617,7 +684,10 @@ class SurveyCTOClient:
         # Download media if requested
         if form_config.attachments and form_config.save_to:
             self._download_attachments(
-                media_field_names(contract), new_data, form_config, private_key
+                media_columns(contract, new_data.columns),
+                new_data,
+                form_config,
+                private_key,
             )
 
         # Save to DuckDB

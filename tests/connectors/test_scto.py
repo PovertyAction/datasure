@@ -21,6 +21,7 @@ from datasure.connectors.scto import (
     SurveyCTOError,
     SurveyCTOUI,
     download_forms,
+    media_columns,
     media_field_names,
     scto_server_connect,
     typed_frame,
@@ -421,6 +422,46 @@ class TestMediaFieldNames:
     def test_farm_form_photo(self):
         """The farm fixture's one upload is its only media field."""
         assert media_field_names(parse_contract(FARM_XML.encode())) == ["photo"]
+
+
+class TestMediaColumns:
+    """Media columns are the data columns the contract maps to a binary leaf."""
+
+    XML = """<?xml version="1.0"?>
+<h:html xmlns="http://www.w3.org/2002/xforms" xmlns:h="http://www.w3.org/1999/xhtml">
+  <h:head><h:title>Media</h:title><model>
+    <instance><media id="media" version="1">
+      <photo/><photo_1/>
+      <visits><voice/></visits>
+      <meta><instanceID/></meta>
+    </media></instance>
+    <bind nodeset="/media/photo" type="binary"/>
+    <bind nodeset="/media/photo_1" type="int"/>
+    <bind nodeset="/media/visits/voice" type="binary"/>
+    <bind nodeset="/media/meta/instanceID" type="string"/>
+  </model></h:head>
+  <h:body>
+    <upload ref="/media/photo" mediatype="image/*"><label>Photo</label></upload>
+    <input ref="/media/photo_1"><label>Count</label></input>
+    <repeat nodeset="/media/visits">
+      <upload ref="/media/visits/voice" mediatype="audio/*"><label>Voice</label></upload>
+    </repeat>
+  </h:body>
+</h:html>
+"""
+
+    @pytest.fixture
+    def contract(self):
+        return parse_contract(self.XML.encode())
+
+    def test_a_sibling_sharing_the_prefix_is_not_media(self, contract):
+        cols = ["KEY", "photo", "photo_1", "voice_1", "voice_2"]
+
+        assert media_columns(contract, cols) == ["photo", "voice_1", "voice_2"]
+
+    def test_only_columns_in_the_data(self, contract):
+        """No submissions, or an empty repeat, leaves a media field no column."""
+        assert media_columns(contract, ["KEY", "SubmissionDate"]) == []
 
 
 class TestMediaDownloader:
@@ -1030,6 +1071,26 @@ class TestMediaDownloaderExtended:
         # No attachments should be downloaded
         mock_client.download_attachment_from_url.assert_not_called()
 
+    def test_download_field_media_missing_column_is_skipped(self):
+        """A media column absent from the data downloads nothing and does not raise."""
+        mock_client = Mock()
+        downloader = MediaDownloader(mock_client, SurveyCTOConfig())
+        data = pl.DataFrame({"KEY": ["uuid:1"]})
+
+        downloader._download_field_media("text_audit", data, Path("/tmp/m"), None)
+
+        mock_client.download_attachment_from_url.assert_not_called()
+
+    def test_download_field_media_typed_column_is_skipped(self):
+        """A non-string column cannot hold an attachment URL and does not raise."""
+        mock_client = Mock()
+        downloader = MediaDownloader(mock_client, SurveyCTOConfig())
+        data = pl.DataFrame({"KEY": ["uuid:1"], "photo_1": [3]})
+
+        downloader._download_field_media("photo_1", data, Path("/tmp/m"), None)
+
+        mock_client.download_attachment_from_url.assert_not_called()
+
     def test_download_field_media_exception_handling(self, caplog, tmp_path):
         """Test downloading field media with exception handling."""
         mock_client = Mock()
@@ -1162,6 +1223,28 @@ class TestSurveyCTOClientExtended:
 
         client = SurveyCTOClient("test1234")
         api_err = _SurveyCTOAPIError("some completely unmatched error text")
+        with pytest.raises(ConnectionError, match="API error"):
+            client._handle_api_error(api_err, "testserver")
+
+    @pytest.mark.parametrize(
+        ("status", "expected"),
+        [(401, "Invalid credentials"), (403, "forbidden"), (404, "not found")],
+    )
+    def test_handle_api_error_classifies_by_status(self, status, expected):
+        client = SurveyCTOClient("test1234")
+        api_err = SurveyCTOAPIError("request failed", status_code=status)
+
+        with pytest.raises(ConnectionError, match=expected):
+            client._handle_api_error(api_err, "testserver")
+
+    def test_handle_api_error_ignores_keywords_in_the_server_body(self):
+        """A 500 whose body says "connection" or "401" is reported as an API error."""
+        client = SurveyCTOClient("test1234")
+        api_err = SurveyCTOAPIError(
+            "500 Server Error (server said: connection reset; see 401 docs)",
+            status_code=500,
+        )
+
         with pytest.raises(ConnectionError, match="API error"):
             client._handle_api_error(api_err, "testserver")
 
@@ -2226,14 +2309,50 @@ class TestTypedImport:
             client.import_data(form_config)
         client._import_server_dataset.assert_not_called()
 
-    def test_other_form_errors_are_not_retried_as_a_dataset(self, client, form_config):
+    def test_other_xml_errors_raise_for_an_id_off_the_dataset_list(
+        self, client, form_config
+    ):
         client._scto_client.download_form_xml.side_effect = SurveyCTOAPIError("500")
         client._import_server_dataset = Mock()
         form_config.username = "a@b.org"
 
-        with pytest.raises(SurveyCTOAPIError, match="500"):
+        with pytest.raises(SurveyCTOAPIError, match="500") as raised:
             client.import_data(form_config)
-        client._scto_client.list_datasets.assert_not_called()
+        assert type(raised.value) is SurveyCTOAPIError
+        client._import_server_dataset.assert_not_called()
+
+    @pytest.mark.parametrize(
+        "xml_failure",
+        [
+            {"side_effect": SurveyCTOAPIError("403", status_code=403)},
+            {"return_value": b"<html><body>Sign in</body></html>"},
+            {"return_value": b"not xml"},
+        ],
+        ids=["403", "html-200", "non-xml-200"],
+    )
+    def test_any_xml_failure_on_a_dataset_id_imports_as_a_dataset(
+        self, client, xml_failure
+    ):
+        """What SurveyCTO answers for a dataset ID's form XML is undocumented."""
+        client._scto_client.download_form_xml.configure_mock(**xml_failure)
+        client._import_server_dataset = Mock(return_value=4)
+        form_config = FormConfig(
+            alias="prev", form_id="prev_round", server="testserver", username="a@b.org"
+        )
+
+        assert client.import_data(form_config) == 4
+
+    def test_a_failed_dataset_listing_keeps_the_form_error(self, client, form_config):
+        """A wrong form ID reports the 404, not the dataset listing's 403."""
+        client._scto_client.download_form_xml.side_effect = FormNotFoundError("404")
+        client._scto_client.list_datasets.side_effect = SurveyCTOAPIError(
+            "403", status_code=403
+        )
+        client._import_server_dataset = Mock()
+        form_config.username = "a@b.org"
+
+        with pytest.raises(FormNotFoundError):
+            client.import_data(form_config)
         client._import_server_dataset.assert_not_called()
 
     @patch("datasure.connectors.scto.save_form_definition")

@@ -280,12 +280,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   the cast cannot parse in every row stays `String`. Prep or correction steps
   that relied on the old types report `Failed` on the next replay
 - **Form or dataset routing** (#397): `import_data` imports an ID as a server
-  dataset only when its form XML is not found (`FormNotFoundError`, HTTP 404)
-  and the ID is on `list_datasets()`. Any other failed form import raises
-  instead of being retried as a dataset, which turned XML, decryption or
-  network errors into a silent untyped CSV import, or into a misleading 403
-  from the dataset endpoint. A form import makes no dataset call, so accounts
+  dataset only when its form XML cannot be downloaded or parsed and the ID is
+  on `list_datasets()`. The status SurveyCTO answers for a dataset ID's form
+  XML is undocumented, so any XML failure checks the list, not only a 404.
+  Submission, decryption and save errors raise instead of being retried as a
+  dataset, which had turned them into a silent untyped CSV import or a
+  misleading 403 from the dataset endpoint. When the dataset list itself
+  fails (an account without dataset access), the form's own XML error is
+  raised, not the listing's. A form import makes no dataset call, so accounts
   without dataset access import forms as before
+- **Connection errors are classified by HTTP status**:
+  `SurveyCTOClient._handle_api_error` maps 401, 403 and 404 from
+  `status_code`, and matches keywords only for errors with no status. The
+  message now carries SurveyCTO's response body, whose words could match an
+  unrelated keyword
 - **`SurveyCTOAPIClient.list_datasets`** (#397) follows `nextCursor` and
   returns the `data` entries (it returned the first raw page)
 
@@ -338,8 +346,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 - **`DataProcessor`** and `SurveyCTOConfig.date_format`
   (`connectors/scto.py`): replaced by `surveycto.cast`, which also replaces
-  the 1.2.1 date parsing fix (#395). `get_repeat_columns` is a module
-  function for the media download
+  the 1.2.1 date parsing fix (#395)
+- **`get_repeat_columns`**: replaced by `media_columns(contract, columns)`,
+  which picks a media field's columns through `FormContract.map_column`, so
+  a sibling field sharing the prefix (`photo_1` beside `photo`) is never read
+  as media. Typed siblings crashed the import. `MediaDownloader` now takes
+  column names and skips a column that is missing (no submissions, an empty
+  repeat) or not a string
 - **`SurveyCTOClient.get_form_definition`**: the import no longer reads the
   design endpoint. `SurveyCTOAPIClient.download_form_definition` stays for
   the Replication page's XLSForm

@@ -33,7 +33,10 @@ server root.
 
 The design JSON serves only the replication package's XLSForm. Typing and the
 attachment media fields (`media_field_names`: every `binary` bind, uploads as
-well as comments, audits and sensor streams) use the XML. SurveyCTO refuses the
+well as comments, audits and sensor streams) use the XML. The download reads
+`media_columns(contract, columns)`: the data columns `map_column` resolves to a
+binary leaf, so a sibling such as `photo_1` beside `photo` is never read as
+media, and a field with no column is skipped. SurveyCTO refuses the
 design endpoint with HTTP 430, "your Excel form cannot be loaded until it is
 optimized", for some forms whose XML downloads fine. `download_form_xlsx` then
 rebuilds the design-shaped definition from the XML
@@ -41,10 +44,12 @@ rebuilds the design-shaped definition from the XML
 
 ## Import (`SurveyCTOClient.import_data`)
 
-1. Every ID imports as a form first. If its XML download raises
-   `FormNotFoundError` (404) and the ID is on `list_datasets()`, it imports as a
-   server dataset CSV with no typing. Every other error propagates: there is no
-   fallback.
+1. Every ID imports as a form first. If its XML cannot be downloaded or parsed
+   (any status: what SurveyCTO answers for a dataset ID is undocumented) and the
+   ID is on `list_datasets()`, it imports as a server dataset CSV with no
+   typing. Otherwise the XML error itself propagates, also when the dataset
+   listing fails. Errors after the XML step (submissions, decryption, saving)
+   never fall back.
 2. A form import downloads the XML, parses it with `parse_contract`, casts the rows
    with `cast_wide` and converts with `typed_frame`. That gives form types (int ->
    Int64, decimal -> Float64, date -> Date, select_multiple binaries -> Int8,
