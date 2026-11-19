@@ -1956,7 +1956,8 @@ Charts are always on a 0–100% scale, so they compare at a glance across
 enumerators.
 
 High and Moderate results also appear in [Needs attention](#needs-attention)
-as **Flagged** and **Watch** reasons.
+as **Flagged** and **Watch** reasons. A High result with fewer answers than
+**Warn below** appears under **Watch** instead, marked "(low sample)".
 
 ###### Digit Preference
 
