@@ -1,7 +1,6 @@
 """Tests for the SurveyCTO connector module."""
 
-import logging
-from datetime import UTC, date, datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import Mock, patch
 
@@ -22,6 +21,7 @@ from datasure.connectors.scto import (
     SurveyCTOError,
     SurveyCTOUI,
     download_forms,
+    media_field_names,
     scto_server_connect,
     typed_frame,
 )
@@ -377,6 +377,52 @@ class TestSctoFunctions:
             _, _ = manager.get_existing_data("test_alias")
 
 
+class TestMediaFieldNames:
+    """Media fields are read from the compiled form XML."""
+
+    XML = """<?xml version="1.0"?>
+<h:html xmlns="http://www.w3.org/2002/xforms" xmlns:h="http://www.w3.org/1999/xhtml">
+  <h:head><h:title>Media</h:title><model>
+    <instance><media id="media" version="1">
+      <name/><photo/><all_comments/><text_audit/><audio_audit/>
+      <visits><voice/></visits>
+      <meta><instanceID/></meta>
+    </media></instance>
+    <bind nodeset="/media/name" type="string"/>
+    <bind nodeset="/media/photo" type="binary"/>
+    <bind nodeset="/media/all_comments" type="binary" appearance="class=comments"/>
+    <bind nodeset="/media/text_audit" type="binary" appearance="class=textAudit;p=100"/>
+    <bind nodeset="/media/audio_audit" type="binary" appearance="class=audioAudit;s=10-300"/>
+    <bind nodeset="/media/visits/voice" type="binary"/>
+    <bind nodeset="/media/meta/instanceID" type="string"/>
+  </model></h:head>
+  <h:body>
+    <input ref="/media/name"><label>Name</label></input>
+    <upload ref="/media/photo" mediatype="image/*"><label>Photo</label></upload>
+    <repeat nodeset="/media/visits">
+      <upload ref="/media/visits/voice" mediatype="audio/*"><label>Voice</label></upload>
+    </repeat>
+  </h:body>
+</h:html>
+"""
+
+    def test_uploads_comments_audits_and_repeats(self):
+        """Every binary bind is a media field, with or without an upload control."""
+        contract = parse_contract(self.XML.encode())
+
+        assert sorted(media_field_names(contract)) == [
+            "all_comments",
+            "audio_audit",
+            "photo",
+            "text_audit",
+            "voice",
+        ]
+
+    def test_farm_form_photo(self):
+        """The farm fixture's one upload is its only media field."""
+        assert media_field_names(parse_contract(FARM_XML.encode())) == ["photo"]
+
+
 class TestMediaDownloader:
     """Test MediaDownloader class."""
 
@@ -633,58 +679,6 @@ class TestSurveyCTOClient:
         with pytest.raises(ConnectionError, match="Invalid server name"):
             client.connect(credentials)
 
-    def test_get_form_definition_not_connected(self):
-        """Test getting form definition when not connected."""
-        client = SurveyCTOClient("test1234")
-
-        with pytest.raises(ConnectionError, match="Not connected to server"):
-            client.get_form_definition("form123")
-
-    def test_get_form_definition_success(self):
-        """Test getting form definition successfully."""
-        client = SurveyCTOClient("test1234")
-        mock_scto_client = Mock()
-        client._scto_client = mock_scto_client
-
-        form_def = {
-            "fieldsRowsAndColumns": [
-                ["name", "type", "label"],
-                ["question1", "text", "What is your name?"],
-                ["question2", "integer", "What is your age?"],
-            ],
-            "choicesRowsAndColumns": [
-                ["list name", "name", "label"],
-                ["colors", "red", "Red"],
-                ["colors", "blue", "Blue"],
-            ],
-        }
-        mock_scto_client.download_form_definition.return_value = form_def
-
-        questions, choices = client.get_form_definition("form123")
-
-        assert len(questions) == 2
-        assert list(questions.columns) == ["name", "type", "label"]
-        assert questions[0, "name"] == "question1"
-
-        assert len(choices) == 2
-        assert list(choices.columns) == ["list name", "name", "label"]
-        assert choices[0, "name"] == "red"
-
-    def test_get_form_definition_error(self):
-        """Test getting form definition with error."""
-        client = SurveyCTOClient("test1234")
-        mock_scto_client = Mock()
-        client._scto_client = mock_scto_client
-
-        from datasure.utils.scto_api import SurveyCTOAPIError
-
-        mock_scto_client.download_form_definition.side_effect = SurveyCTOAPIError(
-            "API Error"
-        )
-
-        with pytest.raises(SurveyCTOError, match="Failed to get form definition"):
-            client.get_form_definition("form123")
-
     @patch("datasure.connectors.scto.pl.read_csv")
     @patch("datasure.connectors.scto.duckdb_save_table")
     @patch("datasure.connectors.scto.standardize_missing_values")
@@ -787,13 +781,6 @@ class TestSurveyCTOClient:
         mock_downloader = Mock()
         mock_downloader_class.return_value = mock_downloader
 
-        questions = pl.DataFrame(
-            {
-                "type": ["text", "image", "audio", "note"],
-                "name": ["name", "photo", "voice", "notes"],
-            }
-        )
-
         data = pl.DataFrame(
             {"name": ["John"], "photo": ["photo1.jpg"], "voice": ["audio1.wav"]}
         )
@@ -807,7 +794,7 @@ class TestSurveyCTOClient:
         )
 
         client._download_attachments(
-            questions, data, form_config, private_key="test_key"
+            ["photo", "voice"], data, form_config, private_key="test_key"
         )
 
         # Check MediaDownloader was created and called
@@ -818,10 +805,7 @@ class TestSurveyCTOClient:
         args = mock_downloader.download_media_files.call_args[0]
         media_fields, _, media_folder, encryption_key = args
 
-        assert "photo" in media_fields
-        assert "voice" in media_fields
-        assert "name" not in media_fields  # text field
-        assert "notes" not in media_fields  # note field
+        assert media_fields == ["photo", "voice"]
         assert str(media_folder) == str(tmp_path / "media")
         assert encryption_key == "test_key"
 
@@ -1202,7 +1186,6 @@ class TestSurveyCTOClientExtended:
         mock_scto_client = Mock()
         client._scto_client = mock_scto_client
 
-        questions = pl.DataFrame({"type": ["text", "integer"], "name": ["name", "age"]})
         data = pl.DataFrame({"name": ["John"], "age": ["25"]})
         form_config = FormConfig(
             alias="test",
@@ -1210,7 +1193,7 @@ class TestSurveyCTOClientExtended:
             server="testserver",
             save_to=str(tmp_path / "data.csv"),
         )
-        client._download_attachments(questions, data, form_config)
+        client._download_attachments([], data, form_config)
         mock_scto_client.download_attachment_from_url.assert_not_called()
 
 
@@ -2188,21 +2171,17 @@ class TestTypedImport:
 
     @patch("datasure.connectors.scto.save_form_definition")
     @patch("datasure.connectors.scto.duckdb_save_table")
-    def test_attachments_use_the_design_media_fields(
+    def test_attachments_use_the_xml_media_fields(
         self, mock_save, mock_save_definition, client, tmp_path
     ):
+        """Media fields come from the form XML; the design endpoint is not called.
+
+        The design endpoint refuses forms SurveyCTO has not optimized (430).
+        """
         client._download_attachments = Mock()
         client.cache_manager.get_existing_data = Mock(
             return_value=(pl.DataFrame(), SurveyCTOConfig().default_date)
         )
-        client._scto_client.download_form_definition.return_value = {
-            "fieldsRowsAndColumns": [
-                ["name", "type", "disabled"],
-                ["photo", "image", "no"],
-                ["hidden", "image", "yes"],
-            ],
-            "choicesRowsAndColumns": [["list name", "name", "label"]],
-        }
         form_config = FormConfig(
             alias="farm",
             form_id="farm",
@@ -2213,8 +2192,8 @@ class TestTypedImport:
 
         client._import_regular_form(form_config)
 
-        questions = client._download_attachments.call_args[0][0]
-        assert questions["name"].to_list() == ["photo"]
+        assert client._download_attachments.call_args[0][0] == ["photo"]
+        client._scto_client.download_form_definition.assert_not_called()
 
     @patch("datasure.connectors.scto.save_form_definition")
     @patch("datasure.connectors.scto.duckdb_save_table")

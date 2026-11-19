@@ -13,7 +13,7 @@ import streamlit as st
 from pydantic import BaseModel, Field, field_validator
 
 from datasure.surveycto.cast import cast_wide
-from datasure.surveycto.xml_contract import parse_contract
+from datasure.surveycto.xml_contract import FormContract, parse_contract
 from datasure.utils.dataframe_utils import standardize_missing_values
 from datasure.utils.duckdb_utils import (
     duckdb_get_table,
@@ -229,6 +229,23 @@ def get_repeat_columns(field: str, data_cols: list[str]) -> list[str]:
     """Get all columns that belong to a repeat group."""
     pattern = rf"{re.escape(field)}_[0-9]+_{{,1}}[0-9]*_{{,1}}[0-9]*"
     return [col for col in data_cols if re.fullmatch(pattern, col)] or [field]
+
+
+def media_field_names(contract: FormContract) -> list[str]:
+    """Return the names of the form's media fields, in form order.
+
+    The compiled XML binds every media field as ``binary``: uploads (image,
+    audio, video, file) and the fields SurveyCTO fills itself (comments, text
+    and audio audits, sensor streams), which have no upload control. Disabled
+    fields are not compiled, so none is returned.
+    """
+    return list(
+        dict.fromkeys(
+            node.name
+            for node in contract.nodes.values()
+            if node.xml_type == "binary" and node.is_leaf
+        )
+    )
 
 
 class MediaDownloader:
@@ -495,31 +512,6 @@ class SurveyCTOClient:
             )
         raise ConnectionError(f"❌ Failed to create connection: {error}")
 
-    def get_form_definition(self, form_id: str) -> tuple[pl.DataFrame, pl.DataFrame]:
-        """Get form definition (questions and choices)."""
-        if not self._scto_client:
-            raise ConnectionError("Not connected to server")
-
-        try:
-            form_def = self._scto_client.download_form_definition(form_id)
-
-        except SurveyCTOAPIError as e:
-            raise SurveyCTOError(f"Failed to get form definition: {e}") from e
-
-        questions = pl.DataFrame(
-            form_def["fieldsRowsAndColumns"][1:],
-            schema=form_def["fieldsRowsAndColumns"][0],
-            orient="row",
-        )
-
-        choices = pl.DataFrame(
-            form_def["choicesRowsAndColumns"][1:],
-            schema=form_def["choicesRowsAndColumns"][0],
-            orient="row",
-        )
-
-        return questions, choices
-
     def import_data(self, form_config: FormConfig) -> int:
         """Import data from SurveyCTO form."""
         if not self._scto_client:
@@ -624,10 +616,9 @@ class SurveyCTOClient:
 
         # Download media if requested
         if form_config.attachments and form_config.save_to:
-            questions, _ = self.get_form_definition(form_config.form_id)
-            if "disabled" in questions.columns:
-                questions = questions.filter(pl.col("disabled") != "yes")
-            self._download_attachments(questions, new_data, form_config, private_key)
+            self._download_attachments(
+                media_field_names(contract), new_data, form_config, private_key
+            )
 
         # Save to DuckDB
         duckdb_save_table(
@@ -646,20 +637,12 @@ class SurveyCTOClient:
 
     def _download_attachments(
         self,
-        questions: pl.DataFrame,
+        media_fields: list[str],
         data: pl.DataFrame,
         form_config: FormConfig,
         private_key: str | None = None,
     ) -> None:
-        """Download media attachments."""
-        media_types = {e.value for e in MediaType}
-        media_fields = (
-            questions.filter(pl.col("type").is_in(media_types))
-            .select("name")
-            .to_series()
-            .to_list()
-        )
-
+        """Download the attachments of the given media fields."""
         if media_fields:
             media_folder = Path(form_config.save_to).parent / "media"
 
