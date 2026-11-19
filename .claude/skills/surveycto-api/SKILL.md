@@ -31,8 +31,11 @@ server root.
 | `download_form_definition(form_id)` | Console `/forms/{id}/design/`, CSRF login | XLSForm design JSON |
 | `download_attachment_from_url(url, private_key)` | Attachment URL | Bytes |
 
-The design JSON serves the replication package's XLSForm and the media field list
-for attachments. Typing uses the XML.
+The design JSON serves only the replication package's XLSForm. Typing and the
+attachment media fields (`media_field_names`: every `binary` bind, uploads as
+well as comments, audits and sensor streams) use the XML. SurveyCTO refuses the
+design endpoint with HTTP 430, "your Excel form cannot be loaded until it is
+optimized", for some forms whose XML downloads fine.
 
 ## Import (`SurveyCTOClient.import_data`)
 
@@ -55,6 +58,9 @@ for attachments. Typing uses the XML.
   `date=0` is throttled to one full pull per quiet period (HTTP 417), so the floor
   is `SurveyCTOConfig.default_date` (2010-01-01 UTC). Every refresh is a full pull
   until #340 is fixed.
+- **Errors.** Every HTTP error raises `SurveyCTOAPIError` (or `FormNotFoundError`)
+  with `status_code` set and up to 500 characters of the response body in the
+  message, as SurveyCTO explains some statuses, such as 430, only there.
 - **Encrypted forms.** The import log stores the `.pem` path. `_import_private_key`
   reads the key at import time. Without a key, the API returns only the publishable
   fields.

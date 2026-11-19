@@ -9,6 +9,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Typed SurveyCTO import** (#397): `SurveyCTOClient._import_regular_form`
+  (`connectors/scto.py`) downloads the deployed form's compiled XML
+  (`SurveyCTOAPIClient.download_form_xml`, `GET /forms/{id}/xml` with the same
+  Basic auth as the data), parses it with `parse_contract` and casts the wide
+  JSON with `cast_wide`. `typed_frame` converts the Arrow table to Polars,
+  strips the UTC zone from timestamps (stored naive, as before) and keeps
+  `formdef_version` as `Int64` for the enumerator check
+- **Form definitions** (#397): `save_form_definition` / `load_form_definition`
+  (`utils/duckdb_utils.py`) keep the XML in `form_definitions` in
+  `logs.duckdb`, one row per alias and form version. Removing an import
+  removes its rows
+- **`datasure.surveycto`** (#397): the form contract (`xml_contract`,
+  `xpath`) and the typed cast (`cast`), adapted from surveycto_python_dict at
+  `d6f54f9` and maintained in DataSure from now on; `parse_contract` also
+  reads XML bytes. Upstream's offline tests for them are in
+  `tests/surveycto/`
+- **`SurveyCTOAPIError.status_code`**: the HTTP status, or `None` when there
+  was no response. Every HTTP error from `SurveyCTOAPIClient` also includes up
+  to 500 characters of the response body, where SurveyCTO explains statuses
+  such as its non-standard 430
+
 - **Progress tracking-file and master-list modes**: new pure module
   `checks/progress_tracking.py`. `TrackingSettings` (mixed into
   `ProgressSettings`) adds `tracking_target`, `tracking_unit`,
@@ -251,6 +272,23 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Breaking, SurveyCTO column types** (#397): columns take the form's types
+  instead of `DataProcessor`'s. Integers are `Int64` (were `Float64`), dates
+  `Date` (were `Datetime`), numeric select_one codes `Int64` and
+  select_multiple binaries `Int8` with 0 for unchosen options of an answered
+  question (both were `String`), `duration` `Int64` (was `Float64`). A field
+  the cast cannot parse in every row stays `String`. Prep or correction steps
+  that relied on the old types report `Failed` on the next replay
+- **Form or dataset routing** (#397): `import_data` imports an ID as a server
+  dataset only when its form XML is not found (`FormNotFoundError`, HTTP 404)
+  and the ID is on `list_datasets()`. Any other failed form import raises
+  instead of being retried as a dataset, which turned XML, decryption or
+  network errors into a silent untyped CSV import, or into a misleading 403
+  from the dataset endpoint. A form import makes no dataset call, so accounts
+  without dataset access import forms as before
+- **`SurveyCTOAPIClient.list_datasets`** (#397) follows `nextCursor` and
+  returns the `data` entries (it returned the first raw page)
+
 - **Progress page**: Rebuilt as the settings expander
   (`progress_report_settings`, with "Reset filters" beside it, as on
   Summary), then a header shown on every tab (`display_progress_header`:
@@ -298,6 +336,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
+- **`DataProcessor`** and `SurveyCTOConfig.date_format`
+  (`connectors/scto.py`): replaced by `surveycto.cast`, which also replaces
+  the 1.2.1 date parsing fix (#395). `get_repeat_columns` is a module
+  function for the media download
+- **`SurveyCTOClient.get_form_definition`**: the import no longer reads the
+  design endpoint. `SurveyCTOAPIClient.download_form_definition` stays for
+  the Replication page's XLSForm
+
 - **Progress**: The Enumerator setting (dropped from `ProgressSettings` and
   `progress_config`; saved values are ignored, so existing projects need no
   migration), the never-shown consent and completion donut code
@@ -313,6 +359,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   private helpers), replaced by the Follow-up section — #409
 
 ### Fixed
+
+- **SurveyCTO imports failing with HTTP 430**: SurveyCTO refuses the form
+  design endpoint with 430, "your Excel form cannot be loaded until it is
+  optimized", for some forms, and the console offers no way to optimize
+  them
+  - Root cause: the import read column types and attachment media fields
+    from the design endpoint (`get_form_definition`)
+  - Solution: types come from the compiled XML (#397), and the media fields
+    from it too: `media_field_names(contract)` lists every `binary` bind,
+    uploads as well as comments, text and audio audits and sensor streams.
+    Where the design endpoint is still used (the Replication page's XLSForm),
+    a 430 now says the form must be optimized and to contact SurveyCTO
+    support
 
 - **Progress targets**: Targets entered on the Progress page did not load
   back, so the page config's survey target always won on reload
