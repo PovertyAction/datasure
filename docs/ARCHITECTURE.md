@@ -55,6 +55,9 @@ src/datasure/
 │   ├── rename_plan.py      # Rename specs -> old/new pairs, collisions (no Streamlit)
 │   └── row_index.py        # Row-index parsing shared by prep and replication (no Streamlit)
 ├── replication/            # Stata/Python replication package export
+├── surveycto/              # SurveyCTO form contract (xml_contract, xpath) and typed
+│                           # cast, adapted from surveycto_python_dict; maintained here.
+│                           # xlsform rebuilds the design JSON from the XML (HTTP 430)
 ├── models/
 │   ├── schemas.py          # Pydantic models
 │   └── enums.py            # Prep action/method enums
@@ -80,7 +83,12 @@ The `archived/` directory holds legacy code and is gitignored.
 ## Data flow
 
 1. **Import** (`views/import_view.py` + `connectors/`): SurveyCTO API or local
-   files
+   files. A SurveyCTO form is typed from its compiled XML: `connectors/scto.py`
+   downloads it, parses it with `surveycto.xml_contract.parse_contract`, casts the wide
+   JSON with `cast_wide` and keeps the XML per form version in `logs.duckdb`
+   (`form_definitions`), after the raw save. An ID whose form XML cannot be
+   downloaded or parsed, and that is on the server's dataset list, imports as
+   a server dataset CSV instead; any other error fails the import
 2. **Storage**: per-project DuckDB databases via `utils/duckdb_utils.py`
 3. **Preparation** (`views/prep_view.py` + `processing/prep.py`): Polars
    operations recorded in a prep log for reproducibility
@@ -462,8 +470,10 @@ Per project (UUID-keyed):
   `bc_attribution_{page_name_id}`, see [Correction log](#correction-log),
   each check page's check tables, such as the Descriptive Stats column
   selection `descriptive_columns_{page_name_id}`, the project's missing
-  codes `missing_codes_{project_id}`, and the Stata names chosen on the
-  Replication page `stata_names_{alias}`), JSON settings (including
+  codes `missing_codes_{project_id}`, the Stata names chosen on the
+  Replication page `stata_names_{alias}`, and the SurveyCTO form XML
+  `form_definitions`, one row per alias and form version), JSON settings
+  (including
   each check page's, Prepare Data's and Corrections'
   [view state](#view-state)), and credential metadata
 - `cache/projects.json` — the project registry: `name`, `created_at`, and
@@ -625,7 +635,9 @@ selecting an encrypted backend with `PYTHON_KEYRING_BACKEND`.
 ## DataFrames and SQL
 
 Polars is the primary DataFrame library; pandas appears only at interop
-boundaries (some checks, DuckDB `fetchdf`, matplotlib/seaborn charts). DuckDB
+boundaries (some checks, DuckDB `fetchdf`, matplotlib/seaborn charts). The
+`surveycto` modules work on pyarrow tables; `pl.from_arrow` converts
+at the boundary. DuckDB
 table names pass through `_validate_table_name()`; user-supplied values in SQL
 must be parameterized, never f-string interpolated.
 

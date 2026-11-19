@@ -16,6 +16,14 @@ To check which version you have, run `datasure --version`. Versions with `a`, `b
 
 ## Open issues
 
+### KI-036: Some SurveyCTO forms fail to import with a 403 error
+
+- **Status:** 🔴 Open
+- **Affected versions:** 1.3.0a3 and earlier
+- **Symptom:** Importing or refreshing a SurveyCTO form fails with `API request failed: 403 Client Error` for the dataset address, even though your account can open the form in SurveyCTO. With `datasure --logging debug`, the terminal shows an earlier `430 Client Error` for the form's `/design/` address, with the message "your Excel form cannot be loaded until it is optimized". On the **Replication Package** page, the package for that form is built without the questionnaire. SurveyCTO offers no way in its console to optimize a form.
+- **Workaround:** None in DataSure. Ask SurveyCTO support whether they can optimize the form, then import it again.
+- **Issue:** [#469](https://github.com/PovertyAction/datasure/issues/469)
+
 ### KI-035: Targets set on the Progress page reset after a reload
 
 - **Status:** 🟡 Planned for 1.3.0

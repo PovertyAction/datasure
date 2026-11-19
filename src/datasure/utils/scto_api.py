@@ -7,6 +7,8 @@ import openpyxl
 import requests
 from requests.auth import HTTPBasicAuth
 
+from datasure.surveycto.xlsform import design_from_xml
+
 
 @dataclass
 class SurveyCTOAPIConfig:
@@ -26,9 +28,50 @@ class SurveyCTOAPIConfig:
 
 
 class SurveyCTOAPIError(Exception):
-    """Base exception for SurveyCTO API errors."""
+    """Base exception for SurveyCTO API errors.
 
-    pass
+    Attributes
+    ----------
+        status_code: The HTTP status SurveyCTO returned, or None when the
+            request failed without a response (connection error, timeout).
+    """
+
+    def __init__(self, message: str, status_code: int | None = None):
+        super().__init__(message)
+        self.status_code = status_code
+
+
+class FormNotFoundError(SurveyCTOAPIError):
+    """The server has no deployed form with this ID (HTTP 404)."""
+
+
+# Longest part of a response body kept in an error message.
+_MAX_ERROR_BODY = 500
+
+# SurveyCTO's design endpoint returns 430 for a form it has not optimized:
+# "your Excel form cannot be loaded until it is optimized".
+_NOT_OPTIMIZED_STATUS = 430
+
+
+def _http_error(
+    prefix: str,
+    error: requests.exceptions.HTTPError,
+    error_class: type[SurveyCTOAPIError] = SurveyCTOAPIError,
+) -> SurveyCTOAPIError:
+    """Build an error that keeps the HTTP status and the server's explanation.
+
+    SurveyCTO explains some statuses, such as its non-standard 430, only in
+    the response body, which `raise_for_status` leaves out of its message.
+    """
+    response = error.response
+    message = f"{prefix}: {error}"
+    if response is None:
+        return error_class(message)
+    body = response.text if isinstance(response.text, str) else ""
+    body = body.strip()
+    if body:
+        message += f" (server said: {body[:_MAX_ERROR_BODY]})"
+    return error_class(message, status_code=response.status_code)
 
 
 class SurveyCTOAPIClient:
@@ -102,8 +145,9 @@ class SurveyCTOAPIClient:
             return response  # noqa: TRY300
 
         except requests.exceptions.HTTPError as e:
-            self.logger.exception(f"HTTP error for {method} {url}")
-            raise SurveyCTOAPIError(f"API request failed: {e}") from e
+            error = _http_error("API request failed", e)
+            self.logger.exception(f"HTTP error for {method} {url}: {error}")
+            raise error from e
 
         except requests.exceptions.ConnectionError as e:
             self.logger.exception(f"Connection error for {method} {url}")
@@ -120,14 +164,20 @@ class SurveyCTOAPIClient:
     # --- Datasets Endpoints --- #
 
     def list_datasets(self) -> list[dict[str, Any]]:
-        """List all datasets on the server.
+        """List all datasets on the server, following ``nextCursor``.
 
         Returns
         -------
             List of dataset information dictionaries
         """
-        response = self._make_request("GET", "/datasets")
-        return response.json()
+        page = self._make_request("GET", "/datasets").json()
+        datasets = page["data"]
+        while page["nextCursor"]:
+            page = self._make_request(
+                "GET", "/datasets", params={"cursor": page["nextCursor"]}
+            ).json()
+            datasets += page["data"]
+        return datasets
 
     def get_dataset_info(self, dataset_id: str) -> dict[str, Any]:
         """Get information about a specific dataset.
@@ -208,8 +258,9 @@ class SurveyCTOAPIClient:
             return response.json()["forms"]
 
         except requests.exceptions.HTTPError as e:
-            self.logger.exception(f"HTTP error listing forms from {url}")
-            raise SurveyCTOAPIError(f"Failed to list forms: {e}") from e
+            error = _http_error("Failed to list forms", e)
+            self.logger.exception(f"HTTP error listing forms from {url}: {error}")
+            raise error from e
 
         except requests.exceptions.ConnectionError as e:
             self.logger.exception(f"Connection error listing forms from {url}")
@@ -268,10 +319,11 @@ class SurveyCTOAPIClient:
             return headers  # noqa: TRY300
 
         except requests.exceptions.HTTPError as e:
+            error = _http_error("CSRF authentication failed", e)
             self.logger.exception(
-                f"HTTP error during CSRF authentication to {base_url}"
+                f"HTTP error during CSRF authentication to {base_url}: {error}"
             )
-            raise SurveyCTOAPIError(f"CSRF authentication failed: {e}") from e
+            raise error from e
 
         except requests.exceptions.ConnectionError as e:
             self.logger.exception(
@@ -328,8 +380,21 @@ class SurveyCTOAPIClient:
             return response.json()
 
         except requests.exceptions.HTTPError as e:
-            self.logger.exception(f"HTTP error downloading form definition from {url}")
-            raise SurveyCTOAPIError(f"Failed to download form definition: {e}") from e
+            prefix = "Failed to download form definition"
+            if (
+                e.response is not None
+                and e.response.status_code == _NOT_OPTIMIZED_STATUS
+            ):
+                prefix = (
+                    "SurveyCTO cannot provide this form's design until the form "
+                    "is optimized, and the server console offers no way to do "
+                    "that. Contact SurveyCTO support"
+                )
+            error = _http_error(prefix, e)
+            self.logger.exception(
+                f"HTTP error downloading form definition from {url}: {error}"
+            )
+            raise error from e
 
         except requests.exceptions.ConnectionError as e:
             self.logger.exception(
@@ -346,6 +411,49 @@ class SurveyCTOAPIClient:
                 f"Unexpected error downloading form definition from {url}"
             )
             raise SurveyCTOAPIError(f"Unexpected error: {e}") from e
+
+    def download_form_xml(self, form_id: str) -> bytes:
+        """Download the deployed form's compiled XForm XML.
+
+        Parameters
+        ----------
+            form_id: Form identifier
+
+        Returns
+        -------
+            The compiled XML as bytes
+
+        Raises
+        ------
+            SurveyCTOAPIError: If the request fails
+
+        Notes
+        -----
+            Uses the /forms/{form_id}/xml endpoint with the session's Basic
+            auth, the same credentials that download the submissions.
+        """
+        url = f"https://{self.config.server_name}.surveycto.com/forms/{form_id}/xml"
+
+        try:
+            response = self.session.get(url, timeout=self.config.timeout)
+            response.raise_for_status()
+            return response.content  # noqa: TRY300
+
+        except requests.exceptions.HTTPError as e:
+            if e.response is not None and e.response.status_code == 404:
+                error = _http_error(
+                    f"No deployed form {form_id!r}", e, FormNotFoundError
+                )
+            else:
+                error = _http_error("Failed to download form XML", e)
+            self.logger.exception(
+                f"HTTP error downloading form XML from {url}: {error}"
+            )
+            raise error from e
+
+        except requests.exceptions.RequestException as e:
+            self.logger.exception(f"Request error downloading form XML from {url}")
+            raise SurveyCTOAPIError(f"Failed to download form XML: {e}") from e
 
     def download_form_xlsx(self, form_id: str) -> tuple[bytes, dict]:
         """Build an XLSForm-compatible XLSX from the form definition JSON.
@@ -369,14 +477,25 @@ class SurveyCTOAPIClient:
         -----
             SurveyCTO does not expose a public API endpoint for downloading the
             raw XLS form file.  This method instead calls ``download_form_definition``
-            (the same CSRF-authenticated endpoint used by ``get_form_definition`` in
-            the connector) and converts the returned JSON to a standards-compliant
-            XLSForm XLSX in memory.
+            (the CSRF-authenticated design endpoint) and converts the returned JSON
+            to a standards-compliant XLSForm XLSX in memory.
+
+            SurveyCTO refuses the design endpoint with HTTP 430 for a form it has
+            not optimized. The definition is then rebuilt from the compiled form
+            XML (``datasure.surveycto.xlsform.design_from_xml``), and carries
+            ``rebuilt_from_xml: True`` so callers can say so.
         """
         try:
             form_def = self.download_form_definition(form_id)
-        except SurveyCTOAPIError:
-            raise
+        except SurveyCTOAPIError as exc:
+            if exc.status_code != _NOT_OPTIMIZED_STATUS:
+                raise
+            self.logger.warning(
+                "Design of form %s is not available until SurveyCTO optimizes it; "
+                "rebuilding the questionnaire from the compiled form XML",
+                form_id,
+            )
+            form_def = design_from_xml(self.download_form_xml(form_id))
         except Exception as exc:
             raise SurveyCTOAPIError(
                 f"Could not retrieve form definition for '{form_id}': {exc}"
@@ -456,9 +575,16 @@ class SurveyCTOAPIClient:
             response.raise_for_status()
             return response.json()
 
+        except SurveyCTOAPIError:
+            # `_make_request` has already built it, with the HTTP status.
+            raise
+
         except requests.exceptions.HTTPError as e:
-            self.logger.exception(f"HTTP error downloading form data from {url}")
-            raise SurveyCTOAPIError(f"Failed to download form data: {e}") from e
+            error = _http_error("Failed to download form data", e)
+            self.logger.exception(
+                f"HTTP error downloading form data from {url}: {error}"
+            )
+            raise error from e
 
         except requests.exceptions.ConnectionError as e:
             self.logger.exception(f"Connection error downloading form data from {url}")
@@ -521,8 +647,9 @@ class SurveyCTOAPIClient:
             return response.content  # noqa: TRY300
 
         except requests.exceptions.HTTPError as e:
-            self.logger.exception(f"HTTP error downloading from {url}")
-            raise SurveyCTOAPIError(f"Failed to download from URL: {e}") from e
+            error = _http_error("Failed to download from URL", e)
+            self.logger.exception(f"HTTP error downloading from {url}: {error}")
+            raise error from e
 
         except requests.exceptions.ConnectionError as e:
             self.logger.exception(f"Connection error downloading from {url}")

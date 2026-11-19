@@ -1,7 +1,6 @@
 """Tests for the SurveyCTO connector module."""
 
-import logging
-from datetime import UTC, date, datetime
+from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import Mock, patch
 
@@ -12,7 +11,6 @@ from pydantic_core import ValidationError
 from datasure.connectors.scto import (
     CacheManager,
     ConnectionError,
-    DataProcessor,
     FormConfig,
     FormType,
     MediaDownloader,
@@ -23,14 +21,20 @@ from datasure.connectors.scto import (
     SurveyCTOError,
     SurveyCTOUI,
     download_forms,
+    media_columns,
+    media_field_names,
     scto_server_connect,
+    typed_frame,
 )
 from datasure.connectors.scto import (
     ValidationError as SctoValidationError,
 )
-from datasure.utils.dataframe_utils import standardize_missing_values
-from datasure.utils.scto_api import SurveyCTOAPIError
+from datasure.surveycto.cast import cast_wide
+from datasure.surveycto.xml_contract import parse_contract
+from datasure.utils.scto_api import FormNotFoundError, SurveyCTOAPIError
 from datasure.utils.settings_utils import ProjectID
+from tests.surveycto.farm_form import ROWS as FARM_ROWS
+from tests.surveycto.farm_form import XML as FARM_XML
 
 
 @pytest.fixture(autouse=True)
@@ -76,24 +80,20 @@ class TestSurveyCTOConfig:
         assert config.timeout == 30
         assert config.chunk_size == 1000
         assert config.default_date == datetime(2010, 1, 1, tzinfo=UTC)
-        assert config.date_format == "%b %d, %Y %I:%M:%S %p"
 
     def test_config_custom_values(self):
         """Test custom configuration values."""
         custom_date = datetime(2023, 1, 1, 12, 0, 0)
-        custom_format = "%Y-%m-%d %H:%M:%S"
         config = SurveyCTOConfig(
             max_retries=5,
             timeout=60,
             chunk_size=2000,
             default_date=custom_date,
-            date_format=custom_format,
         )
         assert config.max_retries == 5
         assert config.timeout == 60
         assert config.chunk_size == 2000
         assert config.default_date == custom_date
-        assert config.date_format == custom_format
 
 
 class TestProjectID:
@@ -378,263 +378,90 @@ class TestSctoFunctions:
             _, _ = manager.get_existing_data("test_alias")
 
 
-class TestDataProcessor:
-    """Test DataProcessor class."""
+class TestMediaFieldNames:
+    """Media fields are read from the compiled form XML."""
 
-    def test_data_processor_init(self):
-        """Test DataProcessor initialization."""
-        processor = DataProcessor()
-        assert hasattr(processor, "logger")
+    XML = """<?xml version="1.0"?>
+<h:html xmlns="http://www.w3.org/2002/xforms" xmlns:h="http://www.w3.org/1999/xhtml">
+  <h:head><h:title>Media</h:title><model>
+    <instance><media id="media" version="1">
+      <name/><photo/><all_comments/><text_audit/><audio_audit/>
+      <visits><voice/></visits>
+      <meta><instanceID/></meta>
+    </media></instance>
+    <bind nodeset="/media/name" type="string"/>
+    <bind nodeset="/media/photo" type="binary"/>
+    <bind nodeset="/media/all_comments" type="binary" appearance="class=comments"/>
+    <bind nodeset="/media/text_audit" type="binary" appearance="class=textAudit;p=100"/>
+    <bind nodeset="/media/audio_audit" type="binary" appearance="class=audioAudit;s=10-300"/>
+    <bind nodeset="/media/visits/voice" type="binary"/>
+    <bind nodeset="/media/meta/instanceID" type="string"/>
+  </model></h:head>
+  <h:body>
+    <input ref="/media/name"><label>Name</label></input>
+    <upload ref="/media/photo" mediatype="image/*"><label>Photo</label></upload>
+    <repeat nodeset="/media/visits">
+      <upload ref="/media/visits/voice" mediatype="audio/*"><label>Voice</label></upload>
+    </repeat>
+  </h:body>
+</h:html>
+"""
 
-    def test_get_repeat_fields_empty(self):
-        """Test getting repeat fields from empty DataFrame."""
-        processor = DataProcessor()
-        questions = pl.DataFrame({"type": [], "name": []})
+    def test_uploads_comments_audits_and_repeats(self):
+        """Every binary bind is a media field, with or without an upload control."""
+        contract = parse_contract(self.XML.encode())
 
-        result = processor.get_repeat_fields(questions)
-        assert result == []
-
-    def test_get_repeat_fields_no_repeats(self):
-        """Test getting repeat fields with no repeat groups."""
-        processor = DataProcessor()
-        questions = pl.DataFrame(
-            {
-                "type": ["text", "integer", "select_one"],
-                "name": ["name", "age", "gender"],
-            }
-        )
-
-        result = processor.get_repeat_fields(questions)
-        assert result == []
-
-    def test_get_repeat_fields_with_repeats(self):
-        """Test getting repeat fields with repeat groups."""
-        processor = DataProcessor()
-        questions = pl.DataFrame(
-            {
-                "type": [
-                    "begin repeat",
-                    "text",
-                    "integer",
-                    "end repeat",
-                    "begin repeat",
-                    "text",
-                    "end repeat",
-                    "text",
-                ],
-                "name": [
-                    "household",
-                    "member_name",
-                    "member_age",
-                    "",
-                    "assets",
-                    "asset_name",
-                    "",
-                    "notes",
-                ],
-            }
-        )
-
-        result = processor.get_repeat_fields(questions)
-        assert "member_name" in result
-        assert "member_age" in result
-        assert "asset_name" in result
-        assert "notes" not in result
-
-    def test_get_repeat_fields_nested_repeats(self):
-        """Test getting repeat fields with nested repeat groups."""
-        processor = DataProcessor()
-        questions = pl.DataFrame(
-            {
-                "type": [
-                    "begin repeat",
-                    "begin repeat",
-                    "text",
-                    "end repeat",
-                    "end repeat",
-                ],
-                "name": ["household", "members", "name", "", ""],
-            }
-        )
-
-        result = processor.get_repeat_fields(questions)
-        assert "name" in result
-
-    def test_get_repeat_columns_no_matches(self):
-        """Test getting repeat columns with no matches."""
-        processor = DataProcessor()
-        result = processor.get_repeat_columns("nonexistent", ["col1", "col2"])
-        assert result == ["nonexistent"]
-
-    def test_get_repeat_columns_with_matches(self):
-        """Test getting repeat columns with matches."""
-        processor = DataProcessor()
-        data_cols = [
-            "household_1",
-            "household_2",
-            "household_1_2",
-            "other_field",
-            "household_info",
+        assert sorted(media_field_names(contract)) == [
+            "all_comments",
+            "audio_audit",
+            "photo",
+            "text_audit",
+            "voice",
         ]
 
-        result = processor.get_repeat_columns("household", data_cols)
-        expected = ["household_1", "household_2", "household_1_2"]
-        assert result == expected
+    def test_farm_form_photo(self):
+        """The farm fixture's one upload is its only media field."""
+        assert media_field_names(parse_contract(FARM_XML.encode())) == ["photo"]
 
-    def test_convert_data_types_datetime_columns(self):
-        """Test converting datetime columns."""
-        processor = DataProcessor()
-        data = pl.DataFrame(
-            {
-                "CompletionDate": [
-                    "Jan 15, 2024 10:30:00 AM",
-                    "Jan 16, 2024 11:30:00 AM",
-                ],
-                "SubmissionDate": [
-                    "Jan 15, 2024 10:30:00 AM",
-                    "Jan 16, 2024 11:30:00 AM",
-                ],
-                "starttime": ["Jan 15, 2024 10:30:00 AM", "Jan 16, 2024 11:30:00 AM"],
-                "endtime": ["Jan 15, 2024 12:30:00 PM", "Jan 16, 2024 01:30:00 PM"],
-            }
-        )
-        questions = pl.DataFrame({"type": [], "name": []})
 
-        result = processor.convert_data_types(data, questions)
+class TestMediaColumns:
+    """Media columns are the data columns the contract maps to a binary leaf."""
 
-        assert result["CompletionDate"].dtype in [
-            pl.Datetime,
-            pl.Datetime("ms"),
-            pl.Datetime("us"),
-            pl.Datetime("ns"),
-        ]
-        assert result["SubmissionDate"].dtype in [
-            pl.Datetime,
-            pl.Datetime("ms"),
-            pl.Datetime("us"),
-            pl.Datetime("ns"),
-        ]
-        assert result["starttime"].dtype in [
-            pl.Datetime,
-            pl.Datetime("ms"),
-            pl.Datetime("us"),
-            pl.Datetime("ns"),
-        ]
-        assert result["endtime"].dtype in [
-            pl.Datetime,
-            pl.Datetime("ms"),
-            pl.Datetime("us"),
-            pl.Datetime("ns"),
-        ]
+    XML = """<?xml version="1.0"?>
+<h:html xmlns="http://www.w3.org/2002/xforms" xmlns:h="http://www.w3.org/1999/xhtml">
+  <h:head><h:title>Media</h:title><model>
+    <instance><media id="media" version="1">
+      <photo/><photo_1/>
+      <visits><voice/></visits>
+      <meta><instanceID/></meta>
+    </media></instance>
+    <bind nodeset="/media/photo" type="binary"/>
+    <bind nodeset="/media/photo_1" type="int"/>
+    <bind nodeset="/media/visits/voice" type="binary"/>
+    <bind nodeset="/media/meta/instanceID" type="string"/>
+  </model></h:head>
+  <h:body>
+    <upload ref="/media/photo" mediatype="image/*"><label>Photo</label></upload>
+    <input ref="/media/photo_1"><label>Count</label></input>
+    <repeat nodeset="/media/visits">
+      <upload ref="/media/visits/voice" mediatype="audio/*"><label>Voice</label></upload>
+    </repeat>
+  </h:body>
+</h:html>
+"""
 
-    def test_convert_data_types_numeric_columns(self):
-        """Test converting numeric columns."""
-        processor = DataProcessor()
-        data = pl.DataFrame({"duration": ["120", "180"], "formdef_version": ["1", "2"]})
-        questions = pl.DataFrame({"type": [], "name": []})
+    @pytest.fixture
+    def contract(self):
+        return parse_contract(self.XML.encode())
 
-        result = processor.convert_data_types(data, questions)
+    def test_a_sibling_sharing_the_prefix_is_not_media(self, contract):
+        cols = ["KEY", "photo", "photo_1", "voice_1", "voice_2"]
 
-        assert result["duration"].dtype == pl.Float64
-        assert result["formdef_version"].dtype == pl.Float64
+        assert media_columns(contract, cols) == ["photo", "voice_1", "voice_2"]
 
-    def test_convert_data_types_form_based(self):
-        """Test converting data types based on form definition."""
-        processor = DataProcessor()
-        data = pl.DataFrame(
-            {
-                "age": ["25", "30"],
-                # Formats the SurveyCTO wide JSON API sends
-                "birth_date": ["Jan 15, 2000", "May 20, 1995"],
-                "visit_at": ["Mar 7, 2025 4:06:12 PM", "Mar 17, 2025 12:30:00 AM"],
-                "survey_time": ["10:30:00", "14:15:00"],
-                "notes": ["Note 1", "Note 2"],
-            }
-        )
-        questions = pl.DataFrame(
-            {
-                "type": ["integer", "date", "datetime", "time", "note"],
-                "name": ["age", "birth_date", "visit_at", "survey_time", "notes"],
-            }
-        )
-
-        result = processor.convert_data_types(data, questions)
-
-        assert result["age"].dtype == pl.Float64
-        assert result["birth_date"].dtype == pl.Date
-        assert result["birth_date"].to_list() == [
-            date(2000, 1, 15),
-            date(1995, 5, 20),
-        ]
-        assert result["visit_at"].dtype == pl.Datetime
-        assert result["visit_at"].to_list() == [
-            datetime(2025, 3, 7, 16, 6, 12),
-            datetime(2025, 3, 17, 0, 30, 0),
-        ]
-        # time fields stay text: their wide-JSON format is not confirmed
-        assert result["survey_time"].to_list() == ["10:30:00", "14:15:00"]
-        assert "notes" not in result.columns  # Note fields are dropped
-
-    def test_convert_data_types_dates_keep_skipped_answers_null(self):
-        """Skipped date answers stay null without failing the column (#395)."""
-        processor = DataProcessor()
-        data = standardize_missing_values(
-            pl.DataFrame(
-                {
-                    "visit_date": ["Mar 7, 2025", ""],
-                    "visit_at": ["", "Mar 7, 2025 4:06:12 PM"],
-                }
-            )
-        )
-        questions = pl.DataFrame(
-            {"type": ["date", "datetime"], "name": ["visit_date", "visit_at"]}
-        )
-
-        result = processor.convert_data_types(data, questions)
-
-        assert result["visit_date"].to_list() == [date(2025, 3, 7), None]
-        assert result["visit_at"].to_list() == [None, datetime(2025, 3, 7, 16, 6, 12)]
-
-    def test_convert_data_types_unexpected_date_format_stays_text(self, caplog):
-        """A date in an unexpected format keeps the column as text (#395)."""
-        processor = DataProcessor()
-        data = pl.DataFrame({"visit_date": ["Mar 7, 2025", "2025-03-08"]})
-        questions = pl.DataFrame({"type": ["date"], "name": ["visit_date"]})
-
-        with caplog.at_level(logging.WARNING):
-            result = processor.convert_data_types(data, questions)
-
-        assert result["visit_date"].to_list() == ["Mar 7, 2025", "2025-03-08"]
-        assert "Failed to convert column visit_date" in caplog.text
-
-    def test_convert_data_types_with_repeat_fields(self):
-        """Test converting data types with repeat fields."""
-        processor = DataProcessor()
-        data = pl.DataFrame(
-            {"member_age_1": ["25", "30"], "member_age_2": ["28", "35"]}
-        )
-        questions = pl.DataFrame(
-            {
-                "type": ["begin repeat", "integer", "end repeat"],
-                "name": ["members", "member_age", ""],
-            }
-        )
-
-        result = processor.convert_data_types(data, questions)
-
-        assert result["member_age_1"].dtype == pl.Float64
-        assert result["member_age_2"].dtype == pl.Float64
-
-    def test_convert_data_types_error_handling(self, caplog):
-        """Test data type conversion error handling."""
-        processor = DataProcessor()
-        data = pl.DataFrame({"invalid_date": ["not-a-date", "also-not-date"]})
-        questions = pl.DataFrame({"type": ["date"], "name": ["invalid_date"]})
-
-        result = processor.convert_data_types(data, questions)
-
-        # Should handle errors gracefully
-        assert "invalid_date" in result.columns
+    def test_only_columns_in_the_data(self, contract):
+        """No submissions, or an empty repeat, leaves a media field no column."""
+        assert media_columns(contract, ["KEY", "SubmissionDate"]) == []
 
 
 class TestMediaDownloader:
@@ -759,7 +586,6 @@ class TestSurveyCTOClient:
         assert client.project_id == "test1234"
         assert isinstance(client.config, SurveyCTOConfig)
         assert isinstance(client.cache_manager, CacheManager)
-        assert isinstance(client.data_processor, DataProcessor)
         assert client._scto_client is None
 
     def test_client_init_with_config(self):
@@ -894,58 +720,6 @@ class TestSurveyCTOClient:
         with pytest.raises(ConnectionError, match="Invalid server name"):
             client.connect(credentials)
 
-    def test_get_form_definition_not_connected(self):
-        """Test getting form definition when not connected."""
-        client = SurveyCTOClient("test1234")
-
-        with pytest.raises(ConnectionError, match="Not connected to server"):
-            client.get_form_definition("form123")
-
-    def test_get_form_definition_success(self):
-        """Test getting form definition successfully."""
-        client = SurveyCTOClient("test1234")
-        mock_scto_client = Mock()
-        client._scto_client = mock_scto_client
-
-        form_def = {
-            "fieldsRowsAndColumns": [
-                ["name", "type", "label"],
-                ["question1", "text", "What is your name?"],
-                ["question2", "integer", "What is your age?"],
-            ],
-            "choicesRowsAndColumns": [
-                ["list name", "name", "label"],
-                ["colors", "red", "Red"],
-                ["colors", "blue", "Blue"],
-            ],
-        }
-        mock_scto_client.download_form_definition.return_value = form_def
-
-        questions, choices = client.get_form_definition("form123")
-
-        assert len(questions) == 2
-        assert list(questions.columns) == ["name", "type", "label"]
-        assert questions[0, "name"] == "question1"
-
-        assert len(choices) == 2
-        assert list(choices.columns) == ["list name", "name", "label"]
-        assert choices[0, "name"] == "red"
-
-    def test_get_form_definition_error(self):
-        """Test getting form definition with error."""
-        client = SurveyCTOClient("test1234")
-        mock_scto_client = Mock()
-        client._scto_client = mock_scto_client
-
-        from datasure.utils.scto_api import SurveyCTOAPIError
-
-        mock_scto_client.download_form_definition.side_effect = SurveyCTOAPIError(
-            "API Error"
-        )
-
-        with pytest.raises(SurveyCTOError, match="Failed to get form definition"):
-            client.get_form_definition("form123")
-
     @patch("datasure.connectors.scto.pl.read_csv")
     @patch("datasure.connectors.scto.duckdb_save_table")
     @patch("datasure.connectors.scto.standardize_missing_values")
@@ -990,78 +764,6 @@ class TestSurveyCTOClient:
         assert result == 0
         mock_scto_client.get_form_data.assert_not_called()
         mock_save_table.assert_not_called()
-
-    @patch("datasure.connectors.scto.standardize_missing_values")
-    @patch("datasure.connectors.scto.duckdb_save_table")
-    def test_import_regular_form_with_refresh(self, mock_save_table, mock_standardize):
-        """Test importing regular form with refresh=True."""
-        client = SurveyCTOClient("test1234")
-        mock_scto_client = Mock()
-        client._scto_client = mock_scto_client
-
-        # Mock form data response
-        form_data = [
-            {"name": "John", "age": 25, "CompletionDate": "2024-01-15"},
-            {"name": "Jane", "age": 30, "CompletionDate": "2024-01-16"},
-        ]
-        mock_scto_client.download_form_data_json.return_value = form_data
-
-        # Mock form definition
-        mock_scto_client.download_form_definition.return_value = {
-            "fieldsRowsAndColumns": [
-                ["name", "type", "disabled"],
-                ["name", "text", "no"],
-                ["age", "integer", "no"],
-            ],
-            "choicesRowsAndColumns": [["list name", "name", "label"]],
-        }
-
-        # Mock standardize_missing_values to return the data unchanged
-        mock_standardize.side_effect = lambda x: x
-
-        form_config = FormConfig(
-            alias="test_form", form_id="form123", server="testserver", refresh=True
-        )
-
-        result = client._import_regular_form(form_config)
-
-        assert result == 2
-        mock_scto_client.download_form_data_json.assert_called_once()
-        mock_save_table.assert_called_once()
-
-    @patch("datasure.connectors.scto.retrieve_scto_credentials")
-    @patch("datasure.connectors.scto.SurveyCTOAPIClient")
-    def test_import_data_connection_fallback(
-        self, mock_scto_class, mock_retrieve_credentials
-    ):
-        """Test import_data with connection fallback."""
-        client = SurveyCTOClient("test1234")
-
-        # Mock credential retrieval
-        mock_retrieve_credentials.return_value = {
-            "credentials": {"password": "password"}
-        }
-
-        # Mock SurveyCTO object creation
-        mock_scto_instance = Mock()
-        mock_scto_class.return_value = mock_scto_instance
-
-        # Mock _import_regular_form to fail and _import_server_dataset to succeed
-        client._import_regular_form = Mock(side_effect=Exception("Not a regular form"))
-        client._import_server_dataset = Mock(return_value=5)
-
-        form_config = FormConfig(
-            alias="test_form",
-            form_id="form123",
-            server="testserver",
-            username="user@example.com",
-        )
-
-        result = client.import_data(form_config)
-
-        assert result == 5
-        client._import_regular_form.assert_called_once_with(form_config)
-        client._import_server_dataset.assert_called_once_with(form_config)
 
     @patch("datasure.connectors.scto.retrieve_scto_credentials")
     def test_import_data_missing_credentials(self, mock_retrieve_credentials):
@@ -1120,13 +822,6 @@ class TestSurveyCTOClient:
         mock_downloader = Mock()
         mock_downloader_class.return_value = mock_downloader
 
-        questions = pl.DataFrame(
-            {
-                "type": ["text", "image", "audio", "note"],
-                "name": ["name", "photo", "voice", "notes"],
-            }
-        )
-
         data = pl.DataFrame(
             {"name": ["John"], "photo": ["photo1.jpg"], "voice": ["audio1.wav"]}
         )
@@ -1140,7 +835,7 @@ class TestSurveyCTOClient:
         )
 
         client._download_attachments(
-            questions, data, form_config, private_key="test_key"
+            ["photo", "voice"], data, form_config, private_key="test_key"
         )
 
         # Check MediaDownloader was created and called
@@ -1151,10 +846,7 @@ class TestSurveyCTOClient:
         args = mock_downloader.download_media_files.call_args[0]
         media_fields, _, media_folder, encryption_key = args
 
-        assert "photo" in media_fields
-        assert "voice" in media_fields
-        assert "name" not in media_fields  # text field
-        assert "notes" not in media_fields  # note field
+        assert media_fields == ["photo", "voice"]
         assert str(media_folder) == str(tmp_path / "media")
         assert encryption_key == "test_key"
 
@@ -1379,6 +1071,26 @@ class TestMediaDownloaderExtended:
         # No attachments should be downloaded
         mock_client.download_attachment_from_url.assert_not_called()
 
+    def test_download_field_media_missing_column_is_skipped(self):
+        """A media column absent from the data downloads nothing and does not raise."""
+        mock_client = Mock()
+        downloader = MediaDownloader(mock_client, SurveyCTOConfig())
+        data = pl.DataFrame({"KEY": ["uuid:1"]})
+
+        downloader._download_field_media("text_audit", data, Path("/tmp/m"), None)
+
+        mock_client.download_attachment_from_url.assert_not_called()
+
+    def test_download_field_media_typed_column_is_skipped(self):
+        """A non-string column cannot hold an attachment URL and does not raise."""
+        mock_client = Mock()
+        downloader = MediaDownloader(mock_client, SurveyCTOConfig())
+        data = pl.DataFrame({"KEY": ["uuid:1"], "photo_1": [3]})
+
+        downloader._download_field_media("photo_1", data, Path("/tmp/m"), None)
+
+        mock_client.download_attachment_from_url.assert_not_called()
+
     def test_download_field_media_exception_handling(self, caplog, tmp_path):
         """Test downloading field media with exception handling."""
         mock_client = Mock()
@@ -1495,20 +1207,6 @@ class TestCacheManagerExtended:
         assert date == SurveyCTOConfig().default_date
 
 
-class TestDataProcessorExtended:
-    """Extended tests for DataProcessor covering the PolarsError branch."""
-
-    def test_convert_column_by_type_polars_error(self):
-        """Test that PolarsError is caught and original data is returned."""
-        processor = DataProcessor()
-        mock_data = Mock(spec=pl.DataFrame)
-        mock_data.with_columns.side_effect = pl.exceptions.InvalidOperationError(
-            "type mismatch"
-        )
-        result = processor._convert_column_by_type(mock_data, "date_col", "date")
-        assert result is mock_data
-
-
 class TestSurveyCTOClientExtended:
     """Extended tests for SurveyCTOClient covering previously uncovered paths."""
 
@@ -1528,6 +1226,28 @@ class TestSurveyCTOClientExtended:
         with pytest.raises(ConnectionError, match="API error"):
             client._handle_api_error(api_err, "testserver")
 
+    @pytest.mark.parametrize(
+        ("status", "expected"),
+        [(401, "Invalid credentials"), (403, "forbidden"), (404, "not found")],
+    )
+    def test_handle_api_error_classifies_by_status(self, status, expected):
+        client = SurveyCTOClient("test1234")
+        api_err = SurveyCTOAPIError("request failed", status_code=status)
+
+        with pytest.raises(ConnectionError, match=expected):
+            client._handle_api_error(api_err, "testserver")
+
+    def test_handle_api_error_ignores_keywords_in_the_server_body(self):
+        """A 500 whose body says "connection" or "401" is reported as an API error."""
+        client = SurveyCTOClient("test1234")
+        api_err = SurveyCTOAPIError(
+            "500 Server Error (server said: connection reset; see 401 docs)",
+            status_code=500,
+        )
+
+        with pytest.raises(ConnectionError, match="API error"):
+            client._handle_api_error(api_err, "testserver")
+
     def test_handle_connection_error_generic(self):
         """Test _handle_connection_error for non-server-name errors."""
         client = SurveyCTOClient("test1234")
@@ -1543,176 +1263,12 @@ class TestSurveyCTOClientExtended:
         with pytest.raises(ValueError, match="Server and username must be provided"):
             client.import_data(form_config)
 
-    @patch("datasure.connectors.scto.standardize_missing_values")
-    @patch("datasure.connectors.scto.duckdb_save_table")
-    def test_import_regular_form_loads_private_key(
-        self, mock_save, mock_standardize, tmp_path
-    ):
-        """Test _import_regular_form passes key file PEM content to the API."""
-        client = SurveyCTOClient("test1234")
-        mock_scto_client = Mock()
-        client._scto_client = mock_scto_client
-
-        mock_scto_client.download_form_data_json.return_value = [{"name": "John"}]
-        mock_scto_client.download_form_definition.return_value = {
-            "fieldsRowsAndColumns": [["name", "type"], ["name", "text"]],
-            "choicesRowsAndColumns": [["list name", "name", "label"]],
-        }
-        mock_standardize.side_effect = lambda x: x
-
-        key_file = tmp_path / "key.pem"
-        key_content = (
-            "-----BEGIN RSA PRIVATE KEY" + "-----\ntest\n-----END RSA PRIVATE KEY-----"
-        )
-        key_file.write_text(key_content)
-
-        form_config = FormConfig(
-            alias="test_form",
-            form_id="form123",
-            server="testserver",
-            private_key=str(key_file),
-        )
-        result = client._import_regular_form(form_config)
-
-        assert result == 1
-        call_kwargs = mock_scto_client.download_form_data_json.call_args.kwargs
-        assert call_kwargs.get("private_key") == key_content.strip()
-
-    @patch("datasure.connectors.scto.standardize_missing_values")
-    @patch("datasure.connectors.scto.duckdb_save_table")
-    def test_import_regular_form_concats_existing_data(
-        self, mock_save, mock_standardize
-    ):
-        """Test _import_regular_form concatenates new rows onto existing data."""
-        client = SurveyCTOClient("test1234")
-        mock_scto_client = Mock()
-        client._scto_client = mock_scto_client
-
-        existing_df = pl.DataFrame({"name": ["Alice"], "age": ["20"]})
-        client.cache_manager.get_existing_data = Mock(
-            return_value=(existing_df, datetime(2024, 1, 1))
-        )
-
-        mock_scto_client.download_form_data_json.return_value = [
-            {"name": "John", "age": "25"}
-        ]
-        mock_scto_client.download_form_definition.return_value = {
-            "fieldsRowsAndColumns": [["name", "type"], ["name", "text"]],
-            "choicesRowsAndColumns": [["list name", "name", "label"]],
-        }
-        mock_standardize.side_effect = lambda x: x
-
-        form_config = FormConfig(
-            alias="test_form",
-            form_id="form123",
-            server="testserver",
-            save_to="/some/path/data.csv",
-        )
-        result = client._import_regular_form(form_config)
-
-        assert result == 1
-        saved_df = mock_save.call_args[0][1]
-        assert len(saved_df) == 2
-
-    @patch("datasure.connectors.scto.standardize_missing_values")
-    @patch("datasure.connectors.scto.duckdb_save_table")
-    def test_import_regular_form_first_import_sends_2010_date(
-        self, mock_save, mock_standardize
-    ):
-        """Test a first import requests submissions completed after 2010-01-01 UTC."""
-        client = SurveyCTOClient("test1234")
-        mock_scto_client = Mock()
-        client._scto_client = mock_scto_client
-
-        mock_scto_client.download_form_data_json.return_value = [{"name": "John"}]
-        mock_scto_client.download_form_definition.return_value = {
-            "fieldsRowsAndColumns": [["name", "type"], ["name", "text"]],
-            "choicesRowsAndColumns": [["list name", "name", "label"]],
-        }
-        mock_standardize.side_effect = lambda x: x
-
-        form_config = FormConfig(
-            alias="test_form", form_id="form123", server="testserver"
-        )
-        client._import_regular_form(form_config)
-
-        params = mock_scto_client.download_form_data_json.call_args.kwargs["params"]
-        assert params == {"date": 1262304000}
-
-    @patch("datasure.connectors.scto.standardize_missing_values")
-    @patch("datasure.connectors.scto.duckdb_save_table")
-    def test_import_regular_form_filters_disabled_questions(
-        self, mock_save, mock_standardize
-    ):
-        """Test _import_regular_form filters out disabled questions."""
-        client = SurveyCTOClient("test1234")
-        mock_scto_client = Mock()
-        client._scto_client = mock_scto_client
-
-        mock_scto_client.download_form_data_json.return_value = [{"name": "John"}]
-        mock_scto_client.download_form_definition.return_value = {
-            "fieldsRowsAndColumns": [
-                ["name", "type", "disabled"],
-                ["name", "text", "no"],
-                ["hidden_field", "text", "yes"],
-            ],
-            "choicesRowsAndColumns": [["list name", "name", "label"]],
-        }
-        mock_standardize.side_effect = lambda x: x
-
-        form_config = FormConfig(
-            alias="test_form", form_id="form123", server="testserver"
-        )
-        result = client._import_regular_form(form_config)
-
-        assert result == 1
-
-    @patch("datasure.connectors.scto.standardize_missing_values")
-    @patch("datasure.connectors.scto.duckdb_save_table")
-    def test_import_regular_form_triggers_attachment_download(
-        self, mock_save, mock_standardize, tmp_path
-    ):
-        """Test _import_regular_form calls _download_attachments when configured."""
-        client = SurveyCTOClient("test1234")
-        mock_scto_client = Mock()
-        client._scto_client = mock_scto_client
-        client._download_attachments = Mock()
-        client.cache_manager.get_existing_data = Mock(
-            return_value=(pl.DataFrame(), SurveyCTOConfig().default_date)
-        )
-
-        mock_scto_client.download_form_data_json.return_value = [
-            {"name": "John", "photo": "photo1.jpg"}
-        ]
-        mock_scto_client.download_form_definition.return_value = {
-            "fieldsRowsAndColumns": [
-                ["name", "type"],
-                ["name", "text"],
-                ["photo", "image"],
-            ],
-            "choicesRowsAndColumns": [["list name", "name", "label"]],
-        }
-        mock_standardize.side_effect = lambda x: x
-
-        form_config = FormConfig(
-            alias="test_form",
-            form_id="form123",
-            server="testserver",
-            save_to=str(tmp_path / "data.csv"),
-            attachments=True,
-        )
-        result = client._import_regular_form(form_config)
-
-        assert result == 1
-        client._download_attachments.assert_called_once()
-
     def test_download_attachments_no_media_fields_skips_download(self, tmp_path):
         """Test _download_attachments does nothing when no media fields exist."""
         client = SurveyCTOClient("test1234")
         mock_scto_client = Mock()
         client._scto_client = mock_scto_client
 
-        questions = pl.DataFrame({"type": ["text", "integer"], "name": ["name", "age"]})
         data = pl.DataFrame({"name": ["John"], "age": ["25"]})
         form_config = FormConfig(
             alias="test",
@@ -1720,7 +1276,7 @@ class TestSurveyCTOClientExtended:
             server="testserver",
             save_to=str(tmp_path / "data.csv"),
         )
-        client._download_attachments(questions, data, form_config)
+        client._download_attachments([], data, form_config)
         mock_scto_client.download_attachment_from_url.assert_not_called()
 
 
@@ -2569,15 +2125,283 @@ class TestSurveyCTOUIRendering:
         mock_scto_client = Mock()
         client._scto_client = mock_scto_client
 
-        mock_scto_client.download_form_data_json.return_value = [{"name": "Alice"}]
-        mock_scto_client.download_form_definition.return_value = {
-            "fieldsRowsAndColumns": [["name", "type"], ["name", "text"]],
-            "choicesRowsAndColumns": [["list name", "name", "label"]],
-        }
+        mock_scto_client.list_datasets.return_value = []
+        mock_scto_client.download_form_xml.return_value = FARM_XML.encode()
+        mock_scto_client.download_form_data_json.return_value = FARM_ROWS
         mock_standardize.side_effect = lambda x: x
 
-        form_config = FormConfig(
-            alias="test_form", form_id="form123", server="testserver"
+        form_config = FormConfig(alias="farm", form_id="farm", server="testserver")
+        with patch("datasure.connectors.scto.save_form_definition"):
+            result = client.import_data(form_config)
+        assert result == len(FARM_ROWS)
+
+
+# A form whose choice list is filtered with normalize-space(), which the
+# expression evaluator does not implement.
+_UNSUPPORTED_FILTER_XML = b"""<?xml version="1.0"?>
+<h:html xmlns="http://www.w3.org/2002/xforms" xmlns:h="http://www.w3.org/1999/xhtml">
+  <h:head><model>
+    <instance><farm id="farm" version="3"><size/></farm></instance>
+    <instance id="sizes"><root>
+      <item><label>Small</label><name>1</name><band>a</band></item>
+      <item><label>Large</label><name>2</name><band>b</band></item>
+    </root></instance>
+    <bind nodeset="/farm/size" type="select1"/>
+  </model></h:head>
+  <h:body>
+    <select1 ref="/farm/size"><label>Size</label>
+      <itemset nodeset="instance('sizes')/root/item[normalize-space(band) = 'a']">
+        <value ref="name"/><label ref="label"/>
+      </itemset>
+    </select1>
+  </h:body>
+</h:html>
+"""
+
+
+class TestTypedImport:
+    """The SurveyCTO import types submissions from the form's compiled XML."""
+
+    @pytest.fixture
+    def client(self):
+        client = SurveyCTOClient("test1234")
+        client._scto_client = Mock()
+        client._scto_client.download_form_xml.return_value = FARM_XML.encode()
+        client._scto_client.download_form_data_json.return_value = FARM_ROWS
+        client._scto_client.list_datasets.return_value = [{"id": "prev_round"}]
+        return client
+
+    @pytest.fixture
+    def form_config(self):
+        return FormConfig(alias="farm", form_id="farm", server="testserver")
+
+    @patch("datasure.connectors.scto.save_form_definition")
+    @patch("datasure.connectors.scto.duckdb_save_table")
+    def test_columns_take_the_form_types(
+        self, mock_save, mock_save_definition, client, form_config
+    ):
+        assert client._import_regular_form(form_config) == len(FARM_ROWS)
+
+        saved = mock_save.call_args[0][1]
+        assert saved.schema["plots"] == pl.Int64
+        assert saved.schema["area"] == pl.Float64
+        assert saved.schema["visit"] == pl.Date
+        assert saved.schema["tools_1"] == pl.Int8
+        assert saved["visit"].null_count() < len(saved)
+
+    @patch("datasure.connectors.scto.save_form_definition")
+    @patch("datasure.connectors.scto.duckdb_save_table")
+    def test_timestamps_are_naive_utc(
+        self, mock_save, mock_save_definition, client, form_config
+    ):
+        client._import_regular_form(form_config)
+
+        saved = mock_save.call_args[0][1]
+        assert saved.schema["SubmissionDate"] == pl.Datetime("us")
+        assert saved.schema["starttime"] == pl.Datetime("us")
+
+    @patch("datasure.connectors.scto.save_form_definition")
+    @patch("datasure.connectors.scto.duckdb_save_table")
+    def test_form_version_stays_numeric(
+        self, mock_save, mock_save_definition, client, form_config
+    ):
+        client._import_regular_form(form_config)
+
+        assert mock_save.call_args[0][1].schema["formdef_version"] == pl.Int64
+
+    @patch("datasure.connectors.scto.save_form_definition")
+    @patch("datasure.connectors.scto.duckdb_save_table")
+    def test_a_choice_filter_the_evaluator_cannot_run_still_imports(
+        self, mock_save, mock_save_definition, client, form_config
+    ):
+        # normalize-space() is valid XPath the evaluator does not implement; it
+        # must not make the form XML unusable.
+        client._scto_client.download_form_xml.return_value = _UNSUPPORTED_FILTER_XML
+        client._scto_client.download_form_data_json.return_value = [
+            {"KEY": "uuid:a", "formdef_version": "3", "size": "2"}
+        ]
+
+        assert client.import_data(form_config) == 1
+
+        client._scto_client.list_datasets.assert_not_called()
+        assert mock_save.call_args[0][1]["size"].to_list() == [2]
+
+    @patch("datasure.connectors.scto.save_form_definition")
+    @patch("datasure.connectors.scto.duckdb_save_table")
+    def test_stores_the_xml_for_its_version(
+        self, mock_save, mock_save_definition, client, form_config
+    ):
+        client._import_regular_form(form_config)
+
+        mock_save_definition.assert_called_once_with(
+            "test1234", "farm", "farm", "3", FARM_XML.encode()
         )
-        result = client.import_data(form_config)
-        assert result == 1
+
+    @patch("datasure.connectors.scto.save_form_definition")
+    @patch("datasure.connectors.scto.duckdb_save_table")
+    def test_xml_download_failure_saves_nothing(
+        self, mock_save, mock_save_definition, client, form_config
+    ):
+        client._scto_client.download_form_xml.side_effect = SurveyCTOAPIError("404")
+
+        with pytest.raises(SurveyCTOAPIError):
+            client._import_regular_form(form_config)
+        mock_save.assert_not_called()
+        mock_save_definition.assert_not_called()
+
+    @patch("datasure.connectors.scto.save_form_definition")
+    @patch("datasure.connectors.scto.duckdb_save_table")
+    def test_first_import_sends_2010_date(
+        self, mock_save, mock_save_definition, client, form_config
+    ):
+        client._import_regular_form(form_config)
+
+        params = client._scto_client.download_form_data_json.call_args.kwargs["params"]
+        assert params == {"date": 1262304000}
+
+    @patch("datasure.connectors.scto.save_form_definition")
+    @patch("datasure.connectors.scto.duckdb_save_table")
+    def test_loads_private_key(self, mock_save, mock_save_definition, client, tmp_path):
+        key_file = tmp_path / "key.pem"
+        key_content = (
+            "-----BEGIN RSA PRIVATE KEY" + "-----\ntest\n-----END RSA PRIVATE KEY-----"
+        )
+        key_file.write_text(key_content)
+        form_config = FormConfig(
+            alias="farm", form_id="farm", server="testserver", private_key=str(key_file)
+        )
+
+        client._import_regular_form(form_config)
+
+        call_kwargs = client._scto_client.download_form_data_json.call_args.kwargs
+        assert call_kwargs["private_key"] == key_content.strip()
+
+    @patch("datasure.connectors.scto.save_form_definition")
+    @patch("datasure.connectors.scto.duckdb_save_table")
+    def test_concats_existing_typed_data(self, mock_save, mock_save_definition, client):
+        contract = parse_contract(FARM_XML.encode())
+        existing = typed_frame(cast_wide(FARM_ROWS[:1], contract))
+        client.cache_manager.get_existing_data = Mock(
+            return_value=(existing, datetime(2024, 1, 1, tzinfo=UTC))
+        )
+        client._scto_client.download_form_data_json.return_value = FARM_ROWS[1:]
+        form_config = FormConfig(
+            alias="farm", form_id="farm", server="testserver", save_to="/x/farm.csv"
+        )
+
+        assert client._import_regular_form(form_config) == len(FARM_ROWS) - 1
+        assert len(mock_save.call_args[0][1]) == len(FARM_ROWS)
+
+    @patch("datasure.connectors.scto.save_form_definition")
+    @patch("datasure.connectors.scto.duckdb_save_table")
+    def test_attachments_use_the_xml_media_fields(
+        self, mock_save, mock_save_definition, client, tmp_path
+    ):
+        """Media fields come from the form XML; the design endpoint is not called.
+
+        The design endpoint refuses forms SurveyCTO has not optimized (430).
+        """
+        client._download_attachments = Mock()
+        client.cache_manager.get_existing_data = Mock(
+            return_value=(pl.DataFrame(), SurveyCTOConfig().default_date)
+        )
+        form_config = FormConfig(
+            alias="farm",
+            form_id="farm",
+            server="testserver",
+            save_to=str(tmp_path / "farm.csv"),
+            attachments=True,
+        )
+
+        client._import_regular_form(form_config)
+
+        assert client._download_attachments.call_args[0][0] == ["photo"]
+        client._scto_client.download_form_definition.assert_not_called()
+
+    @patch("datasure.connectors.scto.save_form_definition")
+    @patch("datasure.connectors.scto.duckdb_save_table")
+    def test_a_form_import_lists_no_datasets(
+        self, mock_save, mock_save_definition, client, form_config
+    ):
+        form_config.username = "a@b.org"
+
+        client.import_data(form_config)
+
+        client._scto_client.list_datasets.assert_not_called()
+
+    def test_an_id_without_form_xml_on_the_dataset_list_imports_as_a_dataset(
+        self, client
+    ):
+        client._scto_client.download_form_xml.side_effect = FormNotFoundError("404")
+        client._import_server_dataset = Mock(return_value=4)
+        form_config = FormConfig(
+            alias="prev", form_id="prev_round", server="testserver", username="a@b.org"
+        )
+
+        assert client.import_data(form_config) == 4
+
+    def test_an_id_without_form_xml_or_dataset_raises(self, client, form_config):
+        client._scto_client.download_form_xml.side_effect = FormNotFoundError("404")
+        client._import_server_dataset = Mock()
+        form_config.username = "a@b.org"
+
+        with pytest.raises(FormNotFoundError):
+            client.import_data(form_config)
+        client._import_server_dataset.assert_not_called()
+
+    def test_other_xml_errors_raise_for_an_id_off_the_dataset_list(
+        self, client, form_config
+    ):
+        client._scto_client.download_form_xml.side_effect = SurveyCTOAPIError("500")
+        client._import_server_dataset = Mock()
+        form_config.username = "a@b.org"
+
+        with pytest.raises(SurveyCTOAPIError, match="500") as raised:
+            client.import_data(form_config)
+        assert type(raised.value) is SurveyCTOAPIError
+        client._import_server_dataset.assert_not_called()
+
+    @pytest.mark.parametrize(
+        "xml_failure",
+        [
+            {"side_effect": SurveyCTOAPIError("403", status_code=403)},
+            {"return_value": b"<html><body>Sign in</body></html>"},
+            {"return_value": b"not xml"},
+        ],
+        ids=["403", "html-200", "non-xml-200"],
+    )
+    def test_any_xml_failure_on_a_dataset_id_imports_as_a_dataset(
+        self, client, xml_failure
+    ):
+        """What SurveyCTO answers for a dataset ID's form XML is undocumented."""
+        client._scto_client.download_form_xml.configure_mock(**xml_failure)
+        client._import_server_dataset = Mock(return_value=4)
+        form_config = FormConfig(
+            alias="prev", form_id="prev_round", server="testserver", username="a@b.org"
+        )
+
+        assert client.import_data(form_config) == 4
+
+    def test_a_failed_dataset_listing_keeps_the_form_error(self, client, form_config):
+        """A wrong form ID reports the 404, not the dataset listing's 403."""
+        client._scto_client.download_form_xml.side_effect = FormNotFoundError("404")
+        client._scto_client.list_datasets.side_effect = SurveyCTOAPIError(
+            "403", status_code=403
+        )
+        client._import_server_dataset = Mock()
+        form_config.username = "a@b.org"
+
+        with pytest.raises(FormNotFoundError):
+            client.import_data(form_config)
+        client._import_server_dataset.assert_not_called()
+
+    @patch("datasure.connectors.scto.save_form_definition")
+    @patch("datasure.connectors.scto.duckdb_save_table")
+    def test_a_failed_raw_save_stores_no_definition(
+        self, mock_save, mock_save_definition, client, form_config
+    ):
+        mock_save.side_effect = OSError("disk full")
+
+        with pytest.raises(OSError, match="disk full"):
+            client._import_regular_form(form_config)
+        mock_save_definition.assert_not_called()

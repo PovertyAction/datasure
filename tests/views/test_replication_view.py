@@ -56,6 +56,7 @@ with (
         _get_import_log_row,
         _on_progress,
         _package_tree,
+        _questionnaire_status,
         _render_config_details,
         _render_package_preview,
         _render_stata_names,
@@ -384,6 +385,18 @@ class TestFetchSctoAssets:
 # ---------------------------------------------------------------------------
 # _on_progress
 # ---------------------------------------------------------------------------
+
+
+class TestQuestionnaireStatus:
+    def test_downloaded(self):
+        """A questionnaire from the design is reported as downloaded."""
+        assert _questionnaire_status({"title": "Farm"}) == "Questionnaire downloaded"
+
+    def test_rebuilt_from_the_form_xml(self):
+        """A rebuilt questionnaire says so, and why."""
+        status = _questionnaire_status({"rebuilt_from_xml": True})
+        assert status.startswith("Questionnaire rebuilt from the compiled form")
+        assert "not optimized" in status
 
 
 class TestOnProgress:

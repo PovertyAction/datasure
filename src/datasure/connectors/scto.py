@@ -1,4 +1,3 @@
-import contextlib
 import logging
 import os
 import re
@@ -6,13 +5,22 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
+from xml.etree.ElementTree import ParseError
 
 import polars as pl
+import polars.selectors as cs
+import pyarrow as pa
 import streamlit as st
 from pydantic import BaseModel, Field, field_validator
 
+from datasure.surveycto.cast import cast_wide
+from datasure.surveycto.xml_contract import FormContract, parse_contract
 from datasure.utils.dataframe_utils import standardize_missing_values
-from datasure.utils.duckdb_utils import duckdb_get_table, duckdb_save_table
+from datasure.utils.duckdb_utils import (
+    duckdb_get_table,
+    duckdb_save_table,
+    save_form_definition,
+)
 from datasure.utils.scto_api import (
     SurveyCTOAPIClient,
     SurveyCTOAPIConfig,
@@ -30,6 +38,11 @@ from datasure.utils.secure_credentials import (
 SCTO_KEY_IMPORT_OPTIONS = ("Import from File", "Paste private key text")
 
 logger = logging.getLogger(__name__)
+
+
+class _FormXMLUnavailableError(SurveyCTOAPIError):
+    """The form XML could not be downloaded or parsed; ``__cause__`` says why."""
+
 
 # --- Configuration and Models --- #
 
@@ -66,7 +79,6 @@ class SurveyCTOConfig:
     # licensed quiet period (HTTP 417), and every refresh is currently a full
     # pull. Revisit once incremental refresh works (#340).
     default_date: datetime = datetime(2010, 1, 1, tzinfo=UTC)
-    date_format: str = "%b %d, %Y %I:%M:%S %p"
 
 
 class ServerCredentials(BaseModel):
@@ -204,123 +216,55 @@ class CacheManager:
                 return existing_data, self.default_date
 
 
-class DataProcessor:
-    """Handles data processing and type conversion."""
+def typed_frame(table: pa.Table) -> pl.DataFrame:
+    """Return a cast submissions table as a Polars frame for the raw database.
 
-    def __init__(self):
-        self.date_format = SurveyCTOConfig().date_format
-        self.logger = logging.getLogger(__name__)
+    SurveyCTO timestamps are UTC. They are stored naive, as DataSure has always
+    stored them, because the checks compare them with naive dates and times.
+    ``formdef_version`` is cast to an integer because the enumerator check picks it
+    from the numeric columns and takes its maximum as the latest version.
+    """
+    return pl.from_arrow(table).with_columns(
+        cs.datetime(time_zone="UTC").dt.replace_time_zone(None).cast(pl.Datetime("us")),
+        pl.col("formdef_version").cast(pl.Int64),
+    )
 
-    def get_repeat_fields(self, questions: pl.DataFrame) -> list[str]:
-        """Extract repeat field names from form definition."""
-        fields = questions.select(["type", "name"])
-        repeat_fields = []
-        begin_count = 0
-        end_count = 0
 
-        for row in fields.iter_rows(named=True):
-            if row["type"] == "begin repeat":
-                begin_count += 1
-            elif row["type"] == "end repeat":
-                end_count += 1
-            elif (
-                begin_count > end_count
-                and len(str(row["name"])) > 1
-                and row["type"] not in ["begin group", "end group"]
-            ):
-                repeat_fields.append(row["name"])
+def media_columns(contract: FormContract, data_cols: list[str]) -> list[str]:
+    """Return the data columns that hold a media field's attachment URL.
 
-        return repeat_fields
+    A column counts only when the contract resolves it to a ``binary`` leaf,
+    so a repeat media field's ``voice_1``, ``voice_2`` are kept and a sibling
+    field that merely shares the prefix (``photo_1`` beside ``photo``) is not.
+    Only columns present in the data are returned: a form with no new
+    submissions, or a repeat with no instances, has none.
+    """
+    columns = []
+    for col in data_cols:
+        mapped = contract.map_column(col)
+        if mapped["kind"] != "matched":
+            continue
+        node = contract.nodes[mapped["node_path"]]
+        if node.xml_type == "binary" and node.is_leaf:
+            columns.append(col)
+    return columns
 
-    def get_repeat_columns(self, field: str, data_cols: list[str]) -> list[str]:
-        """Get all columns that belong to a repeat group."""
-        pattern = rf"\b{re.escape(field)}_[0-9]+_{{,1}}[0-9]*_{{,1}}[0-9]*\b"
-        return [col for col in data_cols if re.fullmatch(pattern, col)] or [field]
 
-    def _convert_standard_datetime_columns(self, data: pl.DataFrame) -> pl.DataFrame:
-        """Convert standard datetime columns to datetime type."""
-        datetime_cols = ["CompletionDate", "SubmissionDate", "starttime", "endtime"]
-        for col in datetime_cols:
-            if col in data.columns:
-                with contextlib.suppress(Exception):
-                    data = data.with_columns(
-                        pl.col(col).str.strptime(
-                            pl.Datetime, format=self.date_format, strict=False
-                        )
-                    )
-        return data
+def media_field_names(contract: FormContract) -> list[str]:
+    """Return the names of the form's media fields, in form order.
 
-    def _convert_standard_numeric_columns(self, data: pl.DataFrame) -> pl.DataFrame:
-        """Convert standard numeric columns to float type."""
-        numeric_cols = ["duration", "formdef_version"]
-        for col in numeric_cols:
-            if col in data.columns:
-                with contextlib.suppress(Exception):
-                    data = data.with_columns(pl.col(col).cast(pl.Float64, strict=False))
-        return data
-
-    def _get_field_columns(
-        self, field_name: str, repeat_fields: list[str], data_cols: list[str]
-    ) -> list[str]:
-        """Get all columns for a field, including repeat columns."""
-        if field_name in repeat_fields:
-            cols = self.get_repeat_columns(field_name, data_cols)
-        else:
-            cols = [field_name]
-        return [col for col in cols if col in data_cols]
-
-    def _convert_column_by_type(
-        self, data: pl.DataFrame, col: str, field_type: str
-    ) -> pl.DataFrame:
-        """Convert a single column based on its field type."""
-        try:
-            # The wide JSON sends dates as "Mar 7, 2025" and datetimes as
-            # "Mar 7, 2025 4:06:12 PM". Strict: a value in another format
-            # raises below and the column stays text, instead of turning null.
-            # `time` stays text: its wide-JSON format is not confirmed.
-            if field_type == "date":
-                return data.with_columns(
-                    pl.col(col).str.strptime(pl.Date, format="%b %d, %Y")
-                )
-            elif field_type == "datetime":
-                return data.with_columns(
-                    pl.col(col).str.strptime(pl.Datetime, format=self.date_format)
-                )
-            elif field_type in ["integer", "decimal"]:
-                return data.with_columns(pl.col(col).cast(pl.Float64, strict=False))
-            elif field_type == "note":
-                return data.drop(col)
-            return data  # noqa: TRY300
-        except pl.exceptions.PolarsError as e:
-            self.logger.warning(f"Failed to convert column {col}: {e}")
-            return data
-
-    def _convert_form_definition_fields(
-        self, data: pl.DataFrame, questions: pl.DataFrame
-    ) -> pl.DataFrame:
-        """Convert fields based on form definition."""
-        repeat_fields = self.get_repeat_fields(questions)
-        data_cols = data.columns
-
-        for row in questions.select(["type", "name"]).iter_rows(named=True):
-            field_name = row["name"]
-            field_type = row["type"]
-
-            cols = self._get_field_columns(field_name, repeat_fields, data_cols)
-
-            for col in cols:
-                data = self._convert_column_by_type(data, col, field_type)
-
-        return data
-
-    def convert_data_types(
-        self, data: pl.DataFrame, questions: pl.DataFrame
-    ) -> pl.DataFrame:
-        """Convert data types based on form definition."""
-        data = self._convert_standard_datetime_columns(data)
-        data = self._convert_standard_numeric_columns(data)
-        data = self._convert_form_definition_fields(data, questions)
-        return data
+    The compiled XML binds every media field as ``binary``: uploads (image,
+    audio, video, file) and the fields SurveyCTO fills itself (comments, text
+    and audio audits, sensor streams), which have no upload control. Disabled
+    fields are not compiled, so none is returned.
+    """
+    return list(
+        dict.fromkeys(
+            node.name
+            for node in contract.nodes.values()
+            if node.xml_type == "binary" and node.is_leaf
+        )
+    )
 
 
 class MediaDownloader:
@@ -333,55 +277,54 @@ class MediaDownloader:
 
     def download_media_files(
         self,
-        media_fields: list[str],
+        media_columns: list[str],
         data: pl.DataFrame,
         media_folder: Path,
         encryption_key: str | None = None,
     ) -> None:
-        """Download all media files for the given data."""
+        """Download the attachments in the given media columns of the data."""
         media_folder.mkdir(parents=True, exist_ok=True)
 
-        for field in media_fields:
-            self._download_field_media(field, data, media_folder, encryption_key)
+        for col in media_columns:
+            self._download_field_media(col, data, media_folder, encryption_key)
 
     def _download_field_media(
         self,
-        field: str,
+        col: str,
         data: pl.DataFrame,
         media_folder: Path,
         encryption_key: str | None,
     ) -> None:
-        """Download media files for a specific field."""
-        processor = DataProcessor()
-        cols = processor.get_repeat_columns(field, data.columns)
+        """Download the attachments in one media column."""
+        # A column can be absent (no submissions, an empty repeat), and a media
+        # URL is always a string; anything else cannot hold an attachment.
+        if col not in data.columns or data.schema[col] != pl.String:
+            self.logger.info(f"No media column '{col}' to download")
+            return
 
-        for col in cols:
-            media_data = (
-                data.filter(pl.col(col).is_not_null())
-                .select(["KEY", col])
-                .filter(pl.col(col).str.strip_chars() != "")
-            )
+        media_data = (
+            data.filter(pl.col(col).is_not_null())
+            .select(["KEY", col])
+            .filter(pl.col(col).str.strip_chars() != "")
+        )
 
-            if media_data.is_empty():
-                self.logger.info(f"No media files found for field '{col}'")
-                continue
+        if media_data.is_empty():
+            self.logger.info(f"No media files found for field '{col}'")
+            return
 
-            if len(media_data) > 0:
-                progress_bar = st.progress(0, text=f"Downloading {col} media files...")
+        progress_bar = st.progress(0, text=f"Downloading {col} media files...")
 
-                for idx, row in enumerate(media_data.iter_rows(named=True)):
-                    try:
-                        self._download_single_file(
-                            row[col], row["KEY"], col, media_folder, encryption_key
-                        )
-                        progress_bar.progress(
-                            (idx + 1) / len(media_data),
-                            text=f"Downloading {col}... {idx + 1}/{len(media_data)}",
-                        )
-                    except (SurveyCTOAPIError, OSError):
-                        self.logger.exception(
-                            f"Failed to download {col} for {row['KEY']}"
-                        )
+        for idx, row in enumerate(media_data.iter_rows(named=True)):
+            try:
+                self._download_single_file(
+                    row[col], row["KEY"], col, media_folder, encryption_key
+                )
+                progress_bar.progress(
+                    (idx + 1) / len(media_data),
+                    text=f"Downloading {col}... {idx + 1}/{len(media_data)}",
+                )
+            except (SurveyCTOAPIError, OSError):
+                self.logger.exception(f"Failed to download {col} for {row['KEY']}")
 
     def _download_single_file(
         self,
@@ -413,7 +356,6 @@ class SurveyCTOClient:
         self.project_id = project_id
         self.config = config or SurveyCTOConfig()
         self.cache_manager = CacheManager(project_id)
-        self.data_processor = DataProcessor()
         self.logger = logging.getLogger(__name__)
         self._scto_client: SurveyCTOAPIClient | None = None
 
@@ -533,9 +475,26 @@ class SurveyCTOClient:
             )
 
     def _handle_api_error(self, api_err: SurveyCTOAPIError, server: str) -> None:
-        """Handle API errors with user-friendly messages."""
+        """Handle API errors with user-friendly messages.
+
+        An HTTP error is classified by its status. The message also carries
+        SurveyCTO's response body, so its words could match a keyword for an
+        unrelated cause. Keywords classify only errors with no status
+        (connection errors, timeouts).
+        """
         self._scto_client = None
         error_msg = str(api_err)
+
+        status_messages = {
+            401: "🔐 Invalid credentials. Please check your username and password.",
+            403: "🚫 Access forbidden. Your account may not have permission to access this server.",
+            404: f"🔍 Server '{server}' not found. Please verify the server name.",
+        }
+        if api_err.status_code is not None:
+            message = status_messages.get(
+                api_err.status_code, f"❌ API error: {api_err}"
+            )
+            raise ConnectionError(message) from api_err
 
         error_mapping = {
             (
@@ -589,31 +548,6 @@ class SurveyCTOClient:
             )
         raise ConnectionError(f"❌ Failed to create connection: {error}")
 
-    def get_form_definition(self, form_id: str) -> tuple[pl.DataFrame, pl.DataFrame]:
-        """Get form definition (questions and choices)."""
-        if not self._scto_client:
-            raise ConnectionError("Not connected to server")
-
-        try:
-            form_def = self._scto_client.download_form_definition(form_id)
-
-        except SurveyCTOAPIError as e:
-            raise SurveyCTOError(f"Failed to get form definition: {e}") from e
-
-        questions = pl.DataFrame(
-            form_def["fieldsRowsAndColumns"][1:],
-            schema=form_def["fieldsRowsAndColumns"][0],
-            orient="row",
-        )
-
-        choices = pl.DataFrame(
-            form_def["choicesRowsAndColumns"][1:],
-            schema=form_def["choicesRowsAndColumns"][0],
-            orient="row",
-        )
-
-        return questions, choices
-
     def import_data(self, form_config: FormConfig) -> int:
         """Import data from SurveyCTO form."""
         if not self._scto_client:
@@ -642,17 +576,45 @@ class SurveyCTOClient:
             except SurveyCTOAPIError as e:
                 raise ConnectionError(f"Not connected to server: {e}") from e
         try:
-            # downloading as regular form with incremental updates.
-            # If it fails (e.g., for server datasets), fallback to full download
             return self._import_regular_form(form_config)
-        except Exception:
-            self.logger.info(
-                "Regular form import failed for %s; falling back to server "
-                "dataset import",
-                form_config.form_id,
-                exc_info=True,
+        except _FormXMLUnavailableError as unavailable:
+            # A server dataset has no form XML. Which status SurveyCTO answers
+            # for a dataset ID is not documented, so any failure to get or
+            # parse the XML checks the dataset list. Any other ID raises the
+            # XML error itself.
+            if self._is_server_dataset(form_config.form_id):
+                return self._import_server_dataset(form_config)
+            raise unavailable.__cause__ from unavailable.__cause__.__cause__
+
+    def _is_server_dataset(self, form_id: str) -> bool:
+        """Return whether the ID is on the server's dataset list.
+
+        A failed listing (an account without dataset access, a 5xx) answers
+        False, so the caller raises the form's own error rather than a
+        dataset-list error unrelated to the cause.
+        """
+        try:
+            datasets = self._scto_client.list_datasets()
+        except SurveyCTOAPIError:
+            self.logger.warning(
+                "Could not list server datasets to check %r", form_id, exc_info=True
             )
-            return self._import_server_dataset(form_config)
+            return False
+        return form_id in {d["id"] for d in datasets}
+
+    def _download_contract(self, form_id: str) -> tuple[bytes, FormContract]:
+        """Download and parse the deployed form's compiled XML.
+
+        Raises ``_FormXMLUnavailableError``, caused by the original error,
+        when the XML cannot be downloaded or parsed.
+        """
+        try:
+            xml = self._scto_client.download_form_xml(form_id)
+            return xml, parse_contract(xml)
+        except (SurveyCTOAPIError, ParseError, ValueError) as err:
+            raise _FormXMLUnavailableError(
+                str(err), getattr(err, "status_code", None)
+            ) from err
 
     def _import_server_dataset(self, form_config: FormConfig) -> int:
         """Import from server dataset."""
@@ -698,6 +660,9 @@ class SurveyCTOClient:
         if form_config.private_key:
             private_key = self._import_private_key(form_config.private_key)
 
+        # The deployed form's compiled XML types the submissions
+        xml, contract = self._download_contract(form_config.form_id)
+
         # Get new data
         new_data_json = self._scto_client.download_form_data_json(
             form_id=form_config.form_id,
@@ -705,7 +670,7 @@ class SurveyCTOClient:
             private_key=private_key,
         )
 
-        new_data = pl.DataFrame(new_data_json)
+        new_data = typed_frame(cast_wide(new_data_json, contract))
         new_count = len(new_data)
 
         # Combine data
@@ -714,42 +679,40 @@ class SurveyCTOClient:
         else:
             combined_data = new_data
 
-        # Standardize missing values BEFORE type conversion
         combined_data = standardize_missing_values(combined_data)
-
-        # Process data types
-        questions, _ = self.get_form_definition(form_config.form_id)
-        if "disabled" in questions.columns:
-            questions = questions.filter(pl.col("disabled") != "yes")
-        combined_data = self.data_processor.convert_data_types(combined_data, questions)
 
         # Download media if requested
         if form_config.attachments and form_config.save_to:
-            self._download_attachments(questions, new_data, form_config, private_key)
+            self._download_attachments(
+                media_columns(contract, new_data.columns),
+                new_data,
+                form_config,
+                private_key,
+            )
 
         # Save to DuckDB
         duckdb_save_table(
             self.project_id, combined_data, alias=form_config.alias, db_name="raw"
+        )
+        # After raw, so a definition always describes data raw holds.
+        save_form_definition(
+            self.project_id,
+            form_config.alias,
+            form_config.form_id,
+            contract.formdef_version,
+            xml,
         )
 
         return new_count
 
     def _download_attachments(
         self,
-        questions: pl.DataFrame,
+        media_fields: list[str],
         data: pl.DataFrame,
         form_config: FormConfig,
         private_key: str | None = None,
     ) -> None:
-        """Download media attachments."""
-        media_types = {e.value for e in MediaType}
-        media_fields = (
-            questions.filter(pl.col("type").is_in(media_types))
-            .select("name")
-            .to_series()
-            .to_list()
-        )
-
+        """Download the attachments of the given media fields."""
         if media_fields:
             media_folder = Path(form_config.save_to).parent / "media"
 
