@@ -196,6 +196,10 @@ class Node:
 
         A `search()` select takes its codes from a dataset; until they are read
         into `choice_universe`, only its literal extras are known.
+
+        DataSure's import deliberately never reads those datasets: they often
+        hold PII that must not reach DataSure by accident. So on import a
+        `search()` select's choices stay unknown; see the surveycto-api skill.
         """
         searched = bool(self.data_source and self.data_source["kind"] == "search")
         return self.choice_universe is not None or not searched

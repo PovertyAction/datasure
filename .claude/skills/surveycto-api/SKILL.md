@@ -58,6 +58,12 @@ rebuilds the design-shaped definition from the XML
    the import does not read: only its integer-valued items are choices, the
    item naming the dataset columns is `Node.choice_columns`, its select_one
    stays String and its select_multiple binaries are the codes someone picked.
+   **Not reading the datasets behind `search()` and `pulldata()` is
+   deliberate:** they often hold PII (names, phone numbers, locations) that
+   must not reach DataSure by accident. Do not "fix" the unknown `search()`
+   codes by downloading those datasets into `choice_universe`. Values a form
+   copies into its own fields (a `pulldata()` result, a picked `search()`
+   code) are part of the submission and still import.
 3. It saves the frame to `raw.duckdb`, then stores the XML with
    `save_form_definition` (one row per alias and form version). `load_form_definition(alias)`
    returns the latest version's XML, or `None`.
