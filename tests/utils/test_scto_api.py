@@ -82,6 +82,11 @@ class TestSurveyCTOAPIError:
         error = SurveyCTOAPIError("Test")
         assert isinstance(error, Exception)
 
+    def test_error_status_code(self):
+        """Errors keep the HTTP status, or None when there was no response."""
+        assert SurveyCTOAPIError("Test").status_code is None
+        assert SurveyCTOAPIError("Test", status_code=430).status_code == 430
+
 
 class TestSurveyCTOAPIClient:
     """Test the SurveyCTOAPIClient class."""
@@ -181,6 +186,23 @@ class TestMakeRequest:
         with patch.object(api_client.session, "request", return_value=mock_response):  # noqa: SIM117
             with pytest.raises(SurveyCTOAPIError, match="API request failed"):
                 api_client._make_request("GET", "/test")
+
+    def test_http_error_keeps_status_and_body(self, api_client):
+        """The error keeps the status and up to 500 characters of the body."""
+        response = Mock(status_code=403, text="Forbidden: " + "x" * 1000)
+        error = requests.exceptions.HTTPError("403", response=response)
+        response.raise_for_status.side_effect = error
+
+        with (
+            patch.object(api_client.session, "request", return_value=response),
+            pytest.raises(SurveyCTOAPIError) as exc_info,
+        ):
+            api_client._make_request("GET", "/test")
+
+        message = str(exc_info.value)
+        assert exc_info.value.status_code == 403
+        assert "server said: Forbidden: x" in message
+        assert "x" * 501 not in message
 
     def test_connection_error(self, api_client):
         """Test handling of connection errors."""
@@ -411,6 +433,33 @@ class TestFormEndpoints:
                 ):
                     api_client.download_form_definition("test_form")
 
+    def test_download_form_definition_not_optimized(self, api_client):
+        """A 430 says in plain words that the form must be optimized.
+
+        SurveyCTO's design endpoint returns 430 with "your Excel form cannot be
+        loaded until it is optimized" in the body, which the error keeps.
+        """
+        body = (
+            '{"error":{"code":430,"message":"I\'m sorry but your Excel form '
+            'cannot be loaded until it is optimized.","responseObject":null}}'
+        )
+        response = Mock(status_code=430, text=body)
+        error = requests.exceptions.HTTPError("430", response=response)
+        with (
+            patch.object(api_client, "_get_csrf_auth_headers", return_value={}),
+            patch.object(api_client.session, "get") as mock_get,
+        ):
+            mock_get.return_value.raise_for_status.side_effect = error
+
+            with pytest.raises(SurveyCTOAPIError) as exc_info:
+                api_client.download_form_definition("test_form")
+
+        message = str(exc_info.value)
+        assert exc_info.value.status_code == 430
+        assert message.startswith("SurveyCTO cannot provide this form's design")
+        assert "SurveyCTO support" in message
+        assert "cannot be loaded until it is optimized" in message
+
     def test_get_csrf_auth_headers_success(self, api_client):
         """Test successful CSRF authentication."""
         with patch.object(api_client.session, "head") as mock_head:  # noqa: SIM117
@@ -607,6 +656,30 @@ class TestFormXml:
 
             with pytest.raises(SurveyCTOAPIError, match="Failed to download form XML"):
                 api_client.download_form_xml("farm")
+
+    def test_download_form_xml_http_error_keeps_status_and_body(self, api_client):
+        """The error keeps the status and the server's explanation."""
+        response = Mock(status_code=500, text="Server is restarting")
+        error = requests.exceptions.HTTPError("500", response=response)
+        with patch.object(api_client.session, "get") as mock_get:
+            mock_get.return_value.raise_for_status.side_effect = error
+
+            with pytest.raises(SurveyCTOAPIError) as exc_info:
+                api_client.download_form_xml("farm")
+
+        assert exc_info.value.status_code == 500
+        assert "server said: Server is restarting" in str(exc_info.value)
+
+    def test_download_form_xml_not_found_keeps_status(self, api_client):
+        """FormNotFoundError keeps the 404 too."""
+        error = requests.exceptions.HTTPError("404", response=Mock(status_code=404))
+        with patch.object(api_client.session, "get") as mock_get:
+            mock_get.return_value.raise_for_status.side_effect = error
+
+            with pytest.raises(FormNotFoundError) as exc_info:
+                api_client.download_form_xml("farm")
+
+        assert exc_info.value.status_code == 404
 
     def test_download_form_xml_not_found(self, api_client):
         """Test a 404 raises FormNotFoundError."""

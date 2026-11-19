@@ -26,13 +26,50 @@ class SurveyCTOAPIConfig:
 
 
 class SurveyCTOAPIError(Exception):
-    """Base exception for SurveyCTO API errors."""
+    """Base exception for SurveyCTO API errors.
 
-    pass
+    Attributes
+    ----------
+        status_code: The HTTP status SurveyCTO returned, or None when the
+            request failed without a response (connection error, timeout).
+    """
+
+    def __init__(self, message: str, status_code: int | None = None):
+        super().__init__(message)
+        self.status_code = status_code
 
 
 class FormNotFoundError(SurveyCTOAPIError):
     """The server has no deployed form with this ID (HTTP 404)."""
+
+
+# Longest part of a response body kept in an error message.
+_MAX_ERROR_BODY = 500
+
+# SurveyCTO's design endpoint returns 430 for a form it has not optimized:
+# "your Excel form cannot be loaded until it is optimized".
+_NOT_OPTIMIZED_STATUS = 430
+
+
+def _http_error(
+    prefix: str,
+    error: requests.exceptions.HTTPError,
+    error_class: type[SurveyCTOAPIError] = SurveyCTOAPIError,
+) -> SurveyCTOAPIError:
+    """Build an error that keeps the HTTP status and the server's explanation.
+
+    SurveyCTO explains some statuses, such as its non-standard 430, only in
+    the response body, which `raise_for_status` leaves out of its message.
+    """
+    response = error.response
+    message = f"{prefix}: {error}"
+    if response is None:
+        return error_class(message)
+    body = response.text if isinstance(response.text, str) else ""
+    body = body.strip()
+    if body:
+        message += f" (server said: {body[:_MAX_ERROR_BODY]})"
+    return error_class(message, status_code=response.status_code)
 
 
 class SurveyCTOAPIClient:
@@ -106,8 +143,9 @@ class SurveyCTOAPIClient:
             return response  # noqa: TRY300
 
         except requests.exceptions.HTTPError as e:
-            self.logger.exception(f"HTTP error for {method} {url}")
-            raise SurveyCTOAPIError(f"API request failed: {e}") from e
+            error = _http_error("API request failed", e)
+            self.logger.exception(f"HTTP error for {method} {url}: {error}")
+            raise error from e
 
         except requests.exceptions.ConnectionError as e:
             self.logger.exception(f"Connection error for {method} {url}")
@@ -218,8 +256,9 @@ class SurveyCTOAPIClient:
             return response.json()["forms"]
 
         except requests.exceptions.HTTPError as e:
-            self.logger.exception(f"HTTP error listing forms from {url}")
-            raise SurveyCTOAPIError(f"Failed to list forms: {e}") from e
+            error = _http_error("Failed to list forms", e)
+            self.logger.exception(f"HTTP error listing forms from {url}: {error}")
+            raise error from e
 
         except requests.exceptions.ConnectionError as e:
             self.logger.exception(f"Connection error listing forms from {url}")
@@ -278,10 +317,11 @@ class SurveyCTOAPIClient:
             return headers  # noqa: TRY300
 
         except requests.exceptions.HTTPError as e:
+            error = _http_error("CSRF authentication failed", e)
             self.logger.exception(
-                f"HTTP error during CSRF authentication to {base_url}"
+                f"HTTP error during CSRF authentication to {base_url}: {error}"
             )
-            raise SurveyCTOAPIError(f"CSRF authentication failed: {e}") from e
+            raise error from e
 
         except requests.exceptions.ConnectionError as e:
             self.logger.exception(
@@ -338,8 +378,21 @@ class SurveyCTOAPIClient:
             return response.json()
 
         except requests.exceptions.HTTPError as e:
-            self.logger.exception(f"HTTP error downloading form definition from {url}")
-            raise SurveyCTOAPIError(f"Failed to download form definition: {e}") from e
+            prefix = "Failed to download form definition"
+            if (
+                e.response is not None
+                and e.response.status_code == _NOT_OPTIMIZED_STATUS
+            ):
+                prefix = (
+                    "SurveyCTO cannot provide this form's design until the form "
+                    "is optimized, and the server console offers no way to do "
+                    "that. Contact SurveyCTO support"
+                )
+            error = _http_error(prefix, e)
+            self.logger.exception(
+                f"HTTP error downloading form definition from {url}: {error}"
+            )
+            raise error from e
 
         except requests.exceptions.ConnectionError as e:
             self.logger.exception(
@@ -385,10 +438,16 @@ class SurveyCTOAPIClient:
             return response.content  # noqa: TRY300
 
         except requests.exceptions.HTTPError as e:
-            self.logger.exception(f"HTTP error downloading form XML from {url}")
             if e.response is not None and e.response.status_code == 404:
-                raise FormNotFoundError(f"No deployed form {form_id!r}: {e}") from e
-            raise SurveyCTOAPIError(f"Failed to download form XML: {e}") from e
+                error = _http_error(
+                    f"No deployed form {form_id!r}", e, FormNotFoundError
+                )
+            else:
+                error = _http_error("Failed to download form XML", e)
+            self.logger.exception(
+                f"HTTP error downloading form XML from {url}: {error}"
+            )
+            raise error from e
 
         except requests.exceptions.RequestException as e:
             self.logger.exception(f"Request error downloading form XML from {url}")
@@ -504,8 +563,11 @@ class SurveyCTOAPIClient:
             return response.json()
 
         except requests.exceptions.HTTPError as e:
-            self.logger.exception(f"HTTP error downloading form data from {url}")
-            raise SurveyCTOAPIError(f"Failed to download form data: {e}") from e
+            error = _http_error("Failed to download form data", e)
+            self.logger.exception(
+                f"HTTP error downloading form data from {url}: {error}"
+            )
+            raise error from e
 
         except requests.exceptions.ConnectionError as e:
             self.logger.exception(f"Connection error downloading form data from {url}")
@@ -568,8 +630,9 @@ class SurveyCTOAPIClient:
             return response.content  # noqa: TRY300
 
         except requests.exceptions.HTTPError as e:
-            self.logger.exception(f"HTTP error downloading from {url}")
-            raise SurveyCTOAPIError(f"Failed to download from URL: {e}") from e
+            error = _http_error("Failed to download from URL", e)
+            self.logger.exception(f"HTTP error downloading from {url}: {error}")
+            raise error from e
 
         except requests.exceptions.ConnectionError as e:
             self.logger.exception(f"Connection error downloading from {url}")
