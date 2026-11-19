@@ -468,3 +468,11 @@ def test_search_select_one_stays_text_when_its_codes_are_unknown(search_contract
     assert table.schema.field("home").type == pa.string()
     assert _col(table, "home") == ["V7"]
     assert _fallback(table, "home") == ""
+
+
+def test_search_binaries_of_equal_integer_codes_have_a_fixed_order(search_contract):
+    # "01" and "1" are both 1 as integers; the code breaks the tie, so the column
+    # order never follows set iteration (which changes with the hash seed).
+    rows = [{"KEY": "k1", "village_1": "1", "village_01": "1"}]
+    names = cast_wide(rows, search_contract).schema.names
+    assert [n for n in names if n.startswith("village_")] == ["village_01", "village_1"]

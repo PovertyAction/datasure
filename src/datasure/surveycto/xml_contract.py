@@ -225,6 +225,11 @@ def _split_search_items(items: list[dict]) -> tuple[list[dict], dict | None]:
 # search('dataset','mode','col','val'[,'col2','val2'...]) on a select's appearance.
 
 
+# One piece of a call's argument text: a quoted literal (to the end of the text
+# when it never closes), a paren, a comma, or a run of anything else.
+_ARG_TOKEN = re.compile(r"""'[^']*'|"[^"]*"|['"].*|[(),]|[^'"(),]+""", re.DOTALL)
+
+
 def _split_call_args(s: str | None, func_name: str) -> list[str] | None:
     """Top-level argument strings of the first ``func_name(...)`` call in ``s``,
     respecting nested parens and quoted literals. XPath has no backslash escape,
@@ -238,35 +243,23 @@ def _split_call_args(s: str | None, func_name: str) -> list[str] | None:
     m = rx.search(s)
     if not m:
         return None
-    i, n = m.end(), len(s)
     depth = 1
-    in_str: str | None = None
     args: list[str] = []
     cur: list[str] = []
-    while i < n:
-        ch = s[i]
-        if in_str:
-            cur.append(ch)
-            if ch == in_str:
-                in_str = None
-        elif ch in ("'", '"'):
-            in_str = ch
-            cur.append(ch)
-        elif ch == "(":
+    for token in _ARG_TOKEN.finditer(s, m.end()):
+        part = token.group()
+        if part == "(":
             depth += 1
-            cur.append(ch)
-        elif ch == ")":
+        elif part == ")":
             depth -= 1
             if depth == 0:
                 args.append("".join(cur))
                 return [a.strip() for a in args]
-            cur.append(ch)
-        elif ch == "," and depth == 1:
+        elif part == "," and depth == 1:
             args.append("".join(cur))
             cur = []
-        else:
-            cur.append(ch)
-        i += 1
+            continue
+        cur.append(part)
     raise ValueError(f"{func_name}( never closes in {s!r}")
 
 
@@ -356,6 +349,32 @@ def _parse_data_source(appearance: str | None, calc: str | None) -> dict | None:
     return None
 
 
+def _split_suffix(toks: list[str], depth: int) -> tuple[int, str | None]:
+    """Return how many trailing tokens are repeat indices, and the choice token.
+
+    Trailing integer tokens are consumed as repeat indices, at most ``depth`` of
+    them; what precedes them, joined by ``_``, is the (sanitised) choice token,
+    or None when there is none.
+    """
+    n = 0
+    while n < depth and n < len(toks) and toks[len(toks) - 1 - n].isdigit():
+        n += 1
+    # An EMPTY choice is impossible, so if the head vanished while the suffix
+    # still carries more tokens than the node has depth, hand an index back: a
+    # negative sentinel's own leading underscore produced that empty first token
+    # (`x__77_2` is choice -77 at one index, not choice "" at iterations 77 and
+    # 2). When len(toks) == depth there is no choice at all -- that is the
+    # select_multiple's own parent column, which the export writes empty.
+    while n > 0 and len(toks) > depth and not "_".join(toks[: len(toks) - n]):
+        n -= 1
+    token = "_".join(toks[: len(toks) - n])
+    # A token made only of underscores is not a choice value: sanitisation maps a
+    # real value's characters into the alphabet, so at least one alphanumeric
+    # survives, so `x___` has no choice. A negative sentinel's `_66` keeps its
+    # digits.
+    return n, token if token.strip("_") else None
+
+
 class FormContract:
     """The compiled-form node model + the wide-column -> node resolver."""
 
@@ -437,23 +456,25 @@ class FormContract:
             avail = self._trailing_int_count(toks)
             for path in self._by_name[name]:
                 node = self.nodes[path]
-                depth = node.repeat_depth
-                head_empty = avail >= depth and len(toks) == depth
-                if avail < depth:
-                    score = 3  # cannot supply its own indices: under-indexed
-                elif head_empty:
-                    score = 0  # the node's own column
-                elif node.is_select_multiple:
-                    score = 1  # choice binary
-                else:
-                    score = 2  # string key, or formdef index drift
                 # The longer name wins a tie, then the first path in sorted order.
-                key = (score, -len(name), path)
+                key = (self._fit(node, toks, avail), -len(name), path)
                 if best is None or key < best[0]:
                     best = (key, name, node, toks)
         if best is None:
             return None
         return best[1], best[2], best[3]
+
+    @staticmethod
+    def _fit(node: Node, toks: list[str], avail: int) -> int:
+        """Score how well ``node`` owns a column's suffix tokens; lower is better."""
+        depth = node.repeat_depth
+        if avail < depth:
+            return 3  # cannot supply its own indices: under-indexed
+        if len(toks) == depth:
+            return 0  # the node's own column
+        if node.is_select_multiple:
+            return 1  # choice binary
+        return 2  # string key, or formdef index drift
 
     def _universe(self, node: Node) -> dict:
         """Return ``node``'s choices by the token SurveyCTO writes into a column name.
@@ -504,6 +525,28 @@ class FormContract:
             return _coerce_choice_value("-" + m.group(1)), None, False
         return _coerce_choice_value(token), None, False
 
+    def _choice_of(self, node: Node, token: str | None):
+        """Return (choice code, label, string key, ambiguous) for a column's token."""
+        if token is None:
+            return None, None, None, False
+        if not node.is_select_multiple:
+            # Per-study dynamic calculates: `<node>_<id>`, no choice.
+            return None, None, token, False
+        choice, label, from_index = self._decode_choice(node, token)
+        if choice is None and from_index:
+            # The index knows this token maps to two different declared values,
+            # so which choice it is cannot be recovered.
+            return None, None, None, True
+        if not from_index and _COMPOSITE_INT.fullmatch(token):
+            # An UNRESOLVED multi-token all-integer choice is not a choice: a real
+            # numeric value sanitises to exactly ONE token. This is the same drift
+            # as in `map_column` but on a select_multiple, where the choice/index
+            # boundary is unknowable from the contract, so no code is given. Gated
+            # on `not from_index`: a value like `1_2` in the select's choices is a
+            # real choice.
+            return None, None, None, True
+        return choice, label, None, False
+
     def map_column(self, col: str) -> dict:
         """Resolve a wide column to its node + repeat iterations + choice code.
 
@@ -525,28 +568,7 @@ class FormContract:
             return {"kind": "unmapped", "base": col, "indices": []}
         _, node, toks = picked
         depth = node.repeat_depth
-
-        # Consume trailing integer tokens as repeat indices, at most `depth` of them.
-        n = 0
-        while n < depth and n < len(toks) and toks[len(toks) - 1 - n].isdigit():
-            n += 1
-        head = toks[: len(toks) - n]
-        # An EMPTY choice is impossible, so if the head vanished while the suffix
-        # still carries more tokens than the node has depth, hand an index back: a
-        # negative sentinel's own leading underscore produced that empty first
-        # token (`x__77_2` is choice -77 at one index, not choice "" at iterations
-        # 77 and 2). When len(toks) == depth there is no choice at all -- that is
-        # the select_multiple's own parent column, which the export writes empty.
-        while n > 0 and len(toks) > depth and not "_".join(head):
-            n -= 1
-            head = toks[: len(toks) - n]
-        token = "_".join(head) if head else None
-        # A token made only of underscores is not a choice value: sanitisation maps
-        # a real value's characters into the alphabet, so at least one alphanumeric
-        # survives, so `x___` has no choice. A negative sentinel's `_66` keeps its
-        # digits.
-        if token is not None and not token.strip("_"):
-            token = None
+        n, token = _split_suffix(toks, depth)
 
         # A node with no choices cannot have a numeric head: a purely numeric
         # surplus is formdef drift (the column was written while the node sat in
@@ -559,32 +581,12 @@ class FormContract:
             and _ALL_INT.fullmatch(token)
         )
         if drift:
-            n = min(depth, len(toks))
-            token = None
-        idx_toks = toks[:n] if drift else (toks[len(toks) - n :] if n else [])
+            idx_toks, token = toks[: min(depth, len(toks))], None
+        else:
+            idx_toks = toks[len(toks) - n :]
         # Drift can leave fewer indices than repeat levels.
         iters = list(zip(node.repeat_path, [int(t) for t in idx_toks], strict=False))
-
-        choice = label = string_key = None
-        ambiguous_choice = False
-        if token is not None:
-            if node.is_select_multiple:
-                choice, label, from_index = self._decode_choice(node, token)
-                if choice is None and from_index:
-                    # The index knows this token maps to two different declared
-                    # values, so which choice it is cannot be recovered.
-                    ambiguous_choice = True
-                elif not from_index and _COMPOSITE_INT.fullmatch(token):
-                    # An UNRESOLVED multi-token all-integer choice is not a
-                    # choice: a real numeric value sanitises to exactly ONE token.
-                    # This is the same drift as above but on a select_multiple,
-                    # where the choice/index boundary is unknowable from the
-                    # contract, so no code is given. Gated on `not from_index`: a
-                    # value like `1_2` in the select's choices is a real choice.
-                    choice, label, ambiguous_choice = None, None, True
-            else:
-                # Per-study dynamic calculates: `<node>_<id>`, no choice.
-                string_key = token
+        choice, label, string_key, ambiguous_choice = self._choice_of(node, token)
 
         result = {
             "kind": "matched",
@@ -716,7 +718,7 @@ def _default_itext(model) -> dict[str, str]:
     if not translations:
         return {}
     default = next(
-        (t for t in translations if t.get("default") == "true()"), translations[0]
+        (t for t in translations if t.get("default") == _TRUE), translations[0]
     )
     texts = {}
     for text in default:
@@ -727,26 +729,40 @@ def _default_itext(model) -> dict[str, str]:
     return texts
 
 
-def parse_contract(xml_path) -> FormContract:
-    """Parse a compiled XForm XML, as a path or as bytes, into a FormContract."""
+# XForm attribute values that mean true, as in `required="true()"`.
+_TRUE = "true()"
+_TRUE_VALUES = (_TRUE, "true", "1")
+
+# Body elements whose local name is the control a field uses.
+_CONTROLS = ("select", "select1", "input", "upload", "trigger", "range")
+
+
+def _is_true(value: str) -> bool:
+    """Return whether a bind attribute such as ``required`` is set to true."""
+    return str(value).strip() in _TRUE_VALUES
+
+
+def _child(el, tag: str):
+    """Return ``el``'s first child with local name ``tag``, or None."""
+    return next((c for c in el if _ln(c.tag) == tag), None)
+
+
+def _read_root(xml_path):
+    """Return the XML's root element, from a path or from bytes."""
     import xml.etree.ElementTree as ET
 
     if isinstance(xml_path, bytes):
-        root = ET.fromstring(xml_path)
-    else:
-        root = ET.parse(str(xml_path)).getroot()
+        return ET.fromstring(xml_path)
+    return ET.parse(str(xml_path)).getroot()
 
-    # 1) Primary instance: the model's <instance> without an `id`, whose first
-    #    element is the form root. SurveyCTO compiles datasets and choice lists
-    #    into secondary <instance id="..."> blocks.
-    (model,) = [e for e in root.iter() if _ln(e.tag) == "model"]
-    (primary_instance,) = [
-        e for e in model if _ln(e.tag) == "instance" and not e.get("id")
-    ]
-    primary = next(c for c in primary_instance if isinstance(c.tag, str))
-    itext = _default_itext(model)
-    # Static secondary instances (choice lists behind an itemset), item by item.
-    instances = {
+
+def _secondary_instances(model) -> dict[str, list[dict]]:
+    """Return the static secondary instances (choice lists behind an itemset).
+
+    SurveyCTO compiles datasets and choice lists into ``<instance id="...">``
+    blocks; each is read item by item, as ``{column: text}``.
+    """
+    return {
         inst.get("id"): [
             {_ln(c.tag): (c.text or "") for c in item}
             for item in inst.iter()
@@ -756,203 +772,268 @@ def parse_contract(xml_path) -> FormContract:
         if _ln(inst.tag) == "instance" and inst.get("id")
     }
 
-    def label_text(label) -> str:
-        ref = label.get("ref")
-        return itext[_ITEXT_REF.match(ref).group(1)] if ref else _label_text(label)
 
-    def message_text(message: str | None) -> str | None:
+def _walk(
+    el,
+    ancestors: list[str],
+    repeats: list[str],
+    nodes: dict[str, dict],
+    repeat_tokens: set[str],
+) -> None:
+    """Record ``el`` and its descendants with their group and repeat ancestry."""
+    name = _ln(el.tag)
+    is_rep = any(_ln(k) == "template" for k in el.attrib)
+    if is_rep:
+        repeat_tokens.add(name)
+    anc = [*ancestors, name]
+    rep = [*repeats, name] if is_rep else list(repeats)
+    kids = [c for c in el if isinstance(c.tag, str)]
+    nodes["/".join(anc)] = {
+        "group_path": anc[:-1],
+        "repeat_path": rep[:-1] if is_rep else list(rep),
+        "is_leaf": not kids,
+    }
+    for c in kids:
+        _walk(c, anc, rep, nodes, repeat_tokens)
+
+
+def _instance_nodes(primary) -> tuple[dict[str, dict], set[str]]:
+    """Walk the primary instance: every node by path, and the repeat names."""
+    nodes: dict[str, dict] = {}
+    repeat_tokens: set[str] = set()
+    for c in primary:
+        if isinstance(c.tag, str):
+            _walk(c, [], [], nodes, repeat_tokens)
+    return nodes, repeat_tokens
+
+
+def _binds(root, prefix: str) -> dict[str, dict]:
+    """Return each bind's attributes by its path under the form root.
+
+    Binds are the authoritative typed-node set and may target group nodes too.
+    """
+    return {
+        el.get("nodeset")[len(prefix) :]: {_ln(k): v for k, v in el.attrib.items()}
+        for el in root.iter()
+        if _ln(el.tag) == "bind" and (el.get("nodeset") or "").startswith(prefix)
+    }
+
+
+class _Texts:
+    """Read labels, hints and messages in the form's default translation."""
+
+    def __init__(self, itext: dict[str, str]):
+        self.itext = itext
+
+    def label(self, label) -> str:
+        """Return a <label> or <hint>'s text, itself or the itext it names."""
+        ref = label.get("ref")
+        return self.itext[_ITEXT_REF.match(ref).group(1)] if ref else _label_text(label)
+
+    def message(self, message: str | None) -> str | None:
         """Return a bind's message, itself or the text its ``jr:itext()`` names."""
         if message is None:
             return None
         ref = _ITEXT_REF.match(message)
-        return itext[ref.group(1)] if ref else message
+        return self.itext[ref.group(1)] if ref else message
 
-    formid = primary.get("id") or _ln(primary.tag)
-    formdef_version = primary.get("version")
 
-    # 2) Walk the instance: record every node with its group/repeat ancestry.
-    instance_nodes: dict[str, dict] = {}
-    repeat_tokens: set[str] = set()
+@dataclass
+class _Body:
+    """What the body's controls say about each field, by its path.
 
-    def walk(el, ancestors: list[str], repeats: list[str]):
-        name = _ln(el.tag)
-        is_rep = any(_ln(k) == "template" for k in el.attrib)
-        if is_rep:
-            repeat_tokens.add(name)
-        anc = ancestors + [name]
-        rep = repeats + ([name] if is_rep else [])
-        kids = [c for c in el if isinstance(c.tag, str)]
-        path = "/".join(anc)
-        instance_nodes[path] = {
-            "group_path": anc[:-1],
-            "repeat_path": list(rep[:-1]) if is_rep else list(rep),
-            "is_leaf": not kids,
-        }
-        for c in kids:
-            walk(c, anc, rep)
+    The appearance carries ``search(...)`` for select-from-file fields, which is
+    the deterministic choice source (dataset + filter): ``Node.data_source``.
+    """
 
-    for c in primary:
-        if isinstance(c.tag, str):
-            walk(c, [], [])
-
-    # 3) Binds: nodeset (full /formid/...) -> attribs. Binds are the authoritative
-    #    typed-node set and may target group nodes too.
-    prefix = f"/{formid}/"
-    binds: dict[str, dict] = {}
-    for el in root.iter():
-        if _ln(el.tag) != "bind":
-            continue
-        ns = el.get("nodeset")
-        if not ns or not ns.startswith(prefix):
-            continue
-        rel = ns[len(prefix) :]
-        attrs = {_ln(k): v for k, v in el.attrib.items()}
-        binds[rel] = attrs
-
-    # 4) Body controls: ref (full path) -> control local-name + appearance.
-    #    The appearance carries `search(...)` for select-from-file fields, which is
-    #    the deterministic choice-source (dataset + filter) -> data_source.
-    controls: dict[str, str] = {}
-    appearances: dict[str, str] = {}
-    items: dict[str, list[dict]] = {}
-    filtered: set[str] = set()  # selects whose list is filtered per submission
-    choice_filters: dict[str, dict] = {}  # select -> its itemset's filter
-    labels: dict[str, str] = {}
-    hints: dict[str, str] = {}
-    mediatypes: dict[str, str] = {}
-    counts: dict[str, str] = {}
+    controls: dict[str, str] = field(default_factory=dict)
+    appearances: dict[str, str] = field(default_factory=dict)
+    items: dict[str, list[dict]] = field(default_factory=dict)
+    # Selects whose list is filtered per submission.
+    filtered: set[str] = field(default_factory=set)
+    # Select -> its itemset's filter.
+    choice_filters: dict[str, dict] = field(default_factory=dict)
+    labels: dict[str, str] = field(default_factory=dict)
+    hints: dict[str, str] = field(default_factory=dict)
+    mediatypes: dict[str, str] = field(default_factory=dict)
+    counts: dict[str, str] = field(default_factory=dict)
     # SurveyCTO lets a body control carry the calculate: a field prefilled or hidden.
-    body_calculates: dict[str, str] = {}
-    body = next((c for c in root if _ln(c.tag) == "body"), None)
-    if body is not None:
-        for el in body.iter():
-            ref = el.get("ref") or el.get("nodeset")
-            if not ref or not ref.startswith(prefix):
-                continue
-            rel = ref[len(prefix) :]
-            ctl = _ln(el.tag)
-            if ctl in ("select", "select1", "input", "upload", "trigger", "range"):
-                controls[rel] = ctl
-            label = next((c for c in el if _ln(c.tag) == "label"), None)
-            if label is not None:
-                labels[rel] = label_text(label)
-            hint = next((c for c in el if _ln(c.tag) == "hint"), None)
-            if hint is not None:
-                hints[rel] = label_text(hint)
-            if el.get("mediatype"):
-                mediatypes[rel] = el.get("mediatype")
-            if el.get("calculate"):
-                body_calculates[rel] = el.get("calculate")
-            if ctl == "repeat":
-                count = next(
-                    (v for k, v in el.attrib.items() if _ln(k) == "count"), None
-                )
-                if count is not None:
-                    counts[rel] = count
-            if ctl in ("select", "select1"):
-                items[rel] = [
-                    {
-                        "label": next(
-                            (label_text(c) for c in it if _ln(c.tag) == "label"),
-                            None,
-                        ),
-                        "value": next(
-                            (c.text for c in it if _ln(c.tag) == "value"), None
-                        ),
-                    }
-                    for it in el
-                    if _ln(it.tag) == "item"
-                ]
-                for itemset in (c for c in el if _ln(c.tag) == "itemset"):
-                    choices, choice_filter = _itemset_choices(itemset, instances, itext)
-                    items[rel] += choices
-                    if choice_filter:
-                        choice_filters[rel] = choice_filter
-                        if choice_filter["per_submission"]:
-                            filtered.add(rel)
-            ap = el.get("appearance")
-            if ap:
-                appearances[rel] = ap
+    calculates: dict[str, str] = field(default_factory=dict)
 
-    # 5) Merge into Node objects, keyed by the union of instance paths + bind paths.
-    def repeats_for(path: str) -> list[str]:
-        toks = path.split("/")[:-1]
-        return [t for t in toks if t in repeat_tokens]
+    def read(self, el, rel: str, instances: dict, texts: _Texts) -> None:
+        """Record what one body element says about the field at ``rel``."""
+        ctl = _ln(el.tag)
+        if ctl in _CONTROLS:
+            self.controls[rel] = ctl
+        for tag, store in (("label", self.labels), ("hint", self.hints)):
+            child = _child(el, tag)
+            if child is not None:
+                store[rel] = texts.label(child)
+        for attr, store in (
+            ("mediatype", self.mediatypes),
+            ("calculate", self.calculates),
+            ("appearance", self.appearances),
+        ):
+            if el.get(attr):
+                store[rel] = el.get(attr)
+        if ctl == "repeat":
+            count = next((v for k, v in el.attrib.items() if _ln(k) == "count"), None)
+            if count is not None:
+                self.counts[rel] = count
+        if ctl in ("select", "select1"):
+            self._read_choices(el, rel, instances, texts)
 
-    # Instance document order is form order; binds without an instance node follow.
-    nodes: dict[str, Node] = {}
-    for path in [*instance_nodes, *(p for p in binds if p not in instance_nodes)]:
-        inst = instance_nodes.get(path, {})
-        toks = path.split("/")
-        rep = inst.get("repeat_path", repeats_for(path))
-        b = binds.get(path, {})
-        ctl = controls.get(path)
-        ap = appearances.get(path)
-        select_multiple = ctl == "select" or b.get("type") == "select"
-        calculate = b.get("calculate") or body_calculates.get(path)
-        source = _parse_data_source(ap, calculate)
-        searched = bool(source and source["kind"] == "search")
-        choice_items, choice_columns = items.get(path, []), None
-        if searched:
-            choice_items, choice_columns = _split_search_items(choice_items)
-        nodes[path] = Node(
-            path=path,
-            name=toks[-1],
-            group_path=inst.get("group_path", toks[:-1]),
-            repeat_path=rep,
-            repeat_depth=len(rep),
-            is_leaf=inst.get("is_leaf", True),
-            xml_type=b.get("type"),
-            control=_SELECT_CONTROL.get(ctl, ctl),
-            is_select_multiple=select_multiple,
-            choice_items=choice_items,
-            choice_columns=choice_columns,
-            calculate=calculate,
-            calculation_is_default=not b.get("calculate") and path in body_calculates,
-            relevant=b.get("relevant"),
-            constraint=b.get("constraint"),
-            required=str(b.get("required", "")).strip() in ("true()", "true", "1"),
-            readonly=str(b.get("readonly", "")).strip() in ("true()", "true", "1"),
-            publishable=str(b.get("publishable", "")).strip()
-            in ("true()", "true", "1"),
-            preload=b.get("preload"),
-            preload_params=b.get("preloadParams"),
-            data_source=source,
-            # A search() select's dataset codes are unknown here, so its binaries
-            # are only the codes someone picked.
-            choices_per_submission=path in filtered or searched,
-            choice_filter=choice_filters.get(path),
-            original=b.get("original"),
-            field_type=b.get("fieldType"),
-            label=labels.get(path),
-            hint=hints.get(path),
-            constraint_message=message_text(b.get("constraintMsg")),
-            mediatype=mediatypes.get(path),
-            appearance=ap,
-            bind_appearance=b.get("appearance"),
-            repeat_count=counts.get(path),
-        )
+    def _read_choices(self, el, rel: str, instances: dict, texts: _Texts) -> None:
+        """Record a select's <item> choices, then those of its itemsets."""
+        items = [
+            {
+                "label": next(
+                    (texts.label(c) for c in it if _ln(c.tag) == "label"), None
+                ),
+                "value": next((c.text for c in it if _ln(c.tag) == "value"), None),
+            }
+            for it in el
+            if _ln(it.tag) == "item"
+        ]
+        for itemset in (c for c in el if _ln(c.tag) == "itemset"):
+            choices, choice_filter = _itemset_choices(itemset, instances, texts.itext)
+            items += choices
+            if choice_filter:
+                self.choice_filters[rel] = choice_filter
+                if choice_filter["per_submission"]:
+                    self.filtered.add(rel)
+        self.items[rel] = items
 
-    # A dataset named through a field (`search(${list_name})`) is that field's
-    # literal calculate, `string('roster')` or `'roster'`. Any other calculate
-    # (`concat(...)`, `if(...)`) picks the dataset per submission, so the
-    # dataset stays unknown (None) and `dataset_field` names the field. The
-    # form still imports: nothing downstream needs the dataset's name.
+
+def _read_body(root, prefix: str, instances: dict, texts: _Texts) -> _Body:
+    """Read the body's controls: ref (full path) -> what they say about the field."""
+    body = _Body()
+    element = _child(root, "body")
+    if element is None:
+        return body
+    for el in element.iter():
+        ref = el.get("ref") or el.get("nodeset")
+        if ref and ref.startswith(prefix):
+            body.read(el, ref[len(prefix) :], instances, texts)
+    return body
+
+
+def _node(
+    path: str,
+    inst: dict,
+    b: dict,
+    body: _Body,
+    texts: _Texts,
+    repeat_tokens: set[str],
+) -> Node:
+    """Merge a path's instance node, bind and body control into a Node."""
+    toks = path.split("/")
+    rep = inst.get("repeat_path", [t for t in toks[:-1] if t in repeat_tokens])
+    ctl = body.controls.get(path)
+    ap = body.appearances.get(path)
+    calculate = b.get("calculate") or body.calculates.get(path)
+    source = _parse_data_source(ap, calculate)
+    searched = bool(source and source["kind"] == "search")
+    choice_items, choice_columns = body.items.get(path, []), None
+    if searched:
+        choice_items, choice_columns = _split_search_items(choice_items)
+    return Node(
+        path=path,
+        name=toks[-1],
+        group_path=inst.get("group_path", toks[:-1]),
+        repeat_path=rep,
+        repeat_depth=len(rep),
+        is_leaf=inst.get("is_leaf", True),
+        xml_type=b.get("type"),
+        control=_SELECT_CONTROL.get(ctl, ctl),
+        is_select_multiple=ctl == "select" or b.get("type") == "select",
+        choice_items=choice_items,
+        choice_columns=choice_columns,
+        calculate=calculate,
+        calculation_is_default=not b.get("calculate") and path in body.calculates,
+        relevant=b.get("relevant"),
+        constraint=b.get("constraint"),
+        required=_is_true(b.get("required", "")),
+        readonly=_is_true(b.get("readonly", "")),
+        publishable=_is_true(b.get("publishable", "")),
+        preload=b.get("preload"),
+        preload_params=b.get("preloadParams"),
+        data_source=source,
+        # A search() select's dataset codes are unknown here, so its binaries
+        # are only the codes someone picked.
+        choices_per_submission=path in body.filtered or searched,
+        choice_filter=body.choice_filters.get(path),
+        original=b.get("original"),
+        field_type=b.get("fieldType"),
+        label=body.labels.get(path),
+        hint=body.hints.get(path),
+        constraint_message=texts.message(b.get("constraintMsg")),
+        mediatype=body.mediatypes.get(path),
+        appearance=ap,
+        bind_appearance=b.get("appearance"),
+        repeat_count=body.counts.get(path),
+    )
+
+
+def _resolve_named_datasets(nodes: dict[str, Node], prefix: str) -> None:
+    """Resolve each search() dataset named through a field.
+
+    A dataset named through a field (`search(${list_name})`) is that field's
+    literal calculate, `string('roster')` or `'roster'`. Any other calculate
+    (`concat(...)`, `if(...)`) picks the dataset per submission, so the
+    dataset stays unknown (None) and `dataset_field` names the field. The
+    form still imports: nothing downstream needs the dataset's name.
+    """
     for node in nodes.values():
         source = node.data_source
-        if source and source["dataset"].startswith(prefix):
-            field_path = source["dataset"][len(prefix) :]
-            named_by = nodes.get(field_path)
-            calculate = named_by.calculate if named_by else None
-            literal = _STRING_LITERAL.match((calculate or "").strip())
-            if literal:
-                source["dataset"] = literal.group(2).removesuffix(".csv")
-            else:
-                source["dataset"] = None
-                source["dataset_field"] = field_path
+        if not (source and source["dataset"].startswith(prefix)):
+            continue
+        field_path = source["dataset"][len(prefix) :]
+        named_by = nodes.get(field_path)
+        calculate = named_by.calculate if named_by else None
+        literal = _STRING_LITERAL.match((calculate or "").strip())
+        if literal:
+            source["dataset"] = literal.group(2).removesuffix(".csv")
+        else:
+            source["dataset"] = None
+            source["dataset_field"] = field_path
+
+
+def parse_contract(xml_path) -> FormContract:
+    """Parse a compiled XForm XML, as a path or as bytes, into a FormContract."""
+    root = _read_root(xml_path)
+    # The primary instance is the model's <instance> without an `id`; its first
+    # element is the form root.
+    (model,) = [e for e in root.iter() if _ln(e.tag) == "model"]
+    (primary_instance,) = [
+        e for e in model if _ln(e.tag) == "instance" and not e.get("id")
+    ]
+    primary = next(c for c in primary_instance if isinstance(c.tag, str))
+    texts = _Texts(_default_itext(model))
+    formid = primary.get("id") or _ln(primary.tag)
+    prefix = f"/{formid}/"
+
+    instance_nodes, repeat_tokens = _instance_nodes(primary)
+    binds = _binds(root, prefix)
+    body = _read_body(root, prefix, _secondary_instances(model), texts)
+
+    # Instance document order is form order; binds without an instance node follow.
+    paths = [*instance_nodes, *(p for p in binds if p not in instance_nodes)]
+    nodes = {
+        path: _node(
+            path,
+            instance_nodes.get(path, {}),
+            binds.get(path, {}),
+            body,
+            texts,
+            repeat_tokens,
+        )
+        for path in paths
+    }
+    _resolve_named_datasets(nodes, prefix)
 
     encrypted = any(
         _ln(el.tag) == "submission" and el.get("base64RsaPublicKey")
         for el in root.iter()
     )
-    return FormContract(formid, formdef_version, nodes, encrypted=encrypted)
+    return FormContract(formid, primary.get("version"), nodes, encrypted=encrypted)

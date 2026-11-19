@@ -18,7 +18,7 @@ table's metadata counts them.
 import datetime as dt
 import json
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 import pyarrow as pa
 
@@ -151,89 +151,109 @@ def _binary_name(node: Node, code: str, iterations: tuple[int, ...]) -> str:
     return f"{node.name}_{sanitize_choice_value(code)}{suffix}"
 
 
+@dataclass
+class _Picks:
+    """The choice binaries the columns name, per select_multiple and repeat instance."""
+
+    # select_multiple path -> the repeat instances its binaries appear in.
+    instances: dict[str, set[tuple[int, ...]]] = field(default_factory=dict)
+    # (select_multiple path, repeat instance) -> the codes picked there.
+    chosen: dict[tuple[str, tuple[int, ...]], set[str]] = field(default_factory=dict)
+    codes: dict[str, set[str]] = field(default_factory=dict)
+
+    def add(self, node: Node, iterations: tuple[int, ...], code: str) -> bool:
+        """Record a picked code; return False when the form's choices lack it.
+
+        A search() select's dataset codes are not in the form: any code goes.
+        """
+        self.instances.setdefault(node.path, set()).add(iterations)
+        self.chosen.setdefault((node.path, iterations), set()).add(code)
+        if node.path not in self.codes:
+            self.codes[node.path] = {str(c["value"]) for c in node.all_choices}
+        return not node.choices_known or code in self.codes[node.path]
+
+
+def _system_type(name: str) -> pa.DataType:
+    """Return a system column's Arrow type."""
+    if name in _SYSTEM_TIMESTAMPS:
+        return _TIMESTAMP
+    if name in _SYSTEM_INTS:
+        return pa.int64()
+    return pa.string()
+
+
 def _columns(names: list[str], contract: FormContract) -> list[_Column]:
     """Resolve every column, adding the binaries of choices nobody picked."""
     order = {path: i for i, path in enumerate(contract.nodes)}
     columns: dict[str, _Column] = {}
-    multi_instances: dict[str, set[tuple[int, ...]]] = {}
-    picked: dict[tuple[str, tuple[int, ...]], set[str]] = {}
-    codes_of: dict[str, set[str]] = {}
+    picks = _Picks()
     for position, name in enumerate(names):
-        if is_system_column(name):
-            arrow_type = (
-                _TIMESTAMP
-                if name in _SYSTEM_TIMESTAMPS
-                else pa.int64()
-                if name in _SYSTEM_INTS
-                else pa.string()
-            )
-            rank = -1 if name == "KEY" else position
-            columns[name] = _Column(name, arrow_type, {"system": "true"}, (0, rank))
-            continue
-        m = contract.map_column(name)
-        if m["kind"] != "matched":
-            columns[name] = _text(name, "maps to no form field", {}, (2, position))
-            continue
-        node = contract.nodes[m["node_path"]]
-        iterations = tuple(i for _, i in m["repeat_iterations"])
-        key = (1, order[node.path], iterations, 0)
-        if not node.is_leaf:
-            columns[name] = _text(
-                name, f"maps to group {node.path!r}", {}, key, structural=True
-            )
-            continue
-        if m.get("ambiguous_choice"):
-            columns[name] = _text(
-                name,
-                "a choice binary whose choice is ambiguous",
-                _node_metadata(node),
-                key,
-            )
-            continue
-        if node.is_select_multiple and m["choice_code"] is not None:
-            multi_instances.setdefault(node.path, set()).add(iterations)
-            picked.setdefault((node.path, iterations), set()).add(str(m["choice_code"]))
-            if node.path not in codes_of:
-                codes_of[node.path] = {str(c["value"]) for c in node.all_choices}
-            codes = codes_of[node.path]
-            # A search() select's dataset codes are not in the form: any code goes.
-            if node.choices_known and str(m["choice_code"]) not in codes:
-                columns[name] = _text(
-                    name,
-                    "a choice code not among the form's choices",
-                    _node_metadata(node),
-                    (*key[:3], len(node.all_choices)),
-                    binary_group=(node.path, iterations),
-                )
-            continue
-        if node.xml_type not in _XML_TYPES:
-            columns[name] = _text(
-                name,
-                f"no Arrow type for xml_type {node.xml_type!r}",
-                _node_metadata(node),
-                key,
-            )
-            continue
-        # A select_one control can sit on a `select1` or a `string` bind.
-        is_select_one = node.xml_type == "select1" or node.control == "select_one"
-        arrow_type = (
-            _select_one_type(node) if is_select_one else _XML_TYPES[node.xml_type]
-        )
-        columns[name] = _Column(
-            name,
-            arrow_type,
-            _node_metadata(node),
-            key,
-            structural=node.original == "note",
-        )
+        column = _column(name, position, contract, order, picks)
+        if column is not None:
+            columns[name] = column
 
-    for path, instances in multi_instances.items():
+    for path, instances in picks.instances.items():
         node = contract.nodes[path]
         for iterations in instances if node.repeat_path else {()}:
-            chosen = picked.get((path, iterations), set())
+            chosen = picks.chosen.get((path, iterations), set())
             for column in _binary_columns(contract, node, iterations, chosen, order):
                 columns[column.name] = column
     return sorted(columns.values(), key=lambda c: c.sort_key)
+
+
+def _column(
+    name: str,
+    position: int,
+    contract: FormContract,
+    order: dict[str, int],
+    picks: _Picks,
+) -> _Column | None:
+    """Resolve one column, or record a choice binary in ``picks`` and return None.
+
+    A recorded binary's column is built with its siblings in `_binary_columns`.
+    """
+    if is_system_column(name):
+        rank = -1 if name == "KEY" else position
+        return _Column(name, _system_type(name), {"system": "true"}, (0, rank))
+    m = contract.map_column(name)
+    if m["kind"] != "matched":
+        return _text(name, "maps to no form field", {}, (2, position))
+    node = contract.nodes[m["node_path"]]
+    iterations = tuple(i for _, i in m["repeat_iterations"])
+    key = (1, order[node.path], iterations, 0)
+    if not node.is_leaf:
+        return _text(name, f"maps to group {node.path!r}", {}, key, structural=True)
+    if m.get("ambiguous_choice"):
+        reason = "a choice binary whose choice is ambiguous"
+        return _text(name, reason, _node_metadata(node), key)
+    if node.is_select_multiple and m["choice_code"] is not None:
+        if picks.add(node, iterations, str(m["choice_code"])):
+            return None
+        return _text(
+            name,
+            "a choice code not among the form's choices",
+            _node_metadata(node),
+            (*key[:3], len(node.all_choices)),
+            binary_group=(node.path, iterations),
+        )
+    return _answer_column(name, node, key)
+
+
+def _answer_column(name: str, node: Node, key: tuple) -> _Column:
+    """Return the column of a field's own answer, typed by its bind."""
+    if node.xml_type not in _XML_TYPES:
+        reason = f"no Arrow type for xml_type {node.xml_type!r}"
+        return _text(name, reason, _node_metadata(node), key)
+    # A select_one control can sit on a `select1` or a `string` bind.
+    is_select_one = node.xml_type == "select1" or node.control == "select_one"
+    arrow_type = _select_one_type(node) if is_select_one else _XML_TYPES[node.xml_type]
+    return _Column(
+        name,
+        arrow_type,
+        _node_metadata(node),
+        key,
+        structural=node.original == "note",
+    )
 
 
 def _binary_columns(
@@ -271,9 +291,13 @@ def _binary_columns(
 
 
 def _code_order(code: str) -> tuple:
-    """Sort integer codes by value, ahead of text codes."""
+    """Sort integer codes by value, ahead of text codes.
+
+    The code itself breaks ties (``1`` and ``01``), so the order never depends on
+    set iteration.
+    """
     try:
-        return (0, int(code), "")
+        return (0, int(code), code)
     except ValueError:
         return (1, 0, code)
 
@@ -300,14 +324,12 @@ def _cast(
     return pa.array([v or None for v in raw], type=pa.string()), text
 
 
-def _split_raw_multiples(rows: list[dict], contract: FormContract) -> list[dict]:
-    """Return ``rows`` with each select_multiple exported raw (one column, the codes
-    separated by spaces) rewritten as its per-choice binaries, as the export writes
-    the others. The contract resolves each column, since a select's own name can end
-    in ``_<digits>`` like a repeat instance.
-    """
+def _raw_multiples(
+    names, contract: FormContract
+) -> dict[str, tuple[Node, tuple[int, ...]]]:
+    """Return the columns holding a select_multiple's raw answer, with its instance."""
     raw: dict[str, tuple[Node, tuple[int, ...]]] = {}
-    for name in dict.fromkeys(name for row in rows for name in row):
+    for name in names:
         if is_system_column(name):
             continue
         m = contract.map_column(name)
@@ -322,6 +344,16 @@ def _split_raw_multiples(rows: list[dict], contract: FormContract) -> list[dict]
         node = contract.nodes[m["node_path"]]
         if node.is_select_multiple and node.is_leaf:
             raw[name] = (node, tuple(i for _, i in m["repeat_iterations"]))
+    return raw
+
+
+def _split_raw_multiples(rows: list[dict], contract: FormContract) -> list[dict]:
+    """Return ``rows`` with each select_multiple exported raw (one column, the codes
+    separated by spaces) rewritten as its per-choice binaries, as the export writes
+    the others. The contract resolves each column, since a select's own name can end
+    in ``_<digits>`` like a repeat instance.
+    """
+    raw = _raw_multiples(dict.fromkeys(name for row in rows for name in row), contract)
     if not raw:
         return rows
     split = []
