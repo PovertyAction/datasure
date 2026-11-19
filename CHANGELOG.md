@@ -360,18 +360,25 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
-- **SurveyCTO imports failing with HTTP 430**: SurveyCTO refuses the form
-  design endpoint with 430, "your Excel form cannot be loaded until it is
-  optimized", for some forms, and the console offers no way to optimize
-  them
+- **SurveyCTO imports and replication questionnaires failing with HTTP
+  430** (#469): SurveyCTO refuses the form design endpoint with 430, "your
+  Excel form cannot be loaded until it is optimized", for some forms, and
+  the console offers no way to optimize them
   - Root cause: the import read column types and attachment media fields
-    from the design endpoint (`get_form_definition`)
+    from the design endpoint (`get_form_definition`), and the Replication
+    page built the questionnaire XLSX and `import_data.do` from it
+    (`SurveyCTOAPIClient.download_form_xlsx`)
   - Solution: types come from the compiled XML (#397), and the media fields
     from it too: `media_field_names(contract)` lists every `binary` bind,
     uploads as well as comments, text and audio audits and sensor streams.
-    Where the design endpoint is still used (the Replication page's XLSForm),
-    a 430 now says the form must be optimized and to contact SurveyCTO
-    support
+    On a 430, `download_form_xlsx` rebuilds the design-shaped definition from
+    the XML with the new `surveycto.xlsform.design_from_xml` (XLSForm types,
+    begin/end group and repeat rows, `${field}` references, one choice list
+    per select named after it, default language only) and marks it
+    `rebuilt_from_xml`; the Replication page says the questionnaire was
+    rebuilt. `Node.bind_appearance` keeps the bind's appearance, which names
+    comments and audit fields. A 430 from `download_form_definition` itself
+    says the form must be optimized and to contact SurveyCTO support
 
 - **Progress targets**: Targets entered on the Progress page did not load
   back, so the page config's survey target always won on reload

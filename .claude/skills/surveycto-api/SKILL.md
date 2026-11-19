@@ -35,7 +35,9 @@ The design JSON serves only the replication package's XLSForm. Typing and the
 attachment media fields (`media_field_names`: every `binary` bind, uploads as
 well as comments, audits and sensor streams) use the XML. SurveyCTO refuses the
 design endpoint with HTTP 430, "your Excel form cannot be loaded until it is
-optimized", for some forms whose XML downloads fine.
+optimized", for some forms whose XML downloads fine. `download_form_xlsx` then
+rebuilds the design-shaped definition from the XML
+(`surveycto.xlsform.design_from_xml`, marked `rebuilt_from_xml`).
 
 ## Import (`SurveyCTOClient.import_data`)
 

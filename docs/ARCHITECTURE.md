@@ -56,7 +56,8 @@ src/datasure/
 │   └── row_index.py        # Row-index parsing shared by prep and replication (no Streamlit)
 ├── replication/            # Stata/Python replication package export
 ├── surveycto/              # SurveyCTO form contract (xml_contract, xpath) and typed
-│                           # cast, adapted from surveycto_python_dict; maintained here
+│                           # cast, adapted from surveycto_python_dict; maintained here.
+│                           # xlsform rebuilds the design JSON from the XML (HTTP 430)
 ├── models/
 │   ├── schemas.py          # Pydantic models
 │   └── enums.py            # Prep action/method enums
