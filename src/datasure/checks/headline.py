@@ -9,6 +9,7 @@ from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import TYPE_CHECKING
 
+import polars as pl
 from pydantic import ValidationError
 
 if TYPE_CHECKING:
@@ -71,6 +72,70 @@ class CheckHeadline:
             and self.outstanding is not None
             and self.outstanding > 0
         )
+
+
+@dataclass(frozen=True)
+class EnumeratorScope:
+    """Whose issues a check counts for the Enumerator page.
+
+    Attributes
+    ----------
+    enumerator : str
+        The page's enumerator column.
+    team_column : str | None
+        The page's team column, if set.
+    team : str | None
+        The team the Enumerator page is narrowed to; None for all teams.
+        Records outside it, or with no team, are left out of the counts. A
+        check still finds its issues on all its records, so a duplicate ID
+        shared with another team is still a duplicate.
+    """
+
+    enumerator: str
+    team_column: str | None = None
+    team: str | None = None
+
+    @property
+    def narrowed(self) -> bool:
+        """Whether a team is chosen."""
+        return self.team is not None and self.team_column is not None
+
+    def keep(self, data: pl.DataFrame) -> pl.DataFrame:
+        """Return the rows of `data` in the chosen team; all rows without one.
+
+        With a team chosen but its column not in `data`, no row can be
+        placed in the team, so none is kept.
+        """
+        if not self.narrowed:
+            return data
+        if self.team_column not in data.columns:
+            return data.clear()
+        return data.filter(pl.col(self.team_column).cast(pl.String) == self.team)
+
+
+@dataclass(frozen=True)
+class ByEnumerator:
+    """A check's outstanding issues, split by the enumerator they belong to.
+
+    For the Enumerator page's "Needs attention" list. ``counts`` plus
+    ``unattributed`` is the check's own total, so the list can say how many
+    issues it could not place.
+
+    Attributes
+    ----------
+    counts : dict[str, int]
+        Issues by enumerator, as text; enumerators with none are left out.
+    unattributed : int
+        Issues on records with no enumerator.
+    """
+
+    counts: dict[str, int] = field(default_factory=dict)
+    unattributed: int = 0
+
+    @property
+    def total(self) -> int:
+        """All the issues, placed or not."""
+        return sum(self.counts.values()) + self.unattributed
 
 
 class DeltaKind(StrEnum):

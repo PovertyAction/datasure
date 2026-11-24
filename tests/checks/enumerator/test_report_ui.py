@@ -9,20 +9,31 @@ from unittest.mock import MagicMock, patch
 import polars as pl
 import pytest
 
+from datasure.checks.enumerator.attention import (
+    AttentionList,
+    AttentionRow,
+    LeftOut,
+    OtherChecks,
+    Reason,
+    Severity,
+)
+from datasure.checks.enumerator.models import ConsentOutcomeSettings
 from datasure.checks.enumerator.report_ui import (
+    ATTENTION_SHOWN,
+    PageControls,
+    _adopt_shared_controls,
     _get_numeric_columns,
+    _md,
+    _render_attention_row,
     _render_column_selector,
     _render_column_selector_single,
-    _render_enumerator_overview_metrics,
+    _render_columns_in_use,
     _render_enumerator_productivity,
-    _render_enumerator_statistics,
-    _render_enumerator_statistics_overtime,
-    _render_period_selector_overtime,
+    _render_needs_attention,
+    _render_overview,
+    _render_page_controls,
     _render_statistic_selector,
     _render_statistics_selector,
-    _render_time_period_selector,
-    _render_weekday_selector,
-    _render_weekday_selector_overtime,
     enumerator_report_data,
 )
 from datasure.models.schemas import ColumnByType
@@ -165,48 +176,116 @@ def test_get_numeric_columns_no_numeric():
 # PATCHED_ENUM UI FUNCTION TESTS
 # ============================================
 
-
-def test_render_enumerator_overview_no_date_enum(patched_enum):
-    """_render_enumerator_overview_metrics shows info when date/enum is None."""
-    _render_enumerator_overview_metrics(pl.DataFrame(), None, None, None)
-    patched_enum.info.assert_called()
+WEEK = PageControls("Week", "SUN", None)
+DAY = PageControls("Day", "SUN", None)
 
 
-def test_render_enumerator_overview_with_data(patched_enum, sample_enumerator_data):
-    """_render_enumerator_overview_metrics renders metrics with valid data."""
-    _render_enumerator_overview_metrics(
-        sample_enumerator_data, "submission_date", "enumerator", "team"
+def _drawn_columns(mock_st):
+    return [col for result in mock_st._made_columns for col in result]
+
+
+@pytest.fixture
+def tracked_columns(patched_enum):
+    """Keep the columns the mock makes, so tests can read their metrics."""
+    factory = patched_enum.columns.side_effect
+    patched_enum._made_columns = []
+
+    def track(*args, **kwargs):
+        made = factory(*args, **kwargs)
+        patched_enum._made_columns.append(made)
+        return made
+
+    patched_enum.columns.side_effect = track
+    return patched_enum
+
+
+def test_render_overview_shows_four_figures_with_comparisons(
+    tracked_columns, sample_enumerator_data, sample_enumerator_settings
+):
+    """The overview has four figures; the last is interview length in minutes."""
+    with patch.dict(sys.modules, {"streamlit": tracked_columns}):
+        _render_overview(sample_enumerator_data, sample_enumerator_settings)
+
+    metrics = [
+        m for col in _drawn_columns(tracked_columns) for m in col.metric.mock_calls
+    ]
+    labels = [m.args[0] for m in metrics]
+    assert labels == [
+        "Active in the past 7 days",
+        "Submissions in the past 7 days",
+        "Submissions per enumerator",
+        "Interview length",
+    ]
+    assert metrics[3].args[1] == "1 h 4 min"
+    assert metrics[2].kwargs["delta"] == "Range 1 to 3"
+    assert "Fewest: E3 (1). Most: E1 (3)." in metrics[2].kwargs["help"]
+
+
+def test_render_overview_says_when_it_counts_one_team(
+    tracked_columns, sample_enumerator_data, sample_enumerator_settings
+):
+    """With a team chosen, the active figure says Summary counts every team."""
+
+    def active_help(team):
+        tracked_columns._made_columns.clear()
+        with patch.dict(sys.modules, {"streamlit": tracked_columns}):
+            _render_overview(sample_enumerator_data, sample_enumerator_settings, team)
+        first = _drawn_columns(tracked_columns)[0].metric.mock_calls[0]
+        return first.kwargs["help"]
+
+    assert active_help(None).endswith("as on Summary's Enumerator Stats row")
+    assert "in team T1. Summary's Enumerator Stats row counts every team" in (
+        active_help("T1")
     )
-    patched_enum.columns.assert_called()
 
 
-def test_render_enumerator_overview_no_team(patched_enum, sample_enumerator_data):
-    """_render_enumerator_overview_metrics renders without team column."""
-    _render_enumerator_overview_metrics(
-        sample_enumerator_data, "submission_date", "enumerator", None
+def test_render_overview_without_named_enumerators(
+    tracked_columns, sample_enumerator_data, sample_enumerator_settings
+):
+    """No named enumerator leaves the per-enumerator figure blank, not a crash."""
+    unnamed = sample_enumerator_data.with_columns(
+        pl.lit(None, pl.String).alias(sample_enumerator_settings.enumerator)
     )
-    patched_enum.columns.assert_called()
+    with patch.dict(sys.modules, {"streamlit": tracked_columns}):
+        _render_overview(unnamed, sample_enumerator_settings)
+
+    metrics = [
+        m for col in _drawn_columns(tracked_columns) for m in col.metric.mock_calls
+    ]
+    assert metrics[2].args[:2] == ("Submissions per enumerator", "—")
+    assert metrics[2].kwargs["help"] == "No submission names an enumerator"
 
 
-def test_render_time_period_selector_default(patched_enum):
-    """_render_time_period_selector returns Day when pills returns None."""
-    result = _render_time_period_selector("settings.json")
-    assert result == "Day"
-    patched_enum.pills.assert_called()
+def test_render_overview_without_duration_shows_teams(
+    tracked_columns, sample_enumerator_data, sample_enumerator_settings
+):
+    """Without a duration column the fourth figure counts the teams."""
+    settings = sample_enumerator_settings.model_copy(update={"duration": None})
+    with patch.dict(sys.modules, {"streamlit": tracked_columns}):
+        _render_overview(sample_enumerator_data, settings)
+
+    labels = [
+        m.args[0]
+        for col in _drawn_columns(tracked_columns)
+        for m in col.metric.mock_calls
+    ]
+    assert labels[-1] == "Teams"
 
 
-def test_render_time_period_selector_week(patched_enum):
-    """_render_time_period_selector returns Week when pills returns Week."""
-    patched_enum.pills.return_value = "Week"
-    result = _render_time_period_selector("settings.json")
-    assert result == "Week"
+def test_columns_in_use_names_set_and_unset_columns(
+    patched_enum, sample_enumerator_settings
+):
+    """The caption names the columns in use and the ones still to set."""
+    _render_columns_in_use(sample_enumerator_settings, ConsentOutcomeSettings())
+
+    text = patched_enum.caption.call_args.args[0]
+    assert "enumerator **enumerator**" in text
+    assert "Not set: consent, outcome." in text
 
 
-def test_render_weekday_selector(patched_enum):
-    """_render_weekday_selector returns offset code for the selected weekday."""
-    patched_enum.selectbox.return_value = "Monday"
-    result = _render_weekday_selector("settings.json")
-    assert result == "SUN"
+def test_markdown_in_names_is_escaped():
+    """Names shown in Markdown cannot turn into formatting."""
+    assert _md("a*b_[c]") == r"a\*b\_\[c\]"
 
 
 def test_render_column_selector(patched_enum):
@@ -214,6 +293,7 @@ def test_render_column_selector(patched_enum):
     result = _render_column_selector(["age", "income"], None, "settings.json")
     assert isinstance(result, list)
     patched_enum.multiselect.assert_called()
+    assert patched_enum.multiselect.call_args.kwargs["label"] == "Columns"
 
 
 def test_render_statistics_selector(patched_enum):
@@ -221,33 +301,6 @@ def test_render_statistics_selector(patched_enum):
     result = _render_statistics_selector(["count", "mean"], "settings.json")
     assert isinstance(result, list)
     patched_enum.multiselect.assert_called()
-
-
-def test_render_enumerator_statistics_no_enum(patched_enum):
-    """_render_enumerator_statistics shows info when enumerator is None."""
-    _render_enumerator_statistics(pl.DataFrame(), None, None, "settings.json")
-    patched_enum.info.assert_called()
-
-
-def test_render_period_selector_overtime_default(patched_enum):
-    """_render_period_selector_overtime returns Day when pills returns None."""
-    result = _render_period_selector_overtime("settings.json")
-    assert result == "Day"
-    patched_enum.pills.assert_called()
-
-
-def test_render_period_selector_overtime_week(patched_enum):
-    """_render_period_selector_overtime returns Week when pills returns Week."""
-    patched_enum.pills.return_value = "Week"
-    result = _render_period_selector_overtime("settings.json", default_period="Week")
-    assert result == "Week"
-
-
-def test_render_weekday_selector_overtime(patched_enum):
-    """_render_weekday_selector_overtime returns offset code."""
-    patched_enum.selectbox.return_value = "Tuesday"
-    result = _render_weekday_selector_overtime("Monday", "settings.json")
-    assert result == "MON"
 
 
 def test_render_statistic_selector(patched_enum):
@@ -271,22 +324,25 @@ def test_render_column_selector_single_with_value(patched_enum):
     assert result == "age"
 
 
-def test_render_enumerator_productivity_no_enum(patched_enum):
-    """_render_enumerator_productivity shows info when enum/date is None."""
-    _render_enumerator_productivity(pl.DataFrame(), None, None, None, "settings.json")
-    patched_enum.info.assert_called()
+def test_render_enumerator_productivity_uses_the_page_period(
+    patched_enum, sample_enumerator_data
+):
+    """Productivity groups by the page's period, with no controls of its own."""
+    with patch(
+        "datasure.checks.enumerator.report_ui.compute_enumerator_productivity",
+        return_value=pl.DataFrame({"enumerator": ["E1"]}),
+    ) as compute:
+        _render_enumerator_productivity(
+            sample_enumerator_data, "submission_date", "enumerator", None, WEEK
+        )
 
-
-def test_render_enumerator_statistics_overtime_no_enum(patched_enum):
-    """_render_enumerator_statistics_overtime shows info when enum/date is None."""
-    _render_enumerator_statistics_overtime(
-        pl.DataFrame(), None, None, None, "settings.json"
-    )
-    patched_enum.info.assert_called()
+    assert compute.call_args.args[3:] == ("Week", "SUN")
+    patched_enum.pills.assert_not_called()
+    patched_enum.dataframe.assert_called()
 
 
 # ============================================
-# SAVED VIEW STATE
+# PAGE CONTROLS AND SAVED VIEW STATE
 # ============================================
 
 
@@ -298,19 +354,82 @@ def fake_session(monkeypatch):
     return fake_st.session_state
 
 
-def test_report_choices_come_back_from_view_state(patched_enum, fake_session, tmp_path):
-    """Saved periods, columns and statistics are restored in a new session."""
+def test_page_controls_default_to_weekly_and_all_teams(
+    patched_enum, sample_enumerator_data
+):
+    """Without saved choices the page groups by week, from Monday, all teams."""
+    controls = _render_page_controls("settings.json", sample_enumerator_data, "team")
+
+    assert controls == PageControls("Week", "SUN", None)
+    team_box = patched_enum.selectbox.call_args_list[-1]
+    assert team_box.args[0] == "Team"
+    assert team_box.kwargs["options"] == ["All teams", "T1", "T2"]
+
+
+def test_page_controls_return_the_chosen_team_and_period(
+    patched_enum, sample_enumerator_data
+):
+    """A chosen team and period come back for every section to use."""
+    patched_enum.segmented_control.return_value = "Month"
+    patched_enum.selectbox.return_value = "T2"
+
+    controls = _render_page_controls("settings.json", sample_enumerator_data, "team")
+
+    assert controls == PageControls("Month", "SUN", "T2")
+
+
+def test_page_controls_without_team_column_draw_no_team_filter(
+    patched_enum, sample_enumerator_data
+):
+    """With no team column there is nothing to filter by."""
+    patched_enum.segmented_control.return_value = "Day"
+
+    controls = _render_page_controls("settings.json", sample_enumerator_data, None)
+
+    assert controls.team is None
+    patched_enum.selectbox.assert_not_called()
+
+
+def test_sections_periods_saved_by_older_versions_become_the_page_period(tmp_path):
+    """Productivity's saved period and week start become the page's; both go."""
     settings_file = tmp_path / "page_hfcs_settings.json"
     view = ViewState(settings_file, "enumerator")
     view.save("time_period_enumerator_productivity_key", "Month")
+    view.save("project_enumerator_statistics_overtime_period_pills", "Day")
+    view.save("project_week_start_day_enumerator_overtime", "Sunday")
+    view.save("statistics_options_enumerator", ["median"])
+
+    _adopt_shared_controls(view)
+
+    assert view.values() == {
+        "period": "Month",
+        "week_start": "Sunday",
+        "statistics_options_enumerator": ["median"],
+    }
+
+
+def test_a_saved_page_period_wins_over_older_section_periods(tmp_path):
+    """Once the page has its own period, older section choices are dropped."""
+    settings_file = tmp_path / "page_hfcs_settings.json"
+    view = ViewState(settings_file, "enumerator")
+    view.save("period", "Day")
+    view.save("time_period_enumerator_productivity_key", "Month")
+
+    _adopt_shared_controls(view)
+
+    assert view.values() == {"period": "Day"}
+
+
+def test_report_choices_come_back_from_view_state(patched_enum, fake_session, tmp_path):
+    """Saved statistics choices are restored in a new session."""
+    settings_file = tmp_path / "page_hfcs_settings.json"
+    view = ViewState(settings_file, "enumerator")
     view.save("statistics_options_enumerator", ["median", "not_a_stat"])
     view.save("enumerator_statistics_overtime_stat", "max")
 
-    _render_time_period_selector(str(settings_file))
     _render_statistics_selector(["count", "mean"], str(settings_file))
     _render_statistic_selector("count", str(settings_file))
 
-    assert fake_session["time_period_enumerator_productivity_key"] == "Month"
     assert fake_session["statistics_options_enumerator"] == ["median"]
     assert fake_session["enumerator_statistics_overtime_stat"] == "max"
 
@@ -345,21 +464,144 @@ def test_report_choices_saved_by_older_versions_move_to_view_state(
 
 
 # ============================================
+# NEEDS ATTENTION
+# ============================================
+
+
+def _row(name, *severities, team="T1"):
+    return AttentionRow(
+        name,
+        team,
+        tuple(Reason("Check", f"finding {i}", s) for i, s in enumerate(severities)),
+    )
+
+
+@pytest.fixture
+def attention_ui(patched_enum):
+    """The Needs attention section with its metrics recorded and toggles on."""
+    patched_enum.toggle.return_value = True
+    with patch("datasure.checks.enumerator.report_ui.metric_row") as metrics:
+        patched_enum.metric_row = metrics
+        yield patched_enum
+
+
+def _needs_attention(attention: AttentionList, rules=("activity",)) -> None:
+    _render_needs_attention(
+        attention, list(rules), OtherChecks(), "settings.json", in_view=40
+    )
+
+
+def test_needs_attention_with_no_rows_says_so(attention_ui):
+    """An empty list is a success, with what was checked under it."""
+    _needs_attention(AttentionList([]), ["activity", "duplicates"])
+
+    attention_ui.success.assert_called_once()
+    attention_ui.metric_row.assert_not_called()
+    assert attention_ui.caption.call_args.args[0] == "Checked: activity, duplicates."
+
+
+def test_needs_attention_lists_rows_and_folds_the_rest(attention_ui):
+    """The first rows show; the rest fold into an expander."""
+    rows = [_row(f"E{i}", Severity.FLAG) for i in range(ATTENTION_SHOWN + 2)]
+
+    _needs_attention(AttentionList(rows))
+
+    attention_ui.expander.assert_called_once_with("2 more")
+
+
+def test_needs_attention_metrics_count_enumerators_and_reasons(attention_ui):
+    """Enumerators with both severities count under both; notes count reasons."""
+    rows = [
+        _row("both", Severity.FLAG, Severity.FLAG, Severity.WATCH),
+        _row("watch", Severity.WATCH),
+    ]
+
+    _needs_attention(AttentionList(rows))
+
+    (metrics,) = attention_ui.metric_row.call_args.args
+    assert [(label, value, note) for label, value, _help, note in metrics] == [
+        ("Flagged enumerators", "1", "2 flags"),
+        ("Watch enumerators", "2", "2 watch reasons"),
+        ("Enumerators listed", "2", "of 40 enumerators"),
+    ]
+    # The old summary caption is gone.
+    assert not any("to watch" in c.args[0] for c in attention_ui.caption.call_args_list)
+
+
+def test_hiding_watch_drops_rows_with_only_watch_reasons(attention_ui):
+    attention_ui.toggle.side_effect = [True, False]
+    rows = [_row("both", Severity.FLAG, Severity.WATCH), _row("watch", Severity.WATCH)]
+
+    with patch("datasure.checks.enumerator.report_ui._render_attention_row") as draw:
+        _needs_attention(AttentionList(rows))
+
+    (call,) = draw.call_args_list
+    row, label = call.args
+    assert row.enumerator == "both"
+    assert [r.severity for r in row.reasons] == [Severity.FLAG]
+    assert label == "1 flagged"
+    # The metrics still count what is hidden.
+    (metrics,) = attention_ui.metric_row.call_args.args
+    assert metrics[1][1] == "2"
+
+
+def test_hiding_both_severities_asks_to_turn_one_on(attention_ui):
+    attention_ui.toggle.return_value = False
+
+    _needs_attention(AttentionList([_row("a", Severity.FLAG)]))
+
+    attention_ui.info.assert_called_once()
+    assert attention_ui.info.call_args.args[0] == (
+        "Turn on Show Flagged or Show Watch to see enumerators."
+    )
+
+
+def test_needs_attention_shows_each_check_left_out_as_an_error(patched_enum):
+    """A rule or check whose numbers failed is named with its reason."""
+    left_out = (
+        LeftOut("Outliers", "ValueError: bad settings", "Open Outliers."),
+        LeftOut("Activity", "ValueError: bad dates"),
+    )
+
+    _needs_attention(AttentionList([], left_out), ["activity", "duplicates"])
+
+    messages = [c.args[0] for c in patched_enum.error.call_args_list]
+    assert messages == [item.message for item in left_out]
+    assert messages[0].startswith("Outliers is left out of this list")
+    assert "ValueError: bad settings" in messages[0]
+    # A rule that failed is not listed as checked.
+    assert patched_enum.caption.call_args.args[0] == "Checked: duplicates."
+
+
+def test_attention_row_shows_badges_and_escaped_findings(patched_enum):
+    """Each reason shows its severity badge, its check and its finding."""
+    row = AttentionRow(
+        "E*1",
+        "T1",
+        (
+            Reason("Duplicates", "2 records with a duplicate ID", Severity.FLAG),
+            Reason("Activity", "No submissions since Mon", Severity.WATCH),
+        ),
+    )
+
+    _render_attention_row(row, "1 flagged · 1 watch")
+
+    markdown = [c.args[0] for c in patched_enum.markdown.call_args_list]
+    assert markdown[0] == r"**E\*1**"
+    assert markdown[1] == (
+        "- :red-badge[Flagged] **Duplicates**: 2 records with a duplicate ID\n"
+        "- :orange-badge[Watch] **Activity**: No submissions since Mon"
+    )
+
+
+# ============================================
 # ENUM_BC UI FRAGMENT TESTS
 # ============================================
 
 
-def test_render_enumerator_summary_table_no_date_enum(enum_bc):
-    """_render_enumerator_summary_table shows info when date/enum is None."""
-    enum_bc._render_enumerator_summary_table(
-        "proj", pl.DataFrame(), None, None, None, None, None
-    )
-    enum_bc.st.info.assert_called()
-
-
 def test_render_enumerator_summary_table_with_data(enum_bc, sample_enumerator_data):
-    """_render_enumerator_summary_table renders table with valid data."""
-    enum_bc._render_enumerator_summary_table(
+    """_render_enumerator_summary_table renders the summary it is given."""
+    summary = enum_bc.compute_enumerator_summary(
         "proj",
         sample_enumerator_data,
         "submission_date",
@@ -368,7 +610,28 @@ def test_render_enumerator_summary_table_with_data(enum_bc, sample_enumerator_da
         "formversion",
         "duration",
     )
+    enum_bc._render_enumerator_summary_table(summary, "enumerator", "team")
     enum_bc.st.dataframe.assert_called()
+
+
+def test_summary_table_shows_consent_and_completion_as_percentages(
+    enum_bc, sample_enumerator_data
+):
+    """Consent and completion are 0 to 1 rates, so they show as percentages."""
+    summary = enum_bc.compute_enumerator_summary(
+        "proj",
+        sample_enumerator_data,
+        "submission_date",
+        "enumerator",
+        None,
+        None,
+        None,
+    )
+    enum_bc._render_enumerator_summary_table(summary, "enumerator", None)
+
+    config = enum_bc.st.dataframe.call_args.kwargs["column_config"]
+    enum_bc.st.column_config.NumberColumn.assert_any_call("% Consent", format="percent")
+    assert "% consent" in config
 
 
 def test_render_enumerator_summary_table_with_show_info(
@@ -376,7 +639,7 @@ def test_render_enumerator_summary_table_with_show_info(
 ):
     """_render_enumerator_summary_table filters columns when show_info selected."""
     enum_bc.st.pills.return_value = ["submissions"]
-    enum_bc._render_enumerator_summary_table(
+    summary = enum_bc.compute_enumerator_summary(
         "proj",
         sample_enumerator_data,
         "submission_date",
@@ -385,39 +648,8 @@ def test_render_enumerator_summary_table_with_show_info(
         "formversion",
         "duration",
     )
+    enum_bc._render_enumerator_summary_table(summary, "enumerator", None)
     enum_bc.st.dataframe.assert_called()
-
-
-def test_render_enumerator_productivity_table_day(enum_bc, sample_enumerator_data):
-    """_render_enumerator_productivity_table renders with Day period."""
-    enum_bc._render_enumerator_productivity_table(
-        sample_enumerator_data,
-        "submission_date",
-        "enumerator",
-        None,
-        "settings.json",
-    )
-    enum_bc.st.dataframe.assert_called()
-
-
-def test_render_enumerator_productivity_table_week(enum_bc, sample_enumerator_data):
-    """_render_enumerator_productivity_table renders weekday selector for Week."""
-    enum_bc.st.pills.return_value = "Week"
-    enum_bc.st.selectbox.return_value = "Monday"
-    enum_bc._render_enumerator_productivity_table(
-        sample_enumerator_data,
-        "submission_date",
-        "enumerator",
-        "team",
-        "settings.json",
-    )
-    enum_bc.st.dataframe.assert_called()
-
-
-def test_render_enumerator_statistics_table_no_enum(enum_bc):
-    """_render_enumerator_statistics_table shows info when enum is None."""
-    enum_bc._render_enumerator_statistics_table(pl.DataFrame(), None, None, "s.json")
-    enum_bc.st.info.assert_called()
 
 
 def test_render_enumerator_statistics_table_no_cols(enum_bc, sample_enumerator_data):
@@ -437,14 +669,6 @@ def test_render_enumerator_statistics_table_with_cols(enum_bc, sample_enumerator
     enum_bc.st.dataframe.assert_called()
 
 
-def test_render_enumerator_statistics_with_enum(enum_bc, sample_enumerator_data):
-    """_render_enumerator_statistics calls the fragment table function."""
-    enum_bc._render_enumerator_statistics(
-        sample_enumerator_data, "enumerator", None, "settings.json"
-    )
-    enum_bc.st.info.assert_called()
-
-
 def test_render_enumerator_statistics_overtime_table_no_statscol(
     enum_bc, sample_enumerator_data
 ):
@@ -455,67 +679,34 @@ def test_render_enumerator_statistics_overtime_table_no_statscol(
         "enumerator",
         None,
         "settings.json",
+        enum_bc.PageControls("Week", "SUN", None),
     )
     enum_bc.st.info.assert_called()
 
 
-def test_render_enumerator_statistics_overtime_table_with_col(
+def test_render_enumerator_statistics_overtime_table_uses_the_page_period(
     enum_bc, sample_enumerator_data
 ):
-    """_render_enumerator_statistics_overtime_table renders with valid col."""
+    """Statistics over time groups by the page's period and week start."""
     enum_bc.st.selectbox.side_effect = ["age", "count"]
-    enum_bc._render_enumerator_statistics_overtime_table(
-        sample_enumerator_data,
-        "submission_date",
-        "enumerator",
-        None,
-        "settings.json",
-    )
+    with patch.object(
+        enum_bc,
+        "compute_enumerator_statistics_overtime",
+        return_value=pl.DataFrame({"enumerator": ["E1"]}),
+    ) as compute:
+        enum_bc._render_enumerator_statistics_overtime_table(
+            sample_enumerator_data,
+            "submission_date",
+            "enumerator",
+            "team",
+            "settings.json",
+            enum_bc.PageControls("Month", "MON", None),
+        )
+
+    assert compute.call_args.kwargs["period"] == "Month"
+    assert compute.call_args.kwargs["weekstartday"] == "MON"
+    enum_bc.st.pills.assert_not_called()
     enum_bc.st.dataframe.assert_called()
-
-
-def test_render_enumerator_statistics_overtime_table_week_period(
-    enum_bc, sample_enumerator_data
-):
-    """_render_enumerator_statistics_overtime_table handles Week period."""
-    enum_bc.st.pills.return_value = "Week"
-    enum_bc.st.selectbox.side_effect = ["age", "count", "Monday"]
-    enum_bc._render_enumerator_statistics_overtime_table(
-        sample_enumerator_data,
-        "submission_date",
-        "enumerator",
-        "team",
-        "settings.json",
-    )
-    enum_bc.st.dataframe.assert_called()
-
-
-def test_render_enumerator_productivity_with_valid_params(
-    enum_bc, sample_enumerator_data
-):
-    """_render_enumerator_productivity calls the table fragment when params valid."""
-    enum_bc._render_enumerator_productivity(
-        sample_enumerator_data,
-        "submission_date",
-        "enumerator",
-        None,
-        "settings.json",
-    )
-    enum_bc.st.dataframe.assert_called()
-
-
-def test_render_enumerator_statistics_overtime_with_valid_params(
-    enum_bc, sample_enumerator_data
-):
-    """_render_enumerator_statistics_overtime calls the table fragment."""
-    enum_bc._render_enumerator_statistics_overtime(
-        sample_enumerator_data,
-        "submission_date",
-        "enumerator",
-        None,
-        "settings.json",
-    )
-    enum_bc.st.info.assert_called()
 
 
 def test_enumerator_report_empty_data(enum_bc):
@@ -534,54 +725,117 @@ def test_enumerator_report_empty_data(enum_bc):
     enum_bc.st.info.assert_called()
 
 
-def test_enumerator_report_with_data(enum_bc, sample_enumerator_data):
-    """enumerator_report renders full report with valid data."""
-    survey_cols = ColumnByType(
-        categorical_columns=list(sample_enumerator_data.columns),
-        datetime_columns=["submission_date"],
+@pytest.fixture
+def full_report(enum_bc):
+    """The report module with Response Patterns stubbed out."""
+    enum_bc.render_response_patterns = MagicMock()
+    enum_bc.cached_response_patterns = MagicMock(return_value=None)
+    # The reloaded compute module's cache decorator is a mock; skip the flags.
+    enum_bc.enumerator_report_data = MagicMock(side_effect=lambda data, _file: data)
+    return enum_bc
+
+
+def test_enumerator_report_without_enumerator_asks_for_it_once(
+    enum_bc, sample_enumerator_data, sample_enumerator_settings
+):
+    """Without an enumerator column, one message asks for it and nothing else draws."""
+    enum_bc.enumerator_report_settings = MagicMock(
+        return_value=sample_enumerator_settings.model_copy(update={"enumerator": None})
     )
-    # `_render_consent_outcome_settings` lives in settings_ui (called internally by
-    # enumerator_report_settings) rather than report_ui, so it must be patched on
-    # the module that actually owns it for the stub to take effect.
-    from datasure.checks.enumerator import settings_ui as settings_ui_module
-
-    settings_ui_module._render_consent_outcome_settings = MagicMock()
-
-    def _selectbox_side_effect(label, options=None, **kwargs):
-        if options and "seconds" in options:
-            return "seconds"
-        return None
-
-    enum_bc.st.selectbox.side_effect = _selectbox_side_effect
     enum_bc.enumerator_report(
         "proj_id",
         sample_enumerator_data,
         "settings.json",
         {"survey_id": "survey_id"},
-        survey_cols,
+        ColumnByType(),
     )
-    enum_bc.st.title.assert_called()
 
-
-def test_render_enumerator_statistics_table_with_cols_no_team(
-    enum_bc, sample_enumerator_data
-):
-    """_render_enumerator_statistics_table uses else column config when no team."""
-    enum_bc.st.multiselect.side_effect = [["age"], ["count"]]
-    enum_bc._render_enumerator_statistics_table(
-        sample_enumerator_data, "enumerator", None, "settings.json"
-    )
-    enum_bc.st.dataframe.assert_called()
-
-
-def test_render_enumerator_statistics_overtime_table_early_return(
-    enum_bc, sample_enumerator_data
-):
-    """_render_enumerator_statistics_overtime_table returns early when enum None."""
-    enum_bc._render_enumerator_statistics_overtime_table(
-        sample_enumerator_data, "submission_date", None, None, "settings.json"
-    )
+    enum_bc.st.info.assert_called_once()
+    assert "enumerator column" in enum_bc.st.info.call_args.args[0]
     enum_bc.st.dataframe.assert_not_called()
+
+
+def test_enumerator_report_with_data(
+    full_report, sample_enumerator_data, sample_enumerator_settings
+):
+    """enumerator_report draws every section and asks the other checks once."""
+    enum_bc = full_report
+    enum_bc.enumerator_report_settings = MagicMock(
+        return_value=sample_enumerator_settings
+    )
+    other_checks = MagicMock(return_value=OtherChecks())
+
+    enum_bc.enumerator_report(
+        "proj_id",
+        sample_enumerator_data,
+        "settings.json",
+        {"survey_id": "survey_id"},
+        ColumnByType(),
+        other_checks=other_checks,
+    )
+
+    (scope,) = other_checks.call_args.args
+    assert (scope.enumerator, scope.team) == ("enumerator", None)
+    headers = [c.args[0] for c in enum_bc.st.subheader.call_args_list]
+    assert headers[:5] == [
+        ":material/flag: Needs attention",
+        ":material/table_view: Enumerator summary",
+        ":material/calendar_month: Productivity",
+        ":material/functions: Column statistics",
+        ":material/timeline: Statistics over time",
+    ]
+
+
+def test_enumerator_report_still_lists_when_response_patterns_fail(
+    full_report, sample_enumerator_data, sample_enumerator_settings
+):
+    """Response Patterns failing is named under the list; the page goes on."""
+    enum_bc = full_report
+    enum_bc.enumerator_report_settings = MagicMock(
+        return_value=sample_enumerator_settings
+    )
+    enum_bc.cached_response_patterns.side_effect = ValueError("bad settings")
+    other = OtherChecks(errors=(LeftOut("GPS", "OSError: gone", "Open GPS."),))
+
+    enum_bc.enumerator_report(
+        "proj_id",
+        sample_enumerator_data,
+        "settings.json",
+        {"survey_id": "survey_id"},
+        ColumnByType(),
+        other_checks=MagicMock(return_value=other),
+    )
+
+    errors = [c.args[0] for c in enum_bc.st.error.call_args_list]
+    assert errors[0].startswith("GPS is left out of this list")
+    assert errors[1].startswith("Response patterns is left out of this list")
+    assert "ValueError: bad settings" in errors[1]
+    headers = [c.args[0] for c in enum_bc.st.subheader.call_args_list]
+    assert ":material/table_view: Enumerator summary" in headers
+
+
+def test_enumerator_report_narrows_every_section_to_the_chosen_team(
+    full_report, sample_enumerator_data, sample_enumerator_settings
+):
+    """Choosing a team narrows the data each section gets."""
+    enum_bc = full_report
+    enum_bc.enumerator_report_settings = MagicMock(
+        return_value=sample_enumerator_settings
+    )
+    enum_bc.st.selectbox.side_effect = lambda label, **kwargs: (
+        "T2" if label == "Team" else None
+    )
+    with patch.object(enum_bc, "_render_enumerator_productivity") as productivity:
+        enum_bc.enumerator_report(
+            "proj_id",
+            sample_enumerator_data,
+            "settings.json",
+            {"survey_id": "survey_id"},
+            ColumnByType(),
+        )
+
+    data = productivity.call_args.args[0]
+    assert set(data["team"].to_list()) == {"T2"}
 
 
 # ============================================

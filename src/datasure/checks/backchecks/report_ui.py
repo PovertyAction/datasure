@@ -19,6 +19,7 @@ from datasure.checks.backchecks.attribution import (
     backcheck_key_col,
     build_attribution_entries,
     count_error_sources,
+    excused_mismatches,
     is_mismatch,
     load_attribution_log,
     mark_error_sources,
@@ -66,6 +67,7 @@ from datasure.checks.backchecks.settings_ui import backchecks_report_settings
 from datasure.checks.headline import (
     CheckDelta,
     CheckHeadline,
+    EnumeratorScope,
     settings_no_longer_fit,
 )
 from datasure.checks.health_period import DeltaWindow, logged_after, on_or_before
@@ -905,6 +907,102 @@ def backchecks_headline(
         outstanding=unattributed,
         resolved=sum(sources.values()) - unattributed,
     )
+
+
+@dataclass(frozen=True)
+class EnumeratorMismatches:
+    """Each enumerator's backcheck mismatches and values compared.
+
+    Attributes
+    ----------
+    mismatches : dict[str, int]
+        Mismatches by enumerator, less those attributed to the backchecker
+        or the respondent, as the enumerator-adjusted error rate counts them.
+    compared : dict[str, int]
+        Values compared by enumerator.
+    unattributed : int
+        Mismatches, counted the same way, on submissions with no enumerator
+        or whose KEY is not in the survey data.
+    """
+
+    mismatches: dict[str, int]
+    compared: dict[str, int]
+    unattributed: int = 0
+
+
+def backcheck_mismatches_by_enumerator(
+    project_id: str,
+    page_name_id: str,
+    survey_data: pl.DataFrame,
+    backcheck_data: pl.DataFrame,
+    setting_file: str,
+    config: dict,
+    scope: EnumeratorScope,
+) -> EnumeratorMismatches | None:
+    """Return each enumerator's mismatches behind the total error rate.
+
+    The comparisons are those of the Backchecks tab's "Error Rate (Total)",
+    with the saved settings, columns and Records to Include filters. Each is
+    matched to the survey submission's enumerator, and its team, by the
+    Survey KEY. Takes the parameters of `backchecks_headline` and the
+    scope: the page's enumerator column, which may differ from the one the
+    Backchecks settings name, and the team to count in, if any. With a
+    team chosen, only comparisons on that team's submissions count.
+
+    Returns
+    -------
+    EnumeratorMismatches | None
+        None when no values were compared or the Survey KEY or enumerator
+        column is not in the survey data.
+
+    Raises
+    ------
+    ValueError
+        If the saved settings no longer fit the data.
+    """
+    total = _total_errors(
+        project_id, page_name_id, survey_data, backcheck_data, setting_file, config
+    )
+    key = None if total is None else total.survey_key
+    enumerator = scope.enumerator
+    if total is None or not {key, enumerator} <= set(survey_data.columns):
+        return None
+    if key not in total.comparisons.columns:
+        return None
+    in_scope = scope.keep(survey_data)
+    owners = (
+        in_scope.select(
+            pl.col(key).cast(pl.String),
+            pl.col(enumerator).cast(pl.String).alias("_enumerator"),
+        )
+        .drop_nulls()
+        .unique(subset=key)
+    )
+    marked = mark_error_sources(
+        total.comparisons, load_attribution_log(project_id, page_name_id), key
+    ).with_columns(pl.col(key).cast(pl.String))
+    if scope.narrowed:
+        team_keys = in_scope[key].cast(pl.String).drop_nulls()
+        marked = marked.filter(pl.col(key).is_in(team_keys.implode()))
+    mismatches: dict[str, int] = {}
+    compared: dict[str, int] = {}
+    for (name,), rows in marked.join(owners, on=key, how="inner").group_by(
+        "_enumerator"
+    ):
+        rates = compute_overall_error_rates(rows)
+        if not rates or not rates[0].compared:
+            continue
+        compared[name] = rates[0].compared
+        mismatches[name] = _enumerator_mismatches(rates[0].mismatches, rows)
+    unowned = marked.join(owners, on=key, how="anti")
+    rates = compute_overall_error_rates(unowned) if not unowned.is_empty() else []
+    unattributed = _enumerator_mismatches(rates[0].mismatches, unowned) if rates else 0
+    return EnumeratorMismatches(mismatches, compared, unattributed)
+
+
+def _enumerator_mismatches(mismatches: int, rows: pl.DataFrame) -> int:
+    """Leave out the mismatches attributed to the backchecker or respondent."""
+    return mismatches - excused_mismatches(rows, "enumerator")
 
 
 def _unattributed(
