@@ -682,7 +682,7 @@ class TestRemoveImportFlow:
 
     def test_remove_data_cascades_table_removal(self):
         mock_remove, mock_exists, mock_row_filter, mock_delete_rows = (
-            self._run_remove_flow([True, False])
+            self._run_remove_flow([False, True, False])
         )
 
         # The import_log row for the alias is removed (either helper)
@@ -697,10 +697,10 @@ class TestRemoveImportFlow:
         assert ("stale_data", "raw") in removed
         assert ("stale_data", "prep") in removed
         assert ("stale_data", "corrected") not in removed
-        assert mock_exists.call_count == 2
+        assert mock_exists.call_count == 3
 
     def test_remove_data_also_removes_corrected_when_present(self):
-        mock_remove, mock_exists, _, _ = self._run_remove_flow([True, True])
+        mock_remove, mock_exists, _, _ = self._run_remove_flow([False, True, True])
 
         removed = [
             (call.kwargs.get("alias"), call.kwargs.get("db_name"))
@@ -709,10 +709,10 @@ class TestRemoveImportFlow:
         assert ("stale_data", "raw") in removed
         assert ("stale_data", "prep") in removed
         assert ("stale_data", "corrected") in removed
-        assert mock_exists.call_count == 2
+        assert mock_exists.call_count == 3
 
     def test_remove_data_skips_prep_and_corrected_when_absent(self):
-        mock_remove, mock_exists, _, _ = self._run_remove_flow([False, False])
+        mock_remove, mock_exists, _, _ = self._run_remove_flow([False, False, False])
 
         removed = [
             (call.kwargs.get("alias"), call.kwargs.get("db_name"))
@@ -721,7 +721,16 @@ class TestRemoveImportFlow:
         assert ("stale_data", "raw") in removed
         assert ("stale_data", "prep") not in removed
         assert ("stale_data", "corrected") not in removed
-        assert mock_exists.call_count == 2
+        assert mock_exists.call_count == 3
+
+    def test_remove_data_removes_the_form_definition(self):
+        _, _, _, mock_delete_rows = self._run_remove_flow([True, False, False])
+
+        deleted = [
+            (call.kwargs.get("alias"), call.kwargs.get("value"))
+            for call in mock_delete_rows.call_args_list
+        ]
+        assert ("form_definitions", "stale_data") in deleted
 
 
 _SAVED_CREDENTIALS_OVERRIDE = {

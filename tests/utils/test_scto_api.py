@@ -1,11 +1,13 @@
 """Tests for the SurveyCTO API client module."""
 
+from typing import ClassVar
 from unittest.mock import MagicMock, Mock, patch  # noqa: F401
 
 import pytest
 import requests
 
 from datasure.utils.scto_api import (
+    FormNotFoundError,
     SurveyCTOAPIClient,
     SurveyCTOAPIConfig,
     SurveyCTOAPIError,
@@ -80,6 +82,11 @@ class TestSurveyCTOAPIError:
         """Test that SurveyCTOAPIError inherits from Exception."""
         error = SurveyCTOAPIError("Test")
         assert isinstance(error, Exception)
+
+    def test_error_status_code(self):
+        """Errors keep the HTTP status, or None when there was no response."""
+        assert SurveyCTOAPIError("Test").status_code is None
+        assert SurveyCTOAPIError("Test", status_code=430).status_code == 430
 
 
 class TestSurveyCTOAPIClient:
@@ -181,6 +188,23 @@ class TestMakeRequest:
             with pytest.raises(SurveyCTOAPIError, match="API request failed"):
                 api_client._make_request("GET", "/test")
 
+    def test_http_error_keeps_status_and_body(self, api_client):
+        """The error keeps the status and up to 500 characters of the body."""
+        response = Mock(status_code=403, text="Forbidden: " + "x" * 1000)
+        error = requests.exceptions.HTTPError("403", response=response)
+        response.raise_for_status.side_effect = error
+
+        with (
+            patch.object(api_client.session, "request", return_value=response),
+            pytest.raises(SurveyCTOAPIError) as exc_info,
+        ):
+            api_client._make_request("GET", "/test")
+
+        message = str(exc_info.value)
+        assert exc_info.value.status_code == 403
+        assert "server said: Forbidden: x" in message
+        assert "x" * 501 not in message
+
     def test_connection_error(self, api_client):
         """Test handling of connection errors."""
         with patch.object(  # noqa: SIM117
@@ -224,13 +248,30 @@ class TestDatasetEndpoints:
 
         with patch.object(api_client, "_make_request") as mock_request:
             mock_response = Mock()
-            mock_response.json.return_value = expected_data
+            mock_response.json.return_value = {
+                "data": expected_data,
+                "nextCursor": None,
+            }
             mock_request.return_value = mock_response
 
             result = api_client.list_datasets()
 
             mock_request.assert_called_once_with("GET", "/datasets")
             assert result == expected_data
+
+    def test_list_datasets_follows_next_cursor(self, api_client):
+        """Test listing datasets reads every page."""
+        first, second = Mock(), Mock()
+        first.json.return_value = {"data": [{"id": "a"}], "nextCursor": "c1"}
+        second.json.return_value = {"data": [{"id": "b"}], "nextCursor": None}
+
+        with patch.object(
+            api_client, "_make_request", side_effect=[first, second]
+        ) as mock_request:
+            result = api_client.list_datasets()
+
+        assert result == [{"id": "a"}, {"id": "b"}]
+        mock_request.assert_called_with("GET", "/datasets", params={"cursor": "c1"})
 
     def test_get_dataset_info(self, api_client):
         """Test getting dataset information."""
@@ -393,6 +434,33 @@ class TestFormEndpoints:
                 ):
                     api_client.download_form_definition("test_form")
 
+    def test_download_form_definition_not_optimized(self, api_client):
+        """A 430 says in plain words that the form must be optimized.
+
+        SurveyCTO's design endpoint returns 430 with "your Excel form cannot be
+        loaded until it is optimized" in the body, which the error keeps.
+        """
+        body = (
+            '{"error":{"code":430,"message":"I\'m sorry but your Excel form '
+            'cannot be loaded until it is optimized.","responseObject":null}}'
+        )
+        response = Mock(status_code=430, text=body)
+        error = requests.exceptions.HTTPError("430", response=response)
+        with (
+            patch.object(api_client, "_get_csrf_auth_headers", return_value={}),
+            patch.object(api_client.session, "get") as mock_get,
+        ):
+            mock_get.return_value.raise_for_status.side_effect = error
+
+            with pytest.raises(SurveyCTOAPIError) as exc_info:
+                api_client.download_form_definition("test_form")
+
+        message = str(exc_info.value)
+        assert exc_info.value.status_code == 430
+        assert message.startswith("SurveyCTO cannot provide this form's design")
+        assert "SurveyCTO support" in message
+        assert "cannot be loaded until it is optimized" in message
+
     def test_get_csrf_auth_headers_success(self, api_client):
         """Test successful CSRF authentication."""
         with patch.object(api_client.session, "head") as mock_head:  # noqa: SIM117
@@ -536,6 +604,21 @@ class TestFormEndpoints:
             with pytest.raises(SurveyCTOAPIError, match="Failed to download form data"):
                 api_client.download_form_data_json("form1", private_key=b"test_key")
 
+    def test_download_form_data_json_unencrypted_http_error_keeps_status(
+        self, api_client
+    ):
+        """An unencrypted download failure keeps the HTTP status from the request."""
+        response = Mock(status_code=403, text="Permission denied")
+        error = requests.exceptions.HTTPError("403 Forbidden", response=response)
+        with patch.object(api_client.session, "request") as mock_request:
+            mock_request.return_value.raise_for_status.side_effect = error
+            with pytest.raises(SurveyCTOAPIError) as excinfo:
+                api_client.download_form_data_json("form1")
+
+        assert excinfo.value.status_code == 403
+        assert "Unexpected error" not in str(excinfo.value)
+        assert "Permission denied" in str(excinfo.value)
+
     def test_download_form_data_json_encrypted_connection_error(self, api_client):
         """Test downloading encrypted form data with connection error."""
         with patch.object(  # noqa: SIM117
@@ -563,6 +646,142 @@ class TestFormEndpoints:
         ):
             with pytest.raises(SurveyCTOAPIError, match="Unexpected error"):
                 api_client.download_form_data_json("form1", private_key=b"test_key")
+
+
+class TestDownloadFormXlsx:
+    """The questionnaire XLSX, from the design or, on a 430, the form XML."""
+
+    DESIGN: ClassVar[dict] = {
+        "title": "Farm",
+        "fieldsRowsAndColumns": [["type", "name", "label"], ["text", "owner", "Owner"]],
+        "choicesRowsAndColumns": [["list_name", "name", "label"]],
+    }
+
+    @staticmethod
+    def _survey_types(xlsx: bytes) -> list[str]:
+        import io
+
+        import openpyxl
+
+        sheet = openpyxl.load_workbook(io.BytesIO(xlsx))["survey"]
+        return [row[0] for row in sheet.iter_rows(min_row=2, values_only=True)]
+
+    def test_uses_the_design(self, api_client):
+        """A form SurveyCTO serves is built from its design."""
+        with (
+            patch.object(
+                api_client, "download_form_definition", return_value=self.DESIGN
+            ),
+            patch.object(api_client, "download_form_xml") as mock_xml,
+        ):
+            xlsx, form_def = api_client.download_form_xlsx("farm")
+
+        assert form_def is self.DESIGN
+        assert self._survey_types(xlsx) == ["text"]
+        mock_xml.assert_not_called()
+
+    def test_not_optimized_rebuilds_from_the_form_xml(self, api_client):
+        """A 430 (form not optimized) falls back to the compiled form XML."""
+        from tests.surveycto.farm_form import XML as FARM_XML
+
+        not_optimized = SurveyCTOAPIError("not optimized", status_code=430)
+        with (
+            patch.object(
+                api_client, "download_form_definition", side_effect=not_optimized
+            ),
+            patch.object(
+                api_client, "download_form_xml", return_value=FARM_XML.encode()
+            ),
+        ):
+            xlsx, form_def = api_client.download_form_xlsx("farm")
+
+        assert form_def["rebuilt_from_xml"] is True
+        assert "select_one crop" in self._survey_types(xlsx)
+
+    def test_other_errors_propagate(self, api_client):
+        """Any other design error is raised, without trying the XML."""
+        server_error = SurveyCTOAPIError("boom", status_code=500)
+        with (
+            patch.object(
+                api_client, "download_form_definition", side_effect=server_error
+            ),
+            patch.object(api_client, "download_form_xml") as mock_xml,
+            pytest.raises(SurveyCTOAPIError, match="boom"),
+        ):
+            api_client.download_form_xlsx("farm")
+
+        mock_xml.assert_not_called()
+
+
+class TestFormXml:
+    """Test downloading the compiled form XML."""
+
+    def test_download_form_xml(self, api_client):
+        """Test the XML comes back as the server's bytes."""
+        with patch.object(api_client.session, "get") as mock_get:
+            mock_get.return_value.content = b"<h:html/>"
+
+            assert api_client.download_form_xml("farm") == b"<h:html/>"
+
+        url = mock_get.call_args[0][0]
+        assert (
+            url
+            == f"https://{api_client.config.server_name}.surveycto.com/forms/farm/xml"
+        )
+
+    def test_download_form_xml_http_error(self, api_client):
+        """Test an HTTP error raises SurveyCTOAPIError."""
+        error = requests.exceptions.HTTPError("500", response=Mock(status_code=500))
+        with patch.object(api_client.session, "get") as mock_get:
+            mock_get.return_value.raise_for_status.side_effect = error
+
+            with pytest.raises(SurveyCTOAPIError, match="Failed to download form XML"):
+                api_client.download_form_xml("farm")
+
+    def test_download_form_xml_http_error_keeps_status_and_body(self, api_client):
+        """The error keeps the status and the server's explanation."""
+        response = Mock(status_code=500, text="Server is restarting")
+        error = requests.exceptions.HTTPError("500", response=response)
+        with patch.object(api_client.session, "get") as mock_get:
+            mock_get.return_value.raise_for_status.side_effect = error
+
+            with pytest.raises(SurveyCTOAPIError) as exc_info:
+                api_client.download_form_xml("farm")
+
+        assert exc_info.value.status_code == 500
+        assert "server said: Server is restarting" in str(exc_info.value)
+
+    def test_download_form_xml_not_found_keeps_status(self, api_client):
+        """FormNotFoundError keeps the 404 too."""
+        error = requests.exceptions.HTTPError("404", response=Mock(status_code=404))
+        with patch.object(api_client.session, "get") as mock_get:
+            mock_get.return_value.raise_for_status.side_effect = error
+
+            with pytest.raises(FormNotFoundError) as exc_info:
+                api_client.download_form_xml("farm")
+
+        assert exc_info.value.status_code == 404
+
+    def test_download_form_xml_not_found(self, api_client):
+        """Test a 404 raises FormNotFoundError."""
+        error = requests.exceptions.HTTPError("404", response=Mock(status_code=404))
+        with patch.object(api_client.session, "get") as mock_get:
+            mock_get.return_value.raise_for_status.side_effect = error
+
+            with pytest.raises(FormNotFoundError, match="farm"):
+                api_client.download_form_xml("farm")
+
+    def test_download_form_xml_other_request_error(self, api_client):
+        """Test any other requests error is wrapped too."""
+        with (
+            patch.object(
+                api_client.session,
+                "get",
+                side_effect=requests.exceptions.ChunkedEncodingError("cut"),
+            ),
+            pytest.raises(SurveyCTOAPIError, match="cut"),
+        ):
+            api_client.download_form_xml("farm")
 
 
 class TestSubmissionEndpoints:
@@ -678,7 +897,10 @@ class TestIntegration:
         with patch.object(api_client, "_make_request") as mock_request:
             # First call - list datasets
             mock_response1 = Mock()
-            mock_response1.json.return_value = [{"id": "dataset1"}]
+            mock_response1.json.return_value = {
+                "data": [{"id": "dataset1"}],
+                "nextCursor": None,
+            }
 
             # Second call - list form IDs
             mock_response2 = Mock()

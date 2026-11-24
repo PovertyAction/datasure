@@ -225,6 +225,17 @@ def _fetch_scto_assets(
 # ── UI helpers ────────────────────────────────────────────────────────────────
 
 
+def _questionnaire_status(form_def: dict | None) -> str:
+    """Return the build step's line for a fetched questionnaire."""
+    if form_def and form_def.get("rebuilt_from_xml"):
+        return (
+            "Questionnaire rebuilt from the compiled form, as SurveyCTO has not "
+            "optimized the form's design. It lists every field, but only the "
+            "default language, and each select gets a choice list named after it"
+        )
+    return "Questionnaire downloaded"
+
+
 def _on_progress(msg: str) -> None:
     st.write(f":material/check_circle: {msg}")
 
@@ -448,7 +459,7 @@ if st.button(
         if scto_error:
             st.warning(f"Questionnaire not included: {scto_error}")
         elif scto_xlsx:
-            st.write(":material/check_circle: Questionnaire downloaded")
+            st.write(f":material/check_circle: {_questionnaire_status(scto_form_def)}")
 
         zip_bytes = build_replication_package(
             project_id=project_id,

@@ -9,6 +9,39 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Typed SurveyCTO import** (#397): `SurveyCTOClient._import_regular_form`
+  (`connectors/scto.py`) downloads the deployed form's compiled XML
+  (`SurveyCTOAPIClient.download_form_xml`, `GET /forms/{id}/xml` with the same
+  Basic auth as the data), parses it with `parse_contract` and casts the wide
+  JSON with `cast_wide`. `typed_frame` converts the Arrow table to Polars,
+  strips the UTC zone from timestamps (stored naive, as before) and keeps
+  `formdef_version` as `Int64` for the enumerator check
+- **Form definitions** (#397): `save_form_definition` / `load_form_definition`
+  (`utils/duckdb_utils.py`) keep the XML in `form_definitions` in
+  `logs.duckdb`, one row per alias and form version. Removing an import
+  removes its rows
+- **`datasure.surveycto`** (#397): the form contract (`xml_contract`,
+  `xpath`) and the typed cast (`cast`), adapted from surveycto_python_dict at
+  `d6f54f9` and maintained in DataSure from now on; `parse_contract` also
+  reads XML bytes. Upstream's offline tests for them are in
+  `tests/surveycto/`. Changes from upstream: a `search()` select's items are
+  split into its literal choices (integer values, as in ODK Collect) and
+  `Node.choice_columns`, the item naming its dataset's value and label
+  columns, and `Node.choices_known` is False until its dataset's codes are
+  read. A `search()` dataset named by a field whose calculate is not a
+  literal (`concat(...)`, `if(...)`) is left unknown (`data_source["dataset"]`
+  is `None`, `dataset_field` names the field) instead of failing the parse.
+  XPath `round` takes a halfway value toward positive infinity
+  (`round(2.5)` is 3), not to the even neighbour. A static choice filter
+  using XPath the evaluator does not implement (`normalize-space(...)`) keeps
+  every item and is marked `"unresolved"` in `Node.choice_filter`, with the
+  list read per submission, instead of failing the import
+- **`SurveyCTOAPIError.status_code`**: the HTTP status, or `None` when there
+  was no response. Every HTTP error from `SurveyCTOAPIClient` also includes up
+  to 500 characters of the response body, where SurveyCTO explains statuses
+  such as its non-standard 430. A failed submission download keeps the
+  status instead of becoming an "Unexpected error"
+
 - **Enumerator Report: Needs attention**: a list near the top of the report
   of the enumerators any check singles out, each with Flagged or Watch
   reasons
@@ -351,6 +384,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **Breaking, SurveyCTO column types** (#397): columns take the form's types
+  instead of `DataProcessor`'s. Integers are `Int64` (were `Float64`), dates
+  `Date` (were `Datetime`), numeric select_one codes `Int64` (on a `select1`
+  or a `string` bind) and select_multiple binaries `Int8` with 0 for unchosen
+  options of an answered question (both were `String`), `duration` `Int64`
+  (was `Float64`). A field the cast cannot parse in every row stays `String`.
+  A `search()` select takes its codes from a dataset, so its select_one stays
+  `String` and its select_multiple gets binaries only for the codes someone
+  picked. A choice binary whose choice cannot be recovered
+  (`ambiguous_choice`) stays `String` under its own name. A select_multiple
+  exported raw and blank in every row keeps its binaries, all missing; one
+  whose choices are only known when picked keeps its raw column, all
+  missing, so an unanswered question stays visible. Prep or correction
+  steps that relied on the old types report `Failed` on the next replay
+- **Form or dataset routing** (#397): `import_data` imports an ID as a server
+  dataset only when its form XML cannot be downloaded or parsed and the ID is
+  on `list_datasets()`. The status SurveyCTO answers for a dataset ID's form
+  XML is undocumented, so any XML failure checks the list, not only a 404.
+  Submission, decryption and save errors raise instead of being retried as a
+  dataset, which had turned them into a silent untyped CSV import or a
+  misleading 403 from the dataset endpoint. When the dataset list itself
+  fails (an account without dataset access), the form's own XML error is
+  raised, not the listing's. A form import makes no dataset call, so accounts
+  without dataset access import forms as before
+- **Connection errors are classified by HTTP status**:
+  `SurveyCTOClient._handle_api_error` maps 401, 403 and 404 from
+  `status_code`, and matches keywords only for errors with no status. The
+  message now carries SurveyCTO's response body, whose words could match an
+  unrelated keyword
+- **`SurveyCTOAPIClient.list_datasets`** (#397) follows `nextCursor` and
+  returns the `data` entries (it returned the first raw page)
+
 - **Needs attention layout** (`checks/enumerator/report_ui.py`): metrics for
   Flagged and Watch enumerators (an enumerator with both counts under both,
   `attention.attention_totals`) and enumerators listed replace the "N flagged
@@ -428,6 +493,19 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Removed
 
+- **`DataProcessor`** and `SurveyCTOConfig.date_format`
+  (`connectors/scto.py`): replaced by `surveycto.cast`, which also replaces
+  the 1.2.1 date parsing fix (#395)
+- **`get_repeat_columns`**: replaced by `media_columns(contract, columns)`,
+  which picks a media field's columns through `FormContract.map_column`, so
+  a sibling field sharing the prefix (`photo_1` beside `photo`) is never read
+  as media. Typed siblings crashed the import. `MediaDownloader` now takes
+  column names and skips a column that is missing (no submissions, an empty
+  repeat) or not a string
+- **`SurveyCTOClient.get_form_definition`**: the import no longer reads the
+  design endpoint. `SurveyCTOAPIClient.download_form_definition` stays for
+  the Replication page's XLSForm
+
 - **Progress**: The Enumerator setting (dropped from `ProgressSettings` and
   `progress_config`; saved values are ignored, so existing projects need no
   migration), the never-shown consent and completion donut code
@@ -443,6 +521,30 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   private helpers), replaced by the Follow-up section — #409
 
 ### Fixed
+
+- **SurveyCTO imports and replication questionnaires failing with HTTP
+  430** (#469): SurveyCTO refuses the form design endpoint with 430, "your
+  Excel form cannot be loaded until it is optimized", for some forms, and
+  the console offers no way to optimize them
+  - Root cause: the import read column types and attachment media fields
+    from the design endpoint (`get_form_definition`), and the Replication
+    page built the questionnaire XLSX and `import_data.do` from it
+    (`SurveyCTOAPIClient.download_form_xlsx`)
+  - Solution: types come from the compiled XML (#397), and the media fields
+    from it too: `media_field_names(contract)` lists every `binary` bind,
+    uploads as well as comments, text and audio audits and sensor streams.
+    On a 430, `download_form_xlsx` rebuilds the design-shaped definition from
+    the XML with the new `surveycto.xlsform.design_from_xml` (XLSForm types,
+    begin/end group and repeat rows, `${field}` references outside quoted
+    string literals, one choice list per select named after it, default
+    language only; a `search()` select's list keeps the row naming its
+    dataset columns and a `pulldata()` select its choices; a filtered list
+    keeps its `choice_filter`, and the choices sheet the item columns the
+    filter reads) and marks it
+    `rebuilt_from_xml`; the Replication page says the questionnaire was
+    rebuilt. `Node.bind_appearance` keeps the bind's appearance, which names
+    comments and audit fields. A 430 from `download_form_definition` itself
+    says the form must be optimized and to contact SurveyCTO support
 
 - **Enumerator Summary**: % Consent and % Completed showed the 0 to 1 rate
   with a % sign (0.94%); they now use the `percent` format (94%)
