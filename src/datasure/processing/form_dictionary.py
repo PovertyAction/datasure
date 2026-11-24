@@ -93,14 +93,14 @@ def build_form_dictionary(
 ) -> FormDictionary | None:
     """Build the dictionary, PII flags and stats of an alias's raw data.
 
-    ``None`` when the alias has no stored form definition: local files, server
-    datasets, and SurveyCTO imports from before definitions were kept.
-    PII flags come from the form's rules alone, trusting publishable fields;
-    a column the rules leave open is ``may_contain_pii`` and its values stay
-    out of the dictionary workbook.
+    ``None`` when the alias has no stored form definition with a schema: local
+    files, server datasets, and SurveyCTO imports from before definitions were
+    kept or last imported by 1.3.0a4. PII flags come from the form's rules
+    alone, trusting publishable fields; a column the rules leave open is
+    ``may_contain_pii`` and its values stay out of the dictionary workbook.
     """
     definition = load_form_definition(project_id, alias)
-    if definition is None:
+    if definition is None or definition[1] is None:
         return None
     xml, arrow_schema = definition
     contract = parse_contract(xml)

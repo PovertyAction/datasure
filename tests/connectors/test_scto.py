@@ -2330,6 +2330,60 @@ class TestTypedImport:
 
     @patch("datasure.connectors.scto.save_form_definition")
     @patch("datasure.connectors.scto.duckdb_save_table")
+    def test_without_a_stored_schema_raw_keeps_its_earlier_columns(
+        self, mock_save, mock_save_definition, client
+    ):
+        """Raw imported by 1.3.0a4 has no stored schema; the refresh still saves."""
+        contract = parse_contract(FARM_XML.encode())
+        existing = typed_frame(cast_wide(FARM_ROWS[:1], contract))
+        client.cache_manager.get_existing_data = Mock(
+            return_value=(existing, datetime(2024, 1, 1, tzinfo=UTC))
+        )
+        client._scto_client.download_form_data_json.return_value = FARM_ROWS[1:]
+        form_config = FormConfig(
+            alias="farm", form_id="farm", server="testserver", save_to="/x/farm.csv"
+        )
+
+        with patch(
+            "datasure.connectors.scto.load_form_definition",
+            return_value=(FARM_XML.encode(), None),
+        ):
+            client._import_regular_form(form_config)
+
+        combined = mock_save.call_args[0][1]
+        schema = pa.ipc.read_schema(pa.py_buffer(mock_save_definition.call_args[0][5]))
+        assert set(schema.names) == set(combined.columns)
+
+    @patch("datasure.connectors.scto.save_form_definition")
+    @patch("datasure.connectors.scto.duckdb_save_table")
+    def test_raw_is_not_saved_when_the_schema_cannot_be_read(
+        self, mock_save, mock_save_definition, client
+    ):
+        """The schema is worked out first, so a failure leaves raw as it was."""
+        contract = parse_contract(FARM_XML.encode())
+        existing = typed_frame(cast_wide(FARM_ROWS[:1], contract))
+        client.cache_manager.get_existing_data = Mock(
+            return_value=(existing, datetime(2024, 1, 1, tzinfo=UTC))
+        )
+        client._scto_client.download_form_data_json.return_value = FARM_ROWS[1:]
+        form_config = FormConfig(
+            alias="farm", form_id="farm", server="testserver", save_to="/x/farm.csv"
+        )
+
+        with (
+            patch(
+                "datasure.connectors.scto.load_form_definition",
+                side_effect=OSError("logs.duckdb is locked"),
+            ),
+            pytest.raises(OSError, match="locked"),
+        ):
+            client._import_regular_form(form_config)
+
+        mock_save.assert_not_called()
+        mock_save_definition.assert_not_called()
+
+    @patch("datasure.connectors.scto.save_form_definition")
+    @patch("datasure.connectors.scto.duckdb_save_table")
     def test_attachments_use_the_xml_media_fields(
         self, mock_save, mock_save_definition, client, tmp_path
     ):

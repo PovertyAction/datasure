@@ -60,7 +60,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   cast's serialized Arrow schema. `form_table` casts raw back to it,
   restoring the field metadata Polars drops. When raw holds earlier
   batches, `merged_schema` adds their columns, so a refresh with few or no
-  new rows keeps them. Importing an alias as a server dataset deletes its
+  new rows keeps them; earlier batches with no stored schema add raw's own
+  columns, without form metadata. The schema is worked out before raw is
+  saved, so a failure leaves raw unchanged. A `form_definitions` table from
+  1.3.0a4 gains the `arrow_schema` column on first use; its rows load with
+  no schema, and `build_form_dictionary` returns `None` for them until the
+  form is imported again. Importing an alias as a server dataset deletes its
   definitions (`delete_form_definitions`)
 - **`utils/missing_codes.py`** (#398): `codes_by_label` and
   `whole_number_code`, moved from `checks/missing.py` (were

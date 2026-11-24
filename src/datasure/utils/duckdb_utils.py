@@ -545,24 +545,38 @@ def save_form_definition(
         metadata the dictionary reads (Polars drops it on conversion).
     """
     with duckdb.connect(database_path(project_id, "logs")) as conn:
-        conn.execute(
-            f"""
-            CREATE TABLE IF NOT EXISTS {FORM_DEFINITIONS_TABLE} (
-                alias VARCHAR,
-                form_id VARCHAR,
-                formdef_version VARCHAR,
-                xml BLOB,
-                arrow_schema BLOB,
-                downloaded_at TIMESTAMP,
-                PRIMARY KEY (alias, formdef_version)
-            )
-            """
-        )
+        _ensure_form_definitions_table(conn)
         conn.execute(
             f"INSERT OR REPLACE INTO {FORM_DEFINITIONS_TABLE} "
+            "(alias, form_id, formdef_version, xml, arrow_schema, downloaded_at) "
             "VALUES (?, ?, ?, ?, ?, current_timestamp)",
             [alias, form_id, formdef_version, xml, arrow_schema],
         )
+
+
+def _ensure_form_definitions_table(conn: duckdb.DuckDBPyConnection) -> None:
+    """Create ``form_definitions``, or add the schema column to an older one.
+
+    1.3.0a4 created the table without ``arrow_schema``; its rows keep a null
+    schema until the form is imported again.
+    """
+    conn.execute(
+        f"""
+        CREATE TABLE IF NOT EXISTS {FORM_DEFINITIONS_TABLE} (
+            alias VARCHAR,
+            form_id VARCHAR,
+            formdef_version VARCHAR,
+            xml BLOB,
+            arrow_schema BLOB,
+            downloaded_at TIMESTAMP,
+            PRIMARY KEY (alias, formdef_version)
+        )
+        """
+    )
+    conn.execute(
+        f"ALTER TABLE {FORM_DEFINITIONS_TABLE} "
+        "ADD COLUMN IF NOT EXISTS arrow_schema BLOB"
+    )
 
 
 def delete_form_definitions(project_id: str, alias: str) -> None:
@@ -577,15 +591,19 @@ def delete_form_definitions(project_id: str, alias: str) -> None:
         )
 
 
-def load_form_definition(project_id: str, alias: str) -> tuple[bytes, bytes] | None:
+def load_form_definition(
+    project_id: str, alias: str
+) -> tuple[bytes, bytes | None] | None:
     """Return the XML and cast schema of an alias's latest downloaded form version.
 
     ``None`` when the alias has no stored form definition (local files,
     server datasets, or SurveyCTO imports from before definitions were kept).
+    The schema is ``None`` for a row saved by 1.3.0a4, which kept no schema.
     """
     if not duckdb_table_exists(project_id, FORM_DEFINITIONS_TABLE, "logs"):
         return None
     with duckdb.connect(database_path(project_id, "logs")) as conn:
+        _ensure_form_definitions_table(conn)
         rows = conn.execute(
             f"SELECT xml, arrow_schema FROM {FORM_DEFINITIONS_TABLE} WHERE alias = ? "
             "ORDER BY downloaded_at DESC, formdef_version DESC LIMIT 1",

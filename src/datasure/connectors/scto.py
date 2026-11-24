@@ -269,18 +269,26 @@ def media_field_names(contract: FormContract) -> list[str]:
     )
 
 
-def merged_schema(earlier: bytes | None, batch: pa.Schema) -> pa.Schema:
+def merged_schema(
+    earlier: bytes | None, existing: pl.DataFrame, batch: pa.Schema
+) -> pa.Schema:
     """Return the cast schema of raw after adding a batch to earlier batches.
 
     Raw is the diagonal concat of the batches, so its columns are the union of
     theirs. A column in both takes the batch's field.
+
+    ``earlier`` is the stored schema of the batches raw already holds. Without
+    one (raw imported by 1.3.0a4 or earlier, which kept no schema), the earlier
+    columns come from raw itself: their types are kept, but not the form
+    metadata the dictionary reads, so the dictionary lists them without form
+    details.
     """
-    if earlier is None:
-        raise ValueError(
-            "raw holds submissions imported before DataSure kept form "
-            "definitions; remove the import and import the form again"
-        )
-    fields = {f.name: f for f in pa.ipc.read_schema(pa.py_buffer(earlier))}
+    earlier_schema = (
+        pa.ipc.read_schema(pa.py_buffer(earlier))
+        if earlier is not None
+        else existing.to_arrow().schema
+    )
+    fields = {f.name: f for f in earlier_schema}
     fields.update({f.name: f for f in batch})
     return pa.schema(list(fields.values()), metadata=batch.metadata)
 
@@ -711,15 +719,17 @@ class SurveyCTOClient:
                 private_key,
             )
 
+        # Raw holds the earlier batches too: their columns stay in the schema.
+        # Worked out before raw is saved, so a failure here leaves raw as it was.
+        schema = table.schema
+        if not existing_data.is_empty():
+            earlier = load_form_definition(self.project_id, form_config.alias)
+            schema = merged_schema(earlier and earlier[1], existing_data, schema)
+
         # Save to DuckDB
         duckdb_save_table(
             self.project_id, combined_data, alias=form_config.alias, db_name="raw"
         )
-        # Raw holds the earlier batches too: their columns stay in the schema.
-        schema = table.schema
-        if not existing_data.is_empty():
-            earlier = load_form_definition(self.project_id, form_config.alias)
-            schema = merged_schema(earlier and earlier[1], schema)
         # After raw, so a definition always describes data raw holds.
         save_form_definition(
             self.project_id,

@@ -3,6 +3,7 @@
 import io
 from unittest.mock import Mock, patch
 
+import duckdb
 import polars as pl
 import pytest
 from openpyxl import load_workbook
@@ -16,7 +17,11 @@ from datasure.processing.form_dictionary import (
 )
 from datasure.surveycto.cast import cast_wide
 from datasure.surveycto.xml_contract import parse_contract
-from datasure.utils.duckdb_utils import duckdb_get_table, load_form_definition
+from datasure.utils.duckdb_utils import (
+    database_path,
+    duckdb_get_table,
+    load_form_definition,
+)
 from tests.surveycto.farm_form import ROWS, XML
 
 MISSING_CODES = pl.DataFrame(
@@ -93,6 +98,54 @@ def test_form_table_raises_when_raw_and_schema_differ(project):
 def test_no_definition_no_dictionary(project):
     raw = duckdb_get_table(project, "farm", "raw")
     assert build_form_dictionary(project, "listing", raw, MISSING_CODES) is None
+
+
+def test_a_project_from_1_3_0a4_refreshes_and_gets_a_dictionary(tmp_path):
+    """1.3.0a4 kept the form XML without the cast schema.
+
+    The first refresh on this version upgrades the table and stores a schema,
+    so the import succeeds and the dictionary can be built. The refresh
+    downloads every submission again, as the import does today.
+    """
+
+    def cache_path(project_id, *parts):
+        path = tmp_path.joinpath(project_id, *parts)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        return path
+
+    config = FormConfig(alias="farm", form_id="farm", server="srv", username="a@b.org")
+    with patch("datasure.utils.duckdb_utils.get_cache_path", side_effect=cache_path):
+        client = SurveyCTOClient("proj")
+        client._scto_client = Mock()
+        client._scto_client.list_datasets.return_value = []
+        client._scto_client.download_form_xml.return_value = XML.encode()
+        client._scto_client.download_form_data_json.return_value = ROWS[:1]
+        client.import_data(config)
+
+        # The logs table as 1.3.0a4 left it: no arrow_schema column.
+        with duckdb.connect(database_path("proj", "logs")) as conn:
+            conn.execute(
+                "CREATE TABLE a4 (alias VARCHAR, form_id VARCHAR, "
+                "formdef_version VARCHAR, xml BLOB, downloaded_at TIMESTAMP, "
+                "PRIMARY KEY (alias, formdef_version))"
+            )
+            conn.execute(
+                "INSERT INTO a4 SELECT alias, form_id, formdef_version, xml, "
+                "downloaded_at FROM form_definitions"
+            )
+            conn.execute("DROP TABLE form_definitions")
+            conn.execute("ALTER TABLE a4 RENAME TO form_definitions")
+        raw = duckdb_get_table("proj", "farm", "raw")
+        assert build_form_dictionary("proj", "farm", raw, MISSING_CODES) is None
+
+        client._scto_client.download_form_data_json.return_value = ROWS
+        client.import_data(config)
+
+        raw = duckdb_get_table("proj", "farm", "raw")
+        assert len(raw) == len(ROWS)
+        built = build_form_dictionary("proj", "farm", raw, MISSING_CODES)
+        assert built is not None
+        assert {row["variable"] for row in built.stats} <= set(raw.columns)
 
 
 def test_stats_follow_skip_logic_and_set_codes_apart(built):
