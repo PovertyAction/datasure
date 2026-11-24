@@ -120,6 +120,40 @@ class TestFindColumnReferences:
             )
         ]
 
+    def test_response_pattern_variables_are_references(self, cache):
+        _config()
+        settings = {
+            "enumerators": {
+                "enumerator": "enum",
+                "response_patterns": {
+                    "selected_variables": ["age", "income"],
+                    "type_overrides": {"phone": "categorical"},
+                },
+            }
+        }
+        path = cache / PROJECT / "settings" / "page_main_checks_settings.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(settings))
+
+        assert _find("age", "phone") == [
+            ColumnReference(
+                "age",
+                "Check page 'Main Checks'",
+                "Enumerator stats settings: response patterns variables",
+            )
+        ]
+
+    def test_response_pattern_variables_are_not_backcheck_references(self, cache):
+        _config(survey_data_name="other", backcheck_data_name="survey")
+        settings = {
+            "enumerators": {"response_patterns": {"selected_variables": ["age"]}}
+        }
+        path = cache / PROJECT / "settings" / "page_main_checks_settings.json"
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(json.dumps(settings))
+
+        assert _find("age") == []
+
     def _progress_settings(self, cache, progress: dict) -> None:
         path = cache / PROJECT / "settings" / "page_main_checks_settings.json"
         path.parent.mkdir(parents=True, exist_ok=True)

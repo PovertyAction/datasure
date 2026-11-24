@@ -28,6 +28,7 @@ from datasure.checks.gpschecks.review import (
     summarize_gps_outliers,
     validate_coordinates,
 )
+from datasure.checks.headline import EnumeratorScope
 from datasure.checks.outliers.review import (
     REVIEW_REASON_COL,
     REVIEW_STATUS_COL,
@@ -618,6 +619,52 @@ def test_summary_resolves_corrected_points_no_longer_flagged(outliers):
         {"KEY": "K3", "date": pd.Timestamp("2025-01-03").to_pydatetime()},
         {"KEY": "K9", "date": pd.Timestamp("2025-01-02").to_pydatetime()},
     ]
+
+
+def _by_enumerator_outliers(enum, team):
+    """Detection output after `to_pandas`: integer columns with a blank are floats."""
+    return pd.DataFrame(
+        {
+            "KEY": ["K1", "K2", "K3", "K4"],
+            "enum": enum,
+            "team": team,
+            "Outlier": [True, True, True, True],
+        }
+    )
+
+
+def test_unreviewed_by_names_integer_ids_as_polars_does():
+    """ID 101 reads "101", as on the rest of the page, not pandas' "101.0"."""
+    outliers = _by_enumerator_outliers(
+        [101.0, 101.0, 102.0, float("nan")], [1.0, 2.0, 2.0, 2.0]
+    )
+    summary = summarize_gps_outliers(outliers, "KEY", review=None)
+    schema = {"enum": pl.Int64, "team": pl.Int64}
+
+    everyone = summary.unreviewed_by(EnumeratorScope("enum", "team"), schema)
+    team_2 = summary.unreviewed_by(EnumeratorScope("enum", "team", "2"), schema)
+
+    assert (everyone.counts, everyone.unattributed) == ({"101": 2, "102": 1}, 1)
+    assert (team_2.counts, team_2.unattributed) == ({"101": 1, "102": 1}, 1)
+
+
+def test_unreviewed_by_keeps_float_ids_as_polars_does():
+    """An ID column stored as floats keeps "101.0", as polars casts it."""
+    outliers = _by_enumerator_outliers([101.0, 101.5, 101.0, 102.0], ["a"] * 4)
+    summary = summarize_gps_outliers(outliers, "KEY", review=None)
+
+    counts = summary.unreviewed_by(EnumeratorScope("enum"), {"enum": pl.Float64})
+
+    assert counts.counts == {"101.0": 2, "101.5": 1, "102.0": 1}
+
+
+def test_unreviewed_by_without_a_schema_reads_text_names():
+    outliers = _by_enumerator_outliers(["a", "a", None, "b"], ["x", "y", "x", None])
+    summary = summarize_gps_outliers(outliers, "KEY", review=None)
+
+    counts = summary.unreviewed_by(EnumeratorScope("enum", "team", "x"))
+
+    assert (counts.counts, counts.unattributed) == ({"a": 1}, 1)
 
 
 def test_gps_corrections_keeps_gps_fixes_of_the_configuration():

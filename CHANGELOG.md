@@ -42,6 +42,106 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   such as its non-standard 430. A failed submission download keeps the
   status instead of becoming an "Unexpected error"
 
+- **Enumerator Report: Needs attention**: a list near the top of the report
+  of the enumerators any check singles out, each with Flagged or Watch
+  reasons
+  - `checks/enumerator/attention.py` (Streamlit-free): `attention_rows`
+    merges reasons from the report's own numbers (activity, interview
+    length, missing answers, consent, completion, form version), Response
+    Patterns' High and Moderate badges, and other checks' `IssueCounts`.
+    Rules compare each enumerator with the rest of the team in view; rates
+    need `MIN_SUBMISSIONS` (5). Thresholds are module constants
+  - `checks/enumerator_flags.py`: one `by_enumerator` function per check
+    (Duplicates, Outliers & Constraints, GPS Checks, Backchecks), named by
+    the new `CheckEntry.by_enumerator` field. `catalogue.enumerator_other_checks`
+    asks the ready checks, caches each on the page fingerprint and returns
+    a failing check, or one whose status errors, as an `attention.LeftOut`
+    the list shows
+  - Each rule runs on its own: `attention_rows` returns an `AttentionList`
+    whose `left_out` names a rule that raised (logged), and
+    `report_ui._list_patterns` does the same for Response Patterns, so one
+    failure names itself under the list and the other reasons still show
+  - New per-check counters: `duplicates.duplicate_records_by_enumerator`,
+    `outliers.report_ui.outliers_by_enumerator`,
+    `GPSOutlierSummary.unreviewed_by`,
+    `backchecks.report_ui.backcheck_mismatches_by_enumerator` (mismatches
+    attributed to the backchecker or respondent left out). Each also counts
+    the issues on records with no enumerator (`headline.ByEnumerator`,
+    `EnumeratorMismatches.unattributed`), which `IssueCounts.unattributed`
+    carries and `attention.unattributed_notes` names under the list, so
+    each check's numbers add up to its own total. Duplicates counts records,
+    so they add up to the tab's "Records involved", not its duplicate IDs
+  - `health.cached_headline` returns a headline with its basis from Summary's
+    cache; `health.cached_on_page` caches other page-level results with it
+- **Enumerator Report: page controls**: one Period, Week starts on and Team
+  control for every section (`report_ui._render_page_controls`). The Team
+  filter narrows every section's data. The period and week start that
+  Productivity and Statistics Over Time saved separately move to the page's
+  `period` and `week_start` view state on first load
+  (`_adopt_shared_controls`)
+- **Response Patterns: Digit Preference** (#418, part of #158): a new
+  section at the bottom of the Enumerator Report, in
+  `checks/enumerator/response_patterns/` (`models.py`, `compute.py`,
+  `settings_ui.py`, `report_ui.py`). `report_ui.enumerator_report` calls
+  `render_response_patterns`, a fragment
+  - `compute.compute_response_patterns(data, settings, enumerator_col,
+    missing_codes)` (Streamlit-free) returns a `ResponsePatternResults`
+    model; the UI only renders it. Missing codes are masked before types are
+    inferred or answers scored
+  - Digit Preference pools the terminal digit of the integer part
+    (`floor(abs(x)) % 10`) across the selected integer and continuous
+    variables, skipping those with a range under 10, no variation or no
+    answers. A text column the user types as integer or continuous is
+    converted to numbers, and answers that aren't numbers count as missing
+  - Each enumerator's share of answers ending in 0 or 5 is divided by the
+    rest of the team's (everyone but that enumerator), rounded to two
+    decimals. `DIGIT_PREFERENCE_LEVELS` sets three sensitivity levels: High
+    flags at 1.25× with at least 100 responses, Medium (default) at 1.5×,
+    Low at 2×. Moderate means the next more sensitive level would flag the
+    enumerator, its response minimum included. N/A means fewer responses
+    than the minimum, or a team with no 0 or 5 endings
+  - `ResponsePatternSettings` (selected variables, type overrides, minimum
+    and warning sample sizes, and `digit_preference_sensitivity`,
+    `range_compression_sensitivity` and `categorical_sensitivity`) is saved
+    under `enumerators.response_patterns` in the page settings file;
+    settings that no longer validate fall back to the defaults
+  - `utils/column_references` lists the selected variables
+    (`_NESTED_SURVEY_SETTING_KEYS`), so renaming one in Prep warns that the
+    Enumerator stats settings use it
+- **Response Patterns: Range Compression** (#419, part of #158): a second
+  sub-tab, `compute._compute_range_compression`, on the same integer and
+  continuous variables as Digit Preference (text columns typed as numeric
+  are parsed the same way)
+  - Per variable, `sd_ratio = enum_sd / team_sd` against the rest of the
+    team, each side capped at its own 5th and 95th percentiles
+    (`TRIM_QUANTILES`) first and the ratio rounded to two decimals. An
+    enumerator's SD ratio is their lowest across variables
+    (`RangeCompressionEnumerator.variables[0]`). Mean shift is not flagged;
+    the 0–100 compression/shift score in #158 was dropped
+  - `RANGE_COMPRESSION_LEVELS`: flagged at an SD ratio of 0.65 or less
+    (High), 0.5 (Medium, default) or 0.35 (Low); `range_badge_band` gives
+    Moderate when the next more sensitive level would flag
+  - A variable is skipped for one enumerator below the minimum (or with
+    fewer than 2 answers) or when the rest of the team has no spread
+    (`SkipReason.TEAM_NO_VARIATION`)
+  - The detail's histogram (`RangeVariable.bucket_edges`) shares buckets
+    between the two series over the rest of the team's 1st to 99th
+    percentile (`HISTOGRAM_QUANTILES`), with outlying values in the end
+    buckets and whole-number edges when every answer is whole
+- **Response Patterns: Categorical Response Patterns** (#420, part of
+  #158): a third sub-tab, `compute._compute_categorical`, on categorical
+  variables
+  - Per question, each option's share for the enumerator and the rest of
+    the team, over the union of options (an option one side never chose is
+    0%). The gap is the difference in percentage points, rounded to one
+    decimal; a question's result is its largest absolute gap and the
+    enumerator's their largest across questions
+  - `CATEGORICAL_LEVELS`: flagged at a gap of 15 pp (High), 25 (Medium,
+    default) or 35 (Low); `categorical_badge_band` gives Moderate as the
+    other checks do. Options are ordered numerically where they parse as
+    numbers (`_option_counts`), so codes sort 1, 2, 10
+  - `SkipReason.TEAM_NO_RESPONSES` marks a question only the enumerator
+    answered
 - **Progress tracking-file and master-list modes**: new pure module
   `checks/progress_tracking.py`. `TrackingSettings` (mixed into
   `ProgressSettings`) adds `tracking_target`, `tracking_unit`,
@@ -316,6 +416,36 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **`SurveyCTOAPIClient.list_datasets`** (#397) follows `nextCursor` and
   returns the `data` entries (it returned the first raw page)
 
+- **Needs attention layout** (`checks/enumerator/report_ui.py`): metrics for
+  Flagged and Watch enumerators (an enumerator with both counts under both,
+  `attention.attention_totals`) and enumerators listed replace the "N flagged
+  and N to watch" caption. "Show Flagged" and "Show Watch" toggles, saved as
+  view state, filter the list (`attention.shown_rows`); rows are labelled
+  "2 flagged · 1 watch" (`attention.row_label`, replacing `flag_counts`), and
+  reasons within a row sort Flagged first, then by check
+- **Needs attention rules** (`checks/enumerator/attention.py`):
+  - Interview length and missing answers count only consented and completed
+    interviews when consent or outcome is set up (`counted_interviews`,
+    `ColumnRoles.consent`/`completed`); missing answers then read
+    `compute.compute_attention_summary` over those interviews,
+    passed to `attention_rows` as `missing`
+  - Form version: older-version submissions all within `FORM_VERSION_GRACE`
+    (1 day) of the newest version's release are Watch, not Flagged
+  - Response Patterns: a High badge on a low-sample result is Watch
+  - GPS: fewer than `GPS_FLAG_POINTS` (3) unreviewed points are Watch, via
+    the new `IssueCounts.flag_from`
+  - Missing answers read "% Null values" when the project has no missing
+    codes (`missing_column`); before, the rule needed "% Total Missing" and
+    never ran without codes
+- **Enumerator Report overview**: four figures with comparisons
+  (`compute.compute_overview_figures`, `models.OverviewFigures`) replace
+  the eight metrics. The old Fewest/Highest/Average "enumerator submissions"
+  were per enumerator per day; the new figure uses each enumerator's total
+- **Enumerator Report layout**: a caption names the columns in use; one
+  message replaces the five "requires a date and enumerator" boxes;
+  sections use `section_header` and `st.divider()`; selector labels lose
+  "Select ..:"; `response_patterns.report_ui.cached_response_patterns` is
+  public so the list reuses the section's cache
 - **Progress page**: Rebuilt as the settings expander
   (`progress_report_settings`, with "Reset filters" beside it, as on
   Summary), then a header shown on every tab (`display_progress_header`:
@@ -416,6 +546,53 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     comments and audit fields. A 430 from `download_form_definition` itself
     says the form must be optimized and to contact SurveyCTO support
 
+- **Enumerator Summary**: % Consent and % Completed showed the 0 to 1 rate
+  with a % sign (0.94%); they now use the `percent` format (94%)
+- **Summary's Enumerator Stats row**: it could disagree with the Enumerator
+  Report's "Active in the past 7 days". Root cause: the row used
+  `compute.compute_enumerator_overview`, which counted any submission after
+  the cut-off as active (including dates after today) and counted rows with
+  no enumerator as an enumerator, while the overview used its own rule.
+  Both now call `compute.count_active_enumerators` (in
+  `checks/enumerator/compute.py`): the 7 days up to and including today,
+  rows with no enumerator left out. `compute_enumerator_overview` and
+  `models.EnumeratorOverviewMetrics` are removed; `report_ui.enumerator_headline`
+  uses the new function, and the overview's help says when a chosen team
+  makes it differ from Summary
+- **Needs attention: Form version**: `attention.form_version_reasons` took
+  the newest version as the text maximum, so with versions stored as text
+  "9" beat "10" and the enumerators on the real newest version were
+  flagged. It also compared by day, so older-version submissions made
+  earlier on the update day counted as outdated. Versions now compare as
+  numbers when they all are (as text otherwise); with a datetime date
+  column only submissions after the newest version's first one count, and
+  with a date-only column only those from the next day
+- **Needs attention: Interview length**: `attention.duration_reasons`
+  compared each enumerator with the median over every submission,
+  including their own, so an enumerator who did most of the interviews set
+  their own benchmark and was never flagged. Each is now compared with the
+  median of the rest of the team's submissions, and the finding says "for
+  the rest of the team"
+- **Needs attention: Missing answers, Consent, Completion**:
+  `attention.missing_reasons` and `rate_reasons` took the team median over
+  every enumerator, including the one being judged, so in a small team an
+  enumerator's own share pulled the benchmark towards them (two
+  enumerators at 2% and 30% missing gave a 16% median, and 30% was not
+  flagged). Each is now compared with the median of the other enumerators
+  (`_rest_of_team_median`), and the finding says "for the rest of the
+  team". The rate gap is rounded, so a 15-point gap is not read as 14.99
+- **Needs attention: Team filter**: with a team chosen, other checks still
+  counted each enumerator's issues across every team, against that team's
+  submissions only, so an enumerator who worked in two teams brought the
+  other team's issues along. The per-enumerator counters
+  (`duplicate_records_by_enumerator`, `outliers_by_enumerator`,
+  `GPSOutlierSummary.unreviewed_by`, `backcheck_mismatches_by_enumerator`)
+  now take a `headline.EnumeratorScope` (enumerator column, team column,
+  chosen team) in place of the enumerator column, and count only the
+  chosen team's records; checks still find their issues on all records.
+  `catalogue.enumerator_other_checks` caches on the scope, and the
+  catalogue's `ByEnumerator` callable alias is renamed `CountIssues` so it
+  no longer shares a name with `headline.ByEnumerator`
 - **Progress targets**: Targets entered on the Progress page did not load
   back, so the page config's survey target always won on reload
   - Root cause: `progress_report_settings` saved the targets under `target`
@@ -473,6 +650,43 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     no-op
   - The row-index help text on the Prep page now describes this syntax.
     `TestStataRemoveRows` expected the 0-based output and is corrected
+- **Enumerator Report: overview without named enumerators**: data where no
+  submission names an enumerator (such as a team whose enumerator values are
+  all blank) stopped the report at `compute_overview_figures`, before Needs
+  attention. `OverviewFigures.median_per_enumerator`, `fewest` and `most` are
+  now None then, and "Submissions per enumerator" shows a dash
+- **Needs attention: enumerators in two teams**: with a team column and "All
+  teams", the rules read the summary table's one row per enumerator and team,
+  so an enumerator could get two "Missing answers" reasons, or a Consent or
+  Completion reason from one team's work only. The rules now read
+  `compute.compute_attention_summary` (replacing
+  `compute_enumerator_missing_shares`), grouped by enumerator alone; the
+  summary table still groups by team
+- **Needs attention: GPS with numeric enumerator IDs**: an integer
+  enumerator or team column with a blank came back from detection's
+  `to_pandas` as floats, so `GPSOutlierSummary.unreviewed_by` named ID 101
+  "101.0" and every GPS reason was dropped without an error. It now takes
+  the survey data's schema and reads the names and teams back with their
+  polars dtype before casting to text, so IDs stored as floats keep "101.0"
+- **Needs attention: Response Patterns settings**: the list ran Response
+  Patterns on the raw saved settings, so a variable since set as the team,
+  survey ID or survey key column (which the section drops) could flag every
+  enumerator. `settings_ui.effective_response_pattern_settings` applies the
+  section's variable-editor filtering without rendering, and
+  `report_ui._list_patterns` uses it with `excluded_columns` (was
+  `_excluded_columns`), so both run on the same settings and cache entry
+- **Needs attention: relative rule** (`attention.count_reasons`): an
+  enumerator's rate was compared with the team's including their own
+  issues, so one doing most of the interviews could hide (30 outliers in 90
+  against a colleague's 1 in 10 gave no reason), and the rule did not need
+  `MIN_SUBMISSIONS`. Rates now compare with the rest of the team's, need 5
+  submissions, and any issues against none for the rest of the team are
+  Flagged
+- **Needs attention: submissions with no enumerator**:
+  `attention.activity_reasons` and `form_version_reasons` dropped them
+  before finding the latest submission and the newest version's release, so
+  an unnamed newest submission hid inactivity and outdated forms. They now
+  count for those dates and are left out only when attributing reasons
 
 ## [1.2.1] - 2026-11-06
 

@@ -20,7 +20,7 @@ Kept free of Streamlit so the logic can be tested without a running app.
 
 import json
 import math
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass, field
 from enum import StrEnum
 from typing import Any
@@ -28,6 +28,7 @@ from typing import Any
 import pandas as pd
 import polars as pl
 
+from datasure.checks.headline import ByEnumerator, EnumeratorScope
 from datasure.checks.outliers.review import (
     REVIEW_COLUMNS,
     REVIEW_REASON_COL,
@@ -418,6 +419,23 @@ class GPSReviewLog:
     history: pl.DataFrame = field(default_factory=pl.DataFrame)
 
 
+def _as_text(values: pd.Series, schema: Mapping[str, pl.DataType]) -> pl.Series:
+    """Return a detection-output column as text, as polars casts the original.
+
+    The values are read back with the column's dtype in ``schema`` (as they
+    are when it is not there) and cast to text, so an integer ID that pandas
+    holds as 101.0 reads "101" while one stored as a float keeps "101.0".
+    """
+    dtype = schema.get(str(values.name))
+    as_object = values.astype(object).where(values.notna(), None).tolist()
+    series = (
+        pl.Series(as_object, dtype=dtype, strict=False)
+        if dtype is not None
+        else pl.Series(as_object, strict=False)
+    )
+    return series.cast(pl.String)
+
+
 @dataclass(frozen=True)
 class GPSOutlierSummary:
     """The GPS outliers of one configuration with their review status.
@@ -451,6 +469,42 @@ class GPSOutlierSummary:
             self.outliers, marked=self.marked
         )
         return self.outliers[flagged]
+
+    def unreviewed_by(
+        self,
+        scope: EnumeratorScope,
+        schema: Mapping[str, pl.DataType] | None = None,
+    ) -> ByEnumerator:
+        """Count the outstanding outliers by enumerator, as text.
+
+        Only outliers in the scope's team count, when one is chosen. Rows
+        with no enumerator, or every row when the enumerator column is not
+        in the data, are counted as unattributed, so with all teams the
+        counts add up to `outstanding`.
+
+        ``schema`` is the survey data's, before detection converted it to
+        pandas. The names and teams are then text as polars casts them,
+        which the rest of the page matches against: an integer column with
+        a blank comes back from pandas as floats, so ID 101 would otherwise
+        read "101.0", not "101".
+        """
+        schema = schema or {}
+        unreviewed = self.unreviewed()
+        if scope.narrowed:
+            if scope.team_column not in unreviewed.columns:
+                return ByEnumerator()
+            teams = _as_text(unreviewed[scope.team_column], schema)
+            in_team = (teams == scope.team).fill_null(value=False)
+            unreviewed = unreviewed[in_team.to_numpy()]
+        column = scope.enumerator
+        if column not in unreviewed.columns:
+            return ByEnumerator(unattributed=len(unreviewed))
+        names = _as_text(unreviewed[column], schema)
+        counts = names.drop_nulls().value_counts()
+        return ByEnumerator(
+            {str(name): int(count) for name, count in counts.iter_rows()},
+            unattributed=names.null_count(),
+        )
 
 
 _RESOLUTIONS_SCHEMA = {"KEY": pl.String, "date": pl.Datetime("us")}

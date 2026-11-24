@@ -41,6 +41,7 @@ def make_mock_st():
     mock_st.selectbox.return_value = None
     mock_st.multiselect.return_value = []
     mock_st.pills.return_value = None
+    mock_st.segmented_control.return_value = None
     mock_st.button.return_value = False
     mock_st.toggle.return_value = False
     mock_st.number_input.return_value = 0

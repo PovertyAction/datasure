@@ -12,8 +12,10 @@ import streamlit as st
 from pydantic import BaseModel, ValidationError
 
 from datasure.checks.headline import (
+    ByEnumerator,
     CheckDelta,
     CheckHeadline,
+    EnumeratorScope,
     settings_no_longer_fit,
 )
 from datasure.checks.health_period import DeltaWindow, dated_after, logged_after
@@ -1718,6 +1720,72 @@ def _on_keys(flags: _ReviewedFlags, keys: pl.Series) -> _ReviewedFlags:
 
     return replace(  # NOSONAR(S5886): replace keeps the type
         flags, outliers=kept(flags.outliers), violations=kept(flags.violations)
+    )
+
+
+def outliers_by_enumerator(
+    basis: OutliersBasis, data: pl.DataFrame, scope: EnumeratorScope
+) -> tuple[ByEnumerator, ByEnumerator]:
+    """Count each enumerator's outstanding outliers and constraint violations.
+
+    Counted as `outliers_headline` counts them, on the flags in ``basis``
+    left after review, so the numbers agree with the check. Each flag's
+    submission is matched to its enumerator, and its team, by the Survey KEY
+    column. With a team chosen, only flags on that team's submissions count.
+
+    Parameters
+    ----------
+    basis : OutliersBasis
+        The outliers headline's basis.
+    data : pl.DataFrame
+        The survey data the basis was computed on.
+    scope : EnumeratorScope
+        The enumerator column, and the team to count in, if any.
+
+    Returns
+    -------
+    tuple[ByEnumerator, ByEnumerator]
+        Outliers, then constraint violations, by enumerator. Flags on a
+        submission with no enumerator (or, with all teams, whose KEY is not
+        in the data) are unattributed, so with all teams each adds up to the
+        check's total. Both empty when the Survey KEY or enumerator column
+        is not in the data.
+    """
+    flags = basis.reviewed
+    key, enumerator = flags.survey_key, scope.enumerator
+    if not key or not {key, enumerator} <= set(data.columns):
+        return ByEnumerator(), ByEnumerator()
+    data = scope.keep(data)
+    if scope.narrowed:
+        flags = _on_keys(flags, data[key].cast(pl.String).drop_nulls())
+    flagged = pl.concat(
+        [
+            frame.select(pl.col(key).cast(pl.String))
+            for frame in (flags.outliers, flags.violations)
+            if not frame.is_empty() and key in frame.columns
+        ]
+        or [pl.DataFrame(schema={key: pl.String})]
+    )[key]
+    owners = (
+        data.select(
+            pl.col(key).cast(pl.String),
+            pl.col(enumerator).cast(pl.String).alias("_enumerator"),
+        )
+        .drop_nulls()
+        .filter(pl.col(key).is_in(flagged.implode()))
+    )
+    outliers: dict[str, int] = {}
+    violations: dict[str, int] = {}
+    for (name,), rows in owners.group_by("_enumerator"):
+        found, broken = _outstanding(_on_keys(flags, rows[key]))
+        if found:
+            outliers[name] = found
+        if broken:
+            violations[name] = broken
+    all_found, all_broken = _outstanding(flags)
+    return (
+        ByEnumerator(outliers, unattributed=all_found - sum(outliers.values())),
+        ByEnumerator(violations, unattributed=all_broken - sum(violations.values())),
     )
 
 

@@ -28,6 +28,7 @@ src/datasure/
 │   ├── health.py           #   Summary's check health rows, cached headlines
 │   ├── health_deltas.py    #   Each check's change over the comparison period
 │   ├── health_period.py    #   Comparison period and as-of helpers (no Streamlit)
+│   ├── enumerator_flags.py #   Other checks' outstanding issues by enumerator
 │   ├── summary.py          #   Data, submission and progress summary
 │   ├── missing.py          #   Missing data analysis
 │   ├── duplicates.py       #   Duplicate detection
@@ -38,7 +39,11 @@ src/datasure/
 │                           #   turns outlier corrections and acceptances
 │                           #   into log entries (no Streamlit)
 │   ├── outliers/           #   Statistical outlier detection
-│   ├── enumerator/         #   Enumerator performance
+│   ├── enumerator/         #   Enumerator performance; response_patterns/
+│                           #   compares each enumerator's answers with the
+│                           #   rest of the team; attention.py turns every
+│                           #   check's numbers into "Needs attention" reasons
+│                           #   (compute.py and attention.py have no Streamlit)
 │   ├── progress.py         #   Survey progress tracking
 │   ├── descriptive.py      #   Descriptive statistics
 │   └── backchecks/         #   Back-check comparison workflows; scope.py
@@ -298,6 +303,31 @@ to appear.
   delta, Outliers, is about 0.3 s in every period, and the deltas add about
   0.7 to 0.9 s to the rows end to end. A check over the budget should compute
   its delta on request.
+- **Issues by enumerator.** A catalogue entry's optional `by_enumerator`
+  function, one per check in `checks/enumerator_flags.py` (Duplicates,
+  Outliers & Constraints, GPS Checks, Backchecks), returns the check's
+  outstanding issues by enumerator as `IssueCounts`
+  (`checks/enumerator/attention.py`), for an `EnumeratorScope`
+  (`checks/headline.py`: the enumerator column and the team chosen on the
+  page). The Enumerator report's "Needs attention" list adds them to its
+  own reasons through `catalogue.enumerator_other_checks`, which asks only
+  ready checks, caches each result on the page fingerprint
+  (`health.cached_on_page`, keyed with the scope and the check's
+  `headline_view`) and returns a check whose numbers or status raise as an
+  `attention.LeftOut` the list shows (deferred display). Each function
+  starts from the check's headline through Summary's cache
+  (`health.cached_headline`, same key as `health_rows`), so the counts use
+  the headline's basis and agree with the check, and the page computes
+  nothing Summary already did. Each check module keeps the counting itself
+  (`duplicate_records_by_enumerator`, `outliers_by_enumerator`,
+  `GPSOutlierSummary.unreviewed_by`, `backcheck_mismatches_by_enumerator`),
+  returning a `headline.ByEnumerator`: the counts plus the issues with no
+  enumerator, which add up to the check's own total. A check finds its
+  issues on all its records and counts only those in the scope's team. The
+  rules that turn counts and the report's own numbers into Flagged or Watch
+  reasons, against the rest of the team, are in `attention.py` and listed
+  in the user guide; `attention_rows` runs each rule on its own and returns
+  one that raises in `AttentionList.left_out`.
 - **Render wrapper.** Every check renders through `nav_ui.run_guarded`. An
   exception becomes an error state with the traceback in an expander, is
   logged, and is remembered so the navigation marks the check until it
@@ -376,9 +406,11 @@ On a check page this is the page settings file
   report columns; the outliers table toggles, inspected column and extra
   constraint violation columns; the GPS map colour, filter and category
   values, configuration choices, detection method, clustering column,
-  distance threshold and Show reviewed toggle; the enumerator summary
-  information pills, productivity period and week start, and the statistics
-  columns, statistics, period and week start; the backcheck comparison
+  distance threshold and Show reviewed toggle; the enumerator page's
+  period, week start and team, summary information pills, and statistics
+  columns, statistics, column and statistic (the period and week start
+  Productivity and Statistics Over Time once saved separately move to the
+  page's on first load, Productivity's first); the backcheck comparison
   filters, productivity period and week start, and staff statistics view;
   the Descriptive Stats histogram and value counts choices; and the Prepare
   Data preview's "Columns to show". Descriptive
