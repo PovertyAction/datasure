@@ -87,7 +87,8 @@ def _parse_binary(value: str) -> int:
 # a fraction and the exponent Java writes for large and small values ("1.0E-4"). The
 # rest of what int() and float() accept ("1_0", "nan", " 3 ") is text.
 _INT = re.compile(r"-?[0-9]+")
-_DECIMAL = re.compile(r"-?([0-9]+(\.[0-9]*)?|\.[0-9]+)([eE][-+]?[0-9]+)?")
+_MANTISSA = re.compile(r"-?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)")
+_EXPONENT = re.compile(r"[-+]?[0-9]+")
 
 
 def _parse_int(value: str) -> int:
@@ -97,7 +98,8 @@ def _parse_int(value: str) -> int:
 
 
 def _parse_decimal(value: str) -> float:
-    if not _DECIMAL.fullmatch(value):
+    mantissa, e, exponent = value.replace("E", "e").partition("e")
+    if not _MANTISSA.fullmatch(mantissa) or (e and not _EXPONENT.fullmatch(exponent)):
         raise ValueError("not a decimal")
     return float(value)
 

@@ -20,16 +20,16 @@ class UnsupportedExpression(ValueError):
     """The expression uses syntax or a function the evaluator does not implement."""
 
 
-_TOKEN_RE = re.compile(
-    r"""\s*(?:
-        (?P<ref>\$\{[^}]+\})
-      | (?P<num>\d+(?:\.\d*)?|\.\d+)
-      | (?P<str>'[^']*'|"[^"]*")
-      | (?P<op>!=|<=|>=|=|<|>|\+|-|\*|\(|\)|,)
-      | (?P<name>[A-Za-z_][\w\-]*(?<!-))
-      | (?P<dot>\.(?!\.))
-    )""",
-    re.VERBOSE,
+# One pattern per token kind, tried in order at each position: the first that
+# matches wins, as the alternatives of a single regex would.
+_SPACE = re.compile(r"\s*")
+_TOKENS = (
+    ("ref", re.compile(r"\$\{[^}]+\}")),
+    ("num", re.compile(r"\d+(?:\.\d*)?|\.\d+")),
+    ("str", re.compile(r"'[^']*'|\"[^\"]*\"")),
+    ("op", re.compile(r"!=|<=|>=|[=<>+\-*(),]")),
+    ("name", re.compile(r"[A-Za-z_][\w\-]*(?<!-)")),
+    ("dot", re.compile(r"\.(?!\.)")),
 )
 
 _TRAILING_SPACE = re.compile(r"\s*\Z")
@@ -210,12 +210,15 @@ class _Parser:
         while i < len(expr):
             if _TRAILING_SPACE.match(expr, i):
                 break
-            m = _TOKEN_RE.match(expr, i)
-            if m is None or m.end() == i:
+            start = _SPACE.match(expr, i).end()
+            for kind, pattern in _TOKENS:
+                m = pattern.match(expr, start)
+                if m:
+                    tokens.append((kind, m.group()))
+                    i = m.end()
+                    break
+            else:
                 raise UnsupportedExpression(f"cannot read {expr[i:]!r} in {expr!r}")
-            kind = m.lastgroup
-            tokens.append((kind, m.group(kind)))
-            i = m.end()
         return tokens
 
     def peek(self) -> tuple[str, str] | None:
