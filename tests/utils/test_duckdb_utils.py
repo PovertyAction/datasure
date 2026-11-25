@@ -10,6 +10,7 @@ from datasure.utils.duckdb_utils import (
     CHECK_TABLE_PREFIXES,
     _validate_column_name,
     _validate_table_name,
+    alias_clash,
     check_table_name,
     duckdb_delete_rows,
     duckdb_get_aliases,
@@ -382,6 +383,28 @@ class TestImportedDatasetsPreviewList:
         duckdb_save_table(project, pl.DataFrame({"x": [1]}), "a-1", "raw")
 
         assert duckdb_get_imported_datasets(project) == ["a-1"]
+
+
+class TestAliasClash:
+    """Aliases clash when they would be stored in the same DuckDB table."""
+
+    @pytest.mark.parametrize(
+        ("new", "existing"),
+        [
+            ("select_table", "select"),
+            ("select", "select_table"),
+            ("baseline_1", "baseline.1"),
+            ("baseline-1", "baseline_1"),
+        ],
+    )
+    def test_aliases_sharing_a_table_clash(self, new, existing):
+        assert alias_clash(new, [existing]) == (
+            f"'{new}' is too similar to existing alias '{existing}'. "
+            "Please choose a different name."
+        )
+
+    def test_aliases_with_their_own_tables_do_not_clash(self):
+        assert alias_clash("baseline_2", ["baseline_1", "select"]) is None
 
 
 class TestDuckdbGetImportedDatasets:

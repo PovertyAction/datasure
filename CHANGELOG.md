@@ -596,8 +596,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
     migration) gives the storage ID, and `name_clash` compares IDs and names
     the clashing entry. `FileConfig`, `FormConfig` and `CheckConfiguration`
     enforce the rule through `validate_name`; validating with the
-    `STORED_NAME` context skips it so names saved before the rule still load
-    and unchanged names can still be edited. `ConfigurationService`
+    `STORED_NAME` context skips it and returns the name exactly as saved, so
+    names saved before the rule still load and refresh into their own table,
+    and unchanged names can still be edited. Aliases are compared with
+    `duckdb_utils.alias_clash`, which uses the final DuckDB table name
+    (`alias_table`), so `select` and `select_table`, or a saved `baseline.1`
+    and a new `baseline_1`, are caught; bundle import compares the trimmed
+    alias the importer saves. `ConfigurationService`
     (`page_name_exists`, new `page_name_problem`, add and edit validation),
     the local import form and `SurveyCTOUI._add_form_to_project` reject
     clashes by ID; a case-only rename of a page's own name is allowed.

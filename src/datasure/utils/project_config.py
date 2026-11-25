@@ -43,6 +43,7 @@ from datasure.utils.duckdb_utils import (
     DESCRIPTIVE_COLUMNS_TABLE,
     LEGACY_DESCRIPTIVE_SELECTION_TABLE,
     OUTLIERS_TABLE,
+    alias_clash,
     check_table_name,
     duckdb_get_table,
     duckdb_save_table,
@@ -52,7 +53,6 @@ from datasure.utils.duckdb_utils import (
 from datasure.utils.names import (
     NAME_MAX_LENGTH,
     STORED_NAME,
-    name_clash,
     name_id,
     validation_message,
 )
@@ -602,14 +602,14 @@ def _import_surveycto_dataset(
     try:
         form_config = FormConfig.model_validate(
             {
-                "alias": ds.alias,
+                "alias": ds.alias.strip(),
                 "form_id": ds.form_id or "",
                 "server": ds.server,
                 "username": username,
                 "attachments": ds.attachments,
             },
             # SurveyCTO aliases were once allowed up to 64 characters
-            context=STORED_NAME if len(ds.alias) > NAME_MAX_LENGTH else None,
+            context=STORED_NAME if len(ds.alias.strip()) > NAME_MAX_LENGTH else None,
         )
     except ValidationError as e:
         return False, validation_message(e)
@@ -725,13 +725,14 @@ def apply_project_config(
     )
 
     for ds in bundle.datasets:
-        clash = name_clash(ds.alias, existing_aliases, kind="alias")
+        # The importers trim the alias; ds.alias stays the bundle's lookup key
+        clash = alias_clash(ds.alias.strip(), existing_aliases)
         if clash:
             result.datasets_skipped.append(ReapplyFailure(ds.alias, clash))
             continue
         ok, reason = _import_dataset(project_id, ds, local_file_paths)
         if ok:
-            existing_aliases.append(ds.alias)
+            existing_aliases.append(ds.alias.strip())
             imported_aliases.add(ds.alias)
             result.datasets_imported.append(ds.alias)
         else:

@@ -17,12 +17,15 @@ from pydantic import (
     field_validator,
 )
 
-from datasure.utils.duckdb_utils import duckdb_get_table, duckdb_save_table
+from datasure.utils.duckdb_utils import (
+    alias_clash,
+    duckdb_get_table,
+    duckdb_save_table,
+)
 from datasure.utils.names import (
     NAME_MAX_LENGTH,
     NAME_RULE_HELP,
     STORED_NAME,
-    name_clash,
     validate_name,
 )
 
@@ -285,9 +288,7 @@ def _handle_form_submission(
 
         # Aliases sharing a storage ID would share one DuckDB table
         if not edit_mode and not import_log.is_empty():
-            clash = name_clash(
-                file_config.alias, import_log["alias"].to_list(), kind="alias"
-            )
+            clash = alias_clash(file_config.alias, import_log["alias"].to_list())
             if clash:
                 st.error(clash)
                 return
