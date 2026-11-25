@@ -958,6 +958,24 @@ click **Build Replication Package**. Confirm the PII notice and click
 [Correction Audit Trail](#correction-audit-trail) for the **Exclude reviewer
 names** option.
 
+#### Data dictionary (SurveyCTO forms)
+
+For a SurveyCTO form, the package also holds
+`1_docs/2_codebooks/{survey}_dictionary.xlsx`, a data dictionary to share
+with PIs, next to the statistical `codebook.csv`. It has three sheets:
+
+- **Variables**: each column's question label, type, relevance, choice list,
+  missing rate and PII status
+- **Choices**: each choice list's codes and labels. A list is named after its
+  question, because SurveyCTO's compiled form doesn't keep XLSForm list names
+- **Summary stats**: counted only over the rows where the question was asked
+
+DataSure builds the dictionary from the form definition it stores when it
+loads the data. A dataset loaded before version 1.3 has none, so the package
+is built without the dictionary and the page shows a note. To add it, turn
+**Refresh** on for the dataset on the Import page, click **Load data**, then
+build the package again. Server datasets and local files have no dictionary.
+
 #### Stata variable names
 
 DataSure accepts any column name, but Stata accepts a name only if it:

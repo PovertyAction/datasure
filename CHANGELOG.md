@@ -26,7 +26,9 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   named after its question; withheld `search()` lists are left out
 - **Replication package** (#398): SurveyCTO aliases get
   `1_docs/2_codebooks/{survey}_dictionary.xlsx`, listed in the README
-  (`generate_readme(include_form_dictionary=...)`)
+  (`generate_readme(include_form_dictionary=...)`). A SurveyCTO dataset
+  (`form_id` set) without a stored form definition gets no workbook and an
+  `on_warning` note (`NO_FORM_DICTIONARY`) saying to refresh the import
 - **Typed SurveyCTO import** (#397): `SurveyCTOClient._import_regular_form`
   (`connectors/scto.py`) downloads the deployed form's compiled XML
   (`SurveyCTOAPIClient.download_form_xml`, `GET /forms/{id}/xml` with the same

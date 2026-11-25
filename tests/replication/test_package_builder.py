@@ -11,6 +11,7 @@ import pytest
 
 from datasure.processing.correction_log import CORRECTION_LOG_SCHEMA
 from datasure.replication.package_builder import (
+    NO_FORM_DICTIONARY,
     _action_summary,
     _load_corrected,
     _load_correction_log,
@@ -652,7 +653,9 @@ class TestPackageUsesStataNames:
 class TestFormDictionary:
     """A SurveyCTO alias's data dictionary goes into 1_docs/2_codebooks."""
 
-    def _build(self) -> zipfile.ZipFile:
+    def _build(
+        self, form_id: str = "", warnings: list[str] | None = None
+    ) -> zipfile.ZipFile:
         with patch(
             "datasure.replication.package_builder.duckdb_get_table",
             side_effect=_mock_loader,
@@ -663,6 +666,8 @@ class TestFormDictionary:
                 survey_name="S",
                 alias="s",
                 key_col="key",
+                form_id=form_id,
+                on_warning=None if warnings is None else warnings.append,
             )
         return zipfile.ZipFile(BytesIO(zip_bytes))
 
@@ -682,3 +687,23 @@ class TestFormDictionary:
     def test_left_out_without_a_form_definition(self):
         names = self._build().namelist()
         assert not any(n.endswith("_dictionary.xlsx") for n in names)
+
+    def test_a_surveycto_dataset_without_one_gets_a_note(self):
+        warnings: list[str] = []
+        self._build(form_id="farm", warnings=warnings)
+        assert NO_FORM_DICTIONARY in warnings
+
+    def test_no_note_for_a_dataset_not_from_surveycto(self):
+        warnings: list[str] = []
+        self._build(warnings=warnings)
+        assert NO_FORM_DICTIONARY not in warnings
+
+    def test_no_note_when_the_dictionary_is_built(self, no_form_dictionary):
+        no_form_dictionary.return_value = object()
+        warnings: list[str] = []
+        with patch(
+            "datasure.replication.package_builder.dictionary_xlsx",
+            return_value=b"xlsx",
+        ):
+            self._build(form_id="farm", warnings=warnings)
+        assert NO_FORM_DICTIONARY not in warnings

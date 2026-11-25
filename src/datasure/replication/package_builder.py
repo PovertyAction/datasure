@@ -36,6 +36,15 @@ from datasure.utils.duckdb_utils import duckdb_get_table, load_missing_codes_fro
 
 logger = logging.getLogger(__name__)
 
+# Shown when a SurveyCTO dataset's package has no data dictionary workbook.
+NO_FORM_DICTIONARY = (
+    "No data dictionary in this package: DataSure has no SurveyCTO form "
+    "definition stored for this dataset. Datasets imported before version 1.3 "
+    "need one refresh: on the Import page, turn Refresh on for this dataset, "
+    "click Load data, then build the package again. Server datasets have no "
+    "data dictionary."
+)
+
 
 def _get_version() -> str:
     try:
@@ -320,6 +329,8 @@ def build_replication_package(
     )
     if form_dictionary is not None:
         _step("Data dictionary generated")
+    elif form_id and on_warning is not None:
+        on_warning(NO_FORM_DICTIONARY)
 
     readme = generate_readme(
         project_name=project_name,
