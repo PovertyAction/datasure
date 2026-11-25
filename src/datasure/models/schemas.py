@@ -11,7 +11,13 @@ import datetime
 from typing import Any, Literal
 
 import polars as pl
-from pydantic import BaseModel, Field, field_validator, model_validator
+from pydantic import (
+    BaseModel,
+    Field,
+    ValidationInfo,
+    field_validator,
+    model_validator,
+)
 
 from datasure.models.enums import (
     DelimiterType,
@@ -20,6 +26,7 @@ from datasure.models.enums import (
     SearchType,
     StrCondition,
 )
+from datasure.utils.names import validate_name
 
 
 class DuplicatesColumnConfig(BaseModel):
@@ -292,7 +299,7 @@ class GPSColumnConfig(BaseModel):
 class CheckConfiguration(BaseModel):
     """Model for check configuration validation."""
 
-    page_name: str = Field(default=None, min_length=1, max_length=20)
+    page_name: str = Field(default=None, min_length=1)
     survey_data_name: str = Field(default=None, min_length=1)
     survey_key: str = Field(default=None, min_length=1)
     survey_id: str | None = Field(default=None, min_length=1)
@@ -311,11 +318,9 @@ class CheckConfiguration(BaseModel):
 
     @field_validator("page_name")
     @classmethod
-    def validate_page_name(cls, v: str) -> str:
-        """Validate page name format."""
-        if not v or not v.strip():
-            raise ValueError("Page name cannot be empty")
-        return v.strip()
+    def validate_page_name(cls, v: str, info: ValidationInfo) -> str:
+        """Trim the page name and check it against the shared name rule."""
+        return validate_name(v, info, "Page name")
 
     def to_dict(self) -> dict:
         """Convert model to dictionary for storage."""

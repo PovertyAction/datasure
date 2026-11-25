@@ -9,6 +9,7 @@ from datetime import date
 import polars as pl
 
 from datasure.processing.correction_log import Action
+from datasure.utils.names import name_id
 
 SCRIPT_EXT = "do"
 _C = "*"  # Stata comment character
@@ -178,7 +179,7 @@ def generate_master_script(
         survey_name,
         datasure_version,
     )
-    safe_survey = survey_name.lower().replace(" ", "_")
+    safe_survey = name_id(survey_name)
     safe_project = project_name.lower().replace(" ", "_")
 
     lines = [
@@ -334,7 +335,7 @@ def generate_import_script(
         Stata script content as a string.
     """
     header = _header("Import Script", project_name, survey_name, datasure_version)
-    safe_survey = survey_name.lower().replace(" ", "_")
+    safe_survey = name_id(survey_name)
 
     lines = [
         header,

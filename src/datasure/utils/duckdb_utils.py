@@ -7,18 +7,10 @@ import pandas as pd
 import polars as pl
 
 from .cache_utils import get_cache_path
+from .names import name_id
 
 # Set up logging
 logger = logging.getLogger(__name__)
-
-
-def name_id(name: str) -> str:
-    """Return the identifier form of a page or dataset name.
-
-    Lower case, with spaces and hyphens as underscores. Used for table names,
-    settings file names and the Corrections ``page`` URL value.
-    """
-    return name.lower().replace(" ", "_").replace("-", "_")
 
 
 # Per-page check tables in the ``logs`` database are named
@@ -361,8 +353,11 @@ def duckdb_get_imported_datasets(project_id: str) -> list[str]:
             "SELECT table_name FROM information_schema.tables WHERE table_schema = 'main'"
         ).fetchall()
         table_names = {name[0] for name in table_names}
-    table_list = [x for x in aliases if x.lower().replace(" ", "_") in table_names]
-    return table_list
+    return [
+        alias
+        for alias in aliases
+        if _validate_table_name(name_id(alias)) in table_names
+    ]
 
 
 def duckdb_table_exists(project_id: str, alias: str, db_name: str) -> bool:

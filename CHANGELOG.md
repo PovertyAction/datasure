@@ -580,6 +580,38 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Aliases and check page names sharing storage or breaking file names**
+  (#350): `baseline-1`, `baseline_1` and `Baseline 1` were all accepted but
+  mapped to one DuckDB table, so importing one replaced the other; page
+  names such as `HH HFC` and `hh-hfc` shared a settings file and check
+  tables; `HH/HFC`, `HH?` and `Round 1: HH` crashed the check page or wrote
+  settings to an NTFS alternate data stream; and aliases with `-`, `.`, a
+  leading digit or a SQL keyword were missing from the Import preview list
+  - Root cause: duplicates were checked on raw names while storage used the
+    cleaned ID, and callers built IDs in different ways
+  - Solution: new `utils/names.py` holds the one name rule. `name_problem`
+    allows a leading letter then letters, digits, spaces, `_` and `-`, up to
+    `NAME_MAX_LENGTH` (20, now shared by local and SurveyCTO aliases).
+    `name_id` (moved from `duckdb_utils`, unchanged formula, so no
+    migration) gives the storage ID, and `name_clash` compares IDs and names
+    the clashing entry. `FileConfig`, `FormConfig` and `CheckConfiguration`
+    enforce the rule through `validate_name`; validating with the
+    `STORED_NAME` context skips it so names saved before the rule still load
+    and unchanged names can still be edited. `ConfigurationService`
+    (`page_name_exists`, new `page_name_problem`, add and edit validation),
+    the local import form and `SurveyCTOUI._add_form_to_project` reject
+    clashes by ID; a case-only rename of a page's own name is allowed.
+    `apply_project_config` skips a bundled dataset or page that clashes by
+    ID with an existing one, naming it, keeps bundled SurveyCTO aliases over
+    20 characters, and writes page settings and check tables under the
+    trimmed page name. `ConfigurationService.page_name_exists` is replaced
+    by `page_name_clash`, which returns the message. `validation_message`
+    turns a model's validation errors into plain text.
+    `duckdb_get_imported_datasets` matches aliases with the same
+    `_validate_table_name(name_id(...))` used to create tables. The
+    SurveyCTO alias suggested from the form title uses `suggest_name`, empty
+    when no valid name results. Replication package file names use `name_id`
+    for the page part
 - **SurveyCTO imports and replication questionnaires failing with HTTP
   430** (#469): SurveyCTO refuses the form design endpoint with 430, "your
   Excel form cannot be loaded until it is optimized", for some forms, and

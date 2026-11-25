@@ -21,6 +21,7 @@ from datasure.replication.stata_names import (
 from datasure.utils.cache_utils import get_cache_path
 from datasure.utils.config_utils import ConfigurationService
 from datasure.utils.duckdb_utils import duckdb_get_columns, duckdb_get_table
+from datasure.utils.names import name_id
 from datasure.utils.navigations_utils import (
     add_demo_navigation,
     demo_sidebar_help,
@@ -102,8 +103,7 @@ def _zip_filename(project_name: str, page_name: str) -> str:
     Example: ``replication_ors_zinc_community_hfc.zip``
     """
     safe_p = project_name.lower().replace(" ", "_")
-    safe_pg = page_name.lower().replace(" ", "_")
-    return f"replication_{safe_p}_{safe_pg}.zip"
+    return f"replication_{safe_p}_{name_id(page_name)}.zip"
 
 
 def _package_tree(safe_project: str, safe_page: str, is_scto: bool) -> str:
@@ -516,6 +516,6 @@ if selected_page and alias:
     is_scto = import_row is not None and import_row.get("source") == "SurveyCTO"
     _render_package_preview(
         safe_project,
-        selected_page.lower().replace(" ", "_"),
+        name_id(selected_page),
         is_scto,
     )

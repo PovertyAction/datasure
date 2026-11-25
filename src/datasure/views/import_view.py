@@ -19,6 +19,7 @@ from datasure.utils.duckdb_utils import (
     duckdb_save_table,
     duckdb_table_exists,
 )
+from datasure.utils.names import STORED_NAME
 from datasure.utils.navigations_utils import (
     add_demo_navigation,
     demo_callout,
@@ -185,15 +186,19 @@ def _load_from_surveycto(project_id: str, row: dict) -> None:
 
 def _create_form_config(row: dict) -> FormConfig:
     """Create FormConfig from import log row."""
-    return FormConfig(
-        alias=row["alias"],
-        form_id=row["form_id"],
-        server=row["server"],
-        username=row["username"] if row["username"] else None,
-        private_key=row["private_key"] if row["private_key"] else None,
-        save_to=row["save_to"] if row["save_to"] else None,
-        attachments=row["attachments"],
-        refresh=row["refresh"],
+    return FormConfig.model_validate(
+        {
+            "alias": row["alias"],
+            "form_id": row["form_id"],
+            "server": row["server"],
+            "username": row["username"] if row["username"] else None,
+            "private_key": row["private_key"] if row["private_key"] else None,
+            "save_to": row["save_to"] if row["save_to"] else None,
+            "attachments": row["attachments"],
+            "refresh": row["refresh"],
+        },
+        # Aliases saved before the name rule still load.
+        context=STORED_NAME,
     )
 
 

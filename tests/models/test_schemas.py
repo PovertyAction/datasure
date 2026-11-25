@@ -932,6 +932,34 @@ class TestCheckConfiguration:
                 survey_id="id",
             )
 
+    @pytest.mark.parametrize(
+        "page_name", ["HH/HFC", r"HH\HFC", "Round 1: HH", "HH?", "HH*", "a<b", "1st"]
+    )
+    def test_page_name_outside_the_name_rule_raises(self, page_name):
+        """Page names that can't be settings file names are rejected."""
+        with pytest.raises(ValidationError, match="Page name must"):
+            CheckConfiguration(
+                page_name=page_name,
+                survey_data_name="data",
+                survey_key="key",
+                survey_id="id",
+            )
+
+    def test_stored_page_name_outside_the_rule_still_loads(self):
+        """A page created before the rule keeps working."""
+        from datasure.utils.names import STORED_NAME
+
+        config = CheckConfiguration.model_validate(
+            {
+                "page_name": "HH/HFC",
+                "survey_data_name": "data",
+                "survey_key": "key",
+                "survey_id": "id",
+            },
+            context=STORED_NAME,
+        )
+        assert config.page_name == "HH/HFC"
+
     def test_page_name_exactly_20_chars(self):
         """page_name of exactly 20 characters succeeds."""
         config = CheckConfiguration(

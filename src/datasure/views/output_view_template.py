@@ -24,8 +24,8 @@ from datasure.utils.dataframe_utils import (
 from datasure.utils.duckdb_utils import (
     duckdb_get_table,
     duckdb_table_exists,
-    name_id,
 )
+from datasure.utils.names import STORED_NAME, name_id
 from datasure.utils.nav_ui import (
     LAST_CHECK_PAGE,
     PROJECT_VIEW_FILE,
@@ -165,7 +165,10 @@ def load_page_config(project_id: str, page_number: int) -> PageConfig:
         page_row_index=page_data_index,
     )
 
-    check_config = CheckConfiguration(**check_config_info)
+    # A page saved before the name rule keeps its name.
+    check_config = CheckConfiguration.model_validate(
+        check_config_info, context=STORED_NAME
+    )
 
     # Validate configuration
     page_name = check_config.page_name
