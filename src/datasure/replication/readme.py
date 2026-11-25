@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from datetime import date
 
+from datasure.utils.names import name_id
+
 
 def generate_readme(
     project_name: str,
@@ -51,7 +53,7 @@ def generate_readme(
         Plain-text README content as a string.
     """
     today = date.today().isoformat()
-    safe_survey = survey_name.lower().replace(" ", "_")
+    safe_survey = name_id(survey_name)
     safe_project = project_name.lower().replace(" ", "_")
 
     sep = "=" * 60

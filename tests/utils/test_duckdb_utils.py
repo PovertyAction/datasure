@@ -350,6 +350,40 @@ class TestDuckdbGetAliases:
         assert result == []
 
 
+class TestImportedDatasetsPreviewList:
+    """Every imported dataset appears in the preview list, whatever its alias."""
+
+    @pytest.fixture
+    def project(self, tmp_path):
+        def fake_cache_path(*parts):
+            path = tmp_path.joinpath(*map(str, parts))
+            path.parent.mkdir(parents=True, exist_ok=True)
+            return path
+
+        with patch("datasure.utils.duckdb_utils.get_cache_path", fake_cache_path):
+            yield "proj"
+
+    def test_aliases_whose_table_names_are_cleaned_appear(self, project):
+        aliases = ["baseline-1", "Household Survey", "select", "2024 HH"]
+        log = pl.DataFrame(
+            {"refresh": [True] * 4, "load": [True] * 4, "alias": aliases}
+        )
+        duckdb_save_table(project, log, "import_log", "logs")
+        for alias in aliases:
+            duckdb_save_table(project, pl.DataFrame({"x": [1]}), alias, "raw")
+
+        assert sorted(duckdb_get_imported_datasets(project)) == sorted(aliases)
+
+    def test_alias_without_a_table_is_left_out(self, project):
+        log = pl.DataFrame(
+            {"refresh": [True, True], "load": [True, True], "alias": ["a-1", "b"]}
+        )
+        duckdb_save_table(project, log, "import_log", "logs")
+        duckdb_save_table(project, pl.DataFrame({"x": [1]}), "a-1", "raw")
+
+        assert duckdb_get_imported_datasets(project) == ["a-1"]
+
+
 class TestDuckdbGetImportedDatasets:
     """Test the duckdb_get_imported_datasets function."""
 

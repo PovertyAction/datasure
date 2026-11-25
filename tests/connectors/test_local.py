@@ -14,6 +14,7 @@ from datasure.connectors.local import (
     XLS_NOT_SUPPORTED_MESSAGE,
     FileConfig,
     ImportLogEntry,
+    _handle_form_submission,
     get_excel_sheet_names,
     get_file_info,
     load_data_efficiently,
@@ -21,6 +22,20 @@ from datasure.connectors.local import (
     render_local_file_form,
     validate_file_accessibility,
 )
+
+REJECTED_NAMES = [
+    "baseline.1",
+    "HH/HFC",
+    r"HH\HFC",
+    "Round 1: HH",
+    "HH?",
+    "HH*",
+    "a<b",
+    "a|b",
+    '"quoted"',
+    "2024 HH",
+    "a" * 21,
+]
 
 
 @pytest.fixture(autouse=True)
@@ -80,6 +95,21 @@ class TestFileConfig:
             FileConfig(alias=long_alias, filename="/path/to/file.csv")
 
         assert "at most 20 characters" in str(exc_info.value)
+
+    @pytest.mark.parametrize("alias", REJECTED_NAMES)
+    def test_alias_validation_rejects_names_outside_the_rule(self, alias, tmp_path):
+        """Aliases that would break storage are rejected with the allowed characters."""
+        test_file = tmp_path / "test.csv"
+        test_file.write_text("test")
+        with pytest.raises(ValidationError, match="alias"):
+            FileConfig(alias=alias, filename=str(test_file))
+
+    def test_alias_validation_message_lists_allowed_characters(self, tmp_path):
+        test_file = tmp_path / "test.csv"
+        test_file.write_text("test")
+        with pytest.raises(ValidationError) as exc_info:
+            FileConfig(alias="HH/HFC", filename=str(test_file))
+        assert "letters, digits, spaces" in str(exc_info.value)
 
     def test_alias_validation_strips_whitespace(self, tmp_path):
         """Test that alias validation strips whitespace."""
@@ -505,6 +535,54 @@ class TestHandleFormSubmission:
         finally:
             # Clean up temp file
             os.unlink(temp_file_path)
+
+
+def _import_log(*aliases: str) -> pl.DataFrame:
+    return pl.DataFrame(
+        [ImportLogEntry(alias=a, filename="x.csv", sheet_name="") for a in aliases]
+    )
+
+
+class TestSubmitLocalFile:
+    """Submitting the local file form saves a new alias only if it is unique."""
+
+    @pytest.fixture
+    def data_file(self, tmp_path):
+        path = tmp_path / "data.csv"
+        path.write_text("a,b\n1,2")
+        return str(path)
+
+    @pytest.mark.parametrize("alias", ["baseline-1", "Baseline 1", "BASELINE_1"])
+    @patch("datasure.connectors.local.duckdb_save_table")
+    @patch("datasure.connectors.local.duckdb_get_table")
+    @patch("datasure.connectors.local.st")
+    def test_alias_sharing_an_existing_table_is_rejected(
+        self, mock_st, mock_get_table, mock_save_table, alias, data_file
+    ):
+        mock_get_table.return_value = _import_log("baseline_1")
+
+        _handle_form_submission("proj", alias, data_file, "", False, {})
+
+        mock_save_table.assert_not_called()
+        message = mock_st.error.call_args[0][0]
+        assert message == (
+            f"'{alias}' is too similar to existing alias 'baseline_1'. "
+            "Please choose a different name."
+        )
+
+    @patch("datasure.connectors.local.duckdb_save_table")
+    @patch("datasure.connectors.local.duckdb_get_table")
+    @patch("datasure.connectors.local.st")
+    def test_distinct_alias_is_saved(
+        self, mock_st, mock_get_table, mock_save_table, data_file
+    ):
+        mock_get_table.return_value = _import_log("baseline_1")
+
+        _handle_form_submission("proj", "endline", data_file, "", False, {})
+
+        mock_st.error.assert_not_called()
+        saved = mock_save_table.call_args[0][1]
+        assert saved["alias"].to_list() == ["baseline_1", "endline"]
 
 
 class TestLoadLocalData:

@@ -36,8 +36,8 @@ from datasure.utils.dataframe_utils import TableState, get_table_state
 from datasure.utils.duckdb_utils import (
     duckdb_get_table,
     duckdb_table_exists,
-    name_id,
 )
+from datasure.utils.names import name_id
 from datasure.utils.nav_ui import (
     LAST_CHECK_PAGE,
     PROJECT_VIEW_FILE,

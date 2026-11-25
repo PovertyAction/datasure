@@ -318,7 +318,11 @@ class TestApplyProjectConfig:
 
     def _config_service_mock(self, page_exists=False):
         service = Mock()
-        service.page_name_exists.return_value = page_exists
+        service.page_name_clash.return_value = (
+            "'Household HFC' is too similar to existing page name 'household hfc'. Please choose a different name."
+            if page_exists
+            else None
+        )
         return service
 
     @patch("datasure.utils.project_config.CorrectionProcessor")
@@ -529,7 +533,108 @@ class TestApplyProjectConfig:
         result = apply_project_config(PROJECT_ID, bundle, local_file_paths={})
 
         assert result.pages_created == []
-        assert result.pages_skipped[0].reason == "A page with this name already exists"
+        # The reason names the existing page the bundled one clashes with
+        assert "existing page name 'household hfc'" in result.pages_skipped[0].reason
+        mock_config_service_cls.return_value.page_name_clash.assert_called_once_with(
+            "Household HFC"
+        )
+
+    @patch("datasure.utils.project_config.load_local_data")
+    @patch("datasure.utils.project_config.duckdb_save_table")
+    @patch("datasure.utils.project_config.ConfigurationService")
+    @patch("datasure.utils.project_config.duckdb_get_table")
+    def test_dataset_sharing_an_existing_alias_table_is_skipped(
+        self,
+        mock_get_table,
+        mock_config_service_cls,
+        mock_save_table,
+        mock_load_local,
+        tmp_path,
+    ):
+        """A bundled alias that maps to an existing alias's table is not imported."""
+        mock_get_table.return_value = pl.DataFrame({"alias": ["baseline_1"]})
+        mock_config_service_cls.return_value = self._config_service_mock()
+        data_file = tmp_path / "b.csv"
+        data_file.write_text("id\n1\n")
+
+        bundle = ProjectConfigBundle(
+            exported_from_project="p",
+            exported_at="t",
+            datasets=[ImportSourceEntry(alias="baseline-1", source="local storage")],
+        )
+
+        result = apply_project_config(
+            PROJECT_ID, bundle, local_file_paths={"baseline-1": str(data_file)}
+        )
+
+        assert result.datasets_imported == []
+        assert result.datasets_skipped == [
+            ReapplyFailure(
+                "baseline-1",
+                "'baseline-1' is too similar to existing alias 'baseline_1'. "
+                "Please choose a different name.",
+            )
+        ]
+        mock_load_local.assert_not_called()
+
+    @patch("datasure.utils.project_config.download_forms")
+    @patch("datasure.utils.project_config.duckdb_save_table")
+    @patch("datasure.utils.project_config.list_stored_credentials")
+    @patch("datasure.utils.project_config.ConfigurationService")
+    @patch("datasure.utils.project_config.duckdb_get_table")
+    def test_stored_surveycto_alias_longer_than_the_limit_imports(
+        self,
+        mock_get_table,
+        mock_config_service_cls,
+        mock_list_creds,
+        mock_save_table,
+        mock_download,
+    ):
+        """An alias saved before the length limit still imports from a bundle."""
+        mock_get_table.return_value = pl.DataFrame()
+        mock_config_service_cls.return_value = self._config_service_mock()
+        mock_list_creds.return_value = {
+            "credentials": {"k": {"server": "acme", "username": "k@x.com"}}
+        }
+        alias = "household_survey_round_two"
+
+        bundle = ProjectConfigBundle(
+            exported_from_project="p",
+            exported_at="t",
+            datasets=[
+                ImportSourceEntry(
+                    alias=alias, source="SurveyCTO", server="acme", form_id="hh"
+                )
+            ],
+        )
+
+        result = apply_project_config(PROJECT_ID, bundle, local_file_paths={})
+
+        assert result.datasets_imported == [alias]
+        mock_download.assert_called_once()
+
+    @patch("datasure.utils.project_config.ConfigurationService")
+    @patch("datasure.utils.project_config.duckdb_get_table")
+    def test_dataset_alias_outside_the_rule_gives_a_readable_reason(
+        self, mock_get_table, mock_config_service_cls, tmp_path
+    ):
+        """A bundled local alias the rule rejects is skipped with a plain message."""
+        mock_get_table.return_value = pl.DataFrame()
+        mock_config_service_cls.return_value = self._config_service_mock()
+        data_file = tmp_path / "b.csv"
+        data_file.write_text("id\n1\n")
+
+        bundle = ProjectConfigBundle(
+            exported_from_project="p",
+            exported_at="t",
+            datasets=[ImportSourceEntry(alias="HH/HFC", source="local storage")],
+        )
+
+        result = apply_project_config(
+            PROJECT_ID, bundle, local_file_paths={"HH/HFC": str(data_file)}
+        )
+
+        assert result.datasets_skipped[0].reason.startswith("Alias must start with")
 
     @patch("datasure.utils.project_config.get_cache_path")
     @patch("datasure.utils.project_config.CorrectionProcessor")
@@ -748,7 +853,11 @@ def _page_config_service(page_exists=False):
             "survey_key": ["KEY"],
         }
     )
-    service.page_name_exists.return_value = page_exists
+    service.page_name_clash.return_value = (
+        "'Household HFC' is too similar to existing page name 'household hfc'. Please choose a different name."
+        if page_exists
+        else None
+    )
     return service
 
 
@@ -1220,7 +1329,7 @@ def _demo_page_service():
             "survey_key": ["KEY"],
         }
     )
-    service.page_name_exists.return_value = False
+    service.page_name_clash.return_value = None
     return service
 
 

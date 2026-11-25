@@ -682,22 +682,24 @@ class TestConfigurationService:
         assert "Page One" in names
         assert "Page Two" in names
 
-    def test_page_name_exists_empty_config(self, mock_empty_df):
+    def test_page_name_clash_empty_config(self, mock_empty_df):
         """Test page name check with empty configuration."""
         service = ConfigurationService("test_project")
         service.get_all_configurations = Mock(return_value=mock_empty_df)
 
-        assert service.page_name_exists("Test Page") is False
-        assert service.page_name_exists("Any Name") is False
+        assert service.page_name_clash("Test Page") is None
+        assert service.page_name_clash("Any Name") is None
 
-    def test_page_name_exists_with_existing(self, mock_config_df):
+    def test_page_name_clash_with_existing(self, mock_config_df):
         """Test page name check with existing configuration."""
         service = ConfigurationService("test_project")
         service.get_all_configurations = Mock(return_value=mock_config_df)
 
-        assert service.page_name_exists("Existing Page") is True
-        assert service.page_name_exists("New Page") is False
-        assert service.page_name_exists("existing page") is False  # Case sensitive
+        assert service.page_name_clash("Existing Page") is not None
+        assert service.page_name_clash("New Page") is None
+        # Names are compared by storage ID, so case and space/hyphen differ
+        assert service.page_name_clash("existing page") is not None
+        assert service.page_name_clash("existing-page") is not None
 
     def test_validate_configuration_success(self, mock_empty_df):
         """Test successful configuration validation."""
@@ -744,9 +746,48 @@ class TestConfigurationService:
         is_valid, error_msg, config = service.validate_configuration(config_data)
 
         assert is_valid is False
-        assert "already exists" in error_msg
         assert "Existing Page" in error_msg
         assert config is None
+
+    @pytest.mark.parametrize("page_name", ["existing-page", "EXISTING PAGE"])
+    def test_validate_configuration_rejects_name_with_same_id(
+        self, mock_config_df, page_name
+    ):
+        """A page name that would share settings with another page is rejected."""
+        service = ConfigurationService("test_project")
+        service.get_all_configurations = Mock(return_value=mock_config_df)
+
+        is_valid, error_msg, config = service.validate_configuration(
+            {"page_name": page_name, "survey_data_name": "s", "survey_key": "k"}
+        )
+
+        assert is_valid is False
+        assert error_msg == (
+            f"'{page_name}' is too similar to existing page name 'Existing Page'. "
+            "Please choose a different name."
+        )
+        assert config is None
+
+    def test_validate_configuration_reports_disallowed_characters(self, mock_empty_df):
+        service = ConfigurationService("test_project")
+        service.get_all_configurations = Mock(return_value=mock_empty_df)
+
+        is_valid, error_msg, _ = service.validate_configuration(
+            {"page_name": "HH/HFC", "survey_data_name": "s", "survey_key": "k"}
+        )
+
+        assert is_valid is False
+        assert "letters, digits, spaces" in error_msg
+        assert "Value error" not in error_msg
+
+    def test_page_name_problem_covers_rule_and_clash(self, mock_config_df):
+        """The early page-name check reports both kinds of problem."""
+        service = ConfigurationService("test_project")
+        service.get_all_configurations = Mock(return_value=mock_config_df)
+
+        assert "letters, digits" in service.page_name_problem("HH?")
+        assert "too similar" in service.page_name_problem("existing_page")
+        assert service.page_name_problem("New Page") is None
 
     def test_validate_configuration_invalid_page_name_too_long(self, mock_empty_df):
         """Test validation fails for too long page name."""
@@ -1238,13 +1279,14 @@ class TestRenderPageNameInput:
 
         result = render_page_name_input()
 
-        mock_st.text_input.assert_called_once_with(
-            "Page Name",
-            placeholder="eg. Household HFC, Individual HFC, etc.",
-            help="This name will be used to create a new page for the checks.",
-            max_chars=20,
-            key="check_config_page_name_input",
-        )
+        mock_st.text_input.assert_called_once()
+        kwargs = mock_st.text_input.call_args.kwargs
+        assert mock_st.text_input.call_args.args == ("Page Name",)
+        assert kwargs["max_chars"] == 20
+        assert kwargs["key"] == "check_config_page_name_input"
+        # The help states the name rule before the user submits
+        assert "start with a letter" in kwargs["help"].lower()
+        assert "letters, digits, spaces" in kwargs["help"]
         assert result == "Test Page"
 
     @patch("datasure.utils.config_utils.st")
@@ -1986,8 +2028,60 @@ class TestConfigurationServiceValidateEditConfiguration:
         )
 
         assert is_valid is False
-        assert "already exists" in error_msg
+        assert "too similar to existing page name 'Page Two'" in error_msg
         assert config is None
+
+    def test_invalid_when_renamed_onto_another_pages_id(self):
+        """A rename that would share another page's settings is rejected."""
+        service = ConfigurationService("test_project")
+        service.get_all_configurations = Mock(return_value=_make_multi_config_df())
+
+        is_valid, error_msg, _ = service.validate_edit_configuration(
+            {"page_name": "page-two", "survey_data_name": "s", "survey_key": "k"},
+            "Page One",
+        )
+
+        assert is_valid is False
+        assert "'Page Two'" in error_msg
+
+    def test_case_only_rename_of_own_page_is_valid(self):
+        """Changing only the case of a page's own name keeps its ID."""
+        service = ConfigurationService("test_project")
+        service.get_all_configurations = Mock(return_value=_make_multi_config_df())
+
+        is_valid, error_msg, config = service.validate_edit_configuration(
+            {"page_name": "PAGE ONE", "survey_data_name": "s", "survey_key": "k"},
+            "Page One",
+        )
+
+        assert is_valid is True
+        assert error_msg is None
+        assert config.page_name == "PAGE ONE"
+
+    def test_rename_to_disallowed_characters_is_invalid(self):
+        service = ConfigurationService("test_project")
+        service.get_all_configurations = Mock(return_value=_make_multi_config_df())
+
+        is_valid, _, _ = service.validate_edit_configuration(
+            {"page_name": "Round 1: HH", "survey_data_name": "s", "survey_key": "k"},
+            "Page One",
+        )
+
+        assert is_valid is False
+
+    def test_unchanged_legacy_page_name_can_still_be_edited(self):
+        """A page saved before the rule can be edited without renaming it."""
+        service = ConfigurationService("test_project")
+        service.get_all_configurations = Mock(
+            return_value=pl.DataFrame({"page_name": ["HH/HFC"]})
+        )
+
+        is_valid, error_msg, _ = service.validate_edit_configuration(
+            {"page_name": "HH/HFC", "survey_data_name": "s", "survey_key": "k"},
+            "HH/HFC",
+        )
+
+        assert is_valid is True, error_msg
 
     def test_invalid_when_config_data_fails_pydantic_validation(self):
         """Invalid config data (e.g. empty page name) should fail."""
@@ -2801,10 +2895,9 @@ class TestAddCheckConfigurationFormWrapped:
         mock_render_name.return_value = "Existing Page"
 
         mock_service = Mock()
-        mock_service.validate_configuration.return_value = (
-            False,
-            "Page name 'Existing Page' already exists. Please choose a different name.",
-            None,
+        mock_service.page_name_problem.return_value = (
+            "'Existing Page' is too similar to existing page name 'Existing Page'. "
+            "Please choose a different name."
         )
         mock_cs_class.return_value = mock_service
 
@@ -2812,7 +2905,8 @@ class TestAddCheckConfigurationFormWrapped:
 
         mock_st.error.assert_called_once()
         error_msg = mock_st.error.call_args[0][0]
-        assert "already exists" in error_msg
+        assert "too similar" in error_msg
+        mock_service.page_name_problem.assert_called_once_with("Existing Page")
 
     @patch("datasure.utils.config_utils.render_page_name_input")
     @patch("datasure.utils.config_utils.st")
@@ -2826,6 +2920,7 @@ class TestAddCheckConfigurationFormWrapped:
 
         mock_service = Mock()
         mock_service.validate_configuration.return_value = (True, None, Mock())
+        mock_service.page_name_problem.return_value = None
         mock_cs_class.return_value = mock_service
 
         add_check_configuration_form.__wrapped__("project_id", ["survey_1"])
@@ -2859,6 +2954,7 @@ class TestAddCheckConfigurationFormWrapped:
 
         mock_service = Mock()
         mock_service.validate_configuration.return_value = (True, None, Mock())
+        mock_service.page_name_problem.return_value = None
         mock_cs_class.return_value = mock_service
 
         mock_ds = Mock()
@@ -3151,6 +3247,7 @@ class TestAddCheckConfigurationFormBackcheckBranch:
 
         mock_service = Mock()
         mock_service.validate_configuration.return_value = (True, None, Mock())
+        mock_service.page_name_problem.return_value = None
         mock_cs_class.return_value = mock_service
 
         mock_ds = Mock()

@@ -38,6 +38,7 @@ from datasure.replication.scto_import_generator import (
 )
 from datasure.replication.stata_names import package_name_map
 from datasure.utils.duckdb_utils import duckdb_get_table, load_missing_codes_from_db
+from datasure.utils.names import name_id
 
 logger = logging.getLogger(__name__)
 
@@ -299,7 +300,7 @@ def build_replication_package(
 
     datasure_version = _get_version()
     safe_project = project_name.lower().replace(" ", "_")
-    safe_survey = survey_name.lower().replace(" ", "_")
+    safe_survey = name_id(survey_name)
     root = f"replication_{safe_project}_{safe_survey}"
 
     logger.info(
