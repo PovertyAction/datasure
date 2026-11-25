@@ -10,6 +10,7 @@ import html
 import json
 import re
 
+from datasure.surveycto.xlsform import binary_type
 from datasure.surveycto.xml_contract import (
     ENUMERATOR_COLUMNS,
     FormContract,
@@ -45,7 +46,6 @@ _PRELOAD_TYPES = {
     ("property", "username"): "username",
     ("property", "caseid"): "caseid",
 }
-_MEDIA_TYPES = {"image": "image", "audio": "audio", "video": "video"}
 _REF_RE = re.compile(r"\$\{([^}]+)\}")
 # An HTML tag: `<` then a letter or `/`, so `<5 and >10` is text.
 _TAG_RE = re.compile(r"</?[A-Za-z][^<>]*>")
@@ -70,8 +70,9 @@ def _xlsform_type(node: Node) -> str:
         return node.control
     if node.control == "input" and node.xml_type in _INPUT_TYPES:
         return _INPUT_TYPES[node.xml_type]
-    if node.control == "upload" and node.xml_type == "binary":
-        return _MEDIA_TYPES.get((node.mediatype or "").split("/")[0], "file")
+    if node.xml_type == "binary" and node.control in ("upload", None):
+        # Uploads, and media SurveyCTO fills itself (comments, audits).
+        return binary_type(node)
     if node.control is None and node.preload is not None:
         key = (node.preload, node.preload_params)
         if key in _PRELOAD_TYPES:

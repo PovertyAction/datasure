@@ -12,6 +12,7 @@ import pytest
 from datasure.processing.correction_log import CORRECTION_LOG_SCHEMA
 from datasure.replication.package_builder import (
     NO_FORM_DICTIONARY,
+    NO_FORM_DICTIONARY_BUILD,
     _action_summary,
     _load_corrected,
     _load_correction_log,
@@ -697,6 +698,15 @@ class TestFormDictionary:
         warnings: list[str] = []
         self._build(warnings=warnings)
         assert NO_FORM_DICTIONARY not in warnings
+
+    def test_a_form_it_cannot_read_leaves_it_out_with_a_note(self, no_form_dictionary):
+        """One unreadable form does not stop the package (it used to abort it)."""
+        no_form_dictionary.side_effect = ValueError("node 'x': no XLSForm type")
+        warnings: list[str] = []
+        names = self._build(form_id="farm", warnings=warnings).namelist()
+        assert not any(n.endswith("_dictionary.xlsx") for n in names)
+        assert any(n.endswith("codebook.csv") for n in names)
+        assert warnings == [f"{NO_FORM_DICTIONARY_BUILD} (node 'x': no XLSForm type)"]
 
     def test_no_note_when_the_dictionary_is_built(self, no_form_dictionary):
         no_form_dictionary.return_value = object()

@@ -28,7 +28,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   `1_docs/2_codebooks/{survey}_dictionary.xlsx`, listed in the README
   (`generate_readme(include_form_dictionary=...)`). A SurveyCTO dataset
   (`form_id` set) without a stored form definition gets no workbook and an
-  `on_warning` note (`NO_FORM_DICTIONARY`) saying to refresh the import
+  `on_warning` note (`NO_FORM_DICTIONARY`) saying to refresh the import. A
+  form the dictionary cannot read (`ValueError`, `KeyError`,
+  `pa.ArrowException` from `build_form_dictionary`) is logged and leaves the
+  workbook out with a note (`NO_FORM_DICTIONARY_BUILD`) instead of stopping
+  the build
+- **Dictionary types for media SurveyCTO fills itself** (#398):
+  `build_questions` typed a `binary` field with no body control (comments,
+  text audit, audio audit) as an error, which stopped the replication
+  package. It now uses `surveycto.xlsform.binary_type` (was `_binary_type`),
+  which reads the bind's `class=`, for uploads and these fields alike
 - **Typed SurveyCTO import** (#397): `SurveyCTOClient._import_regular_form`
   (`connectors/scto.py`) downloads the deployed form's compiled XML
   (`SurveyCTOAPIClient.download_form_xml`, `GET /forms/{id}/xml` with the same

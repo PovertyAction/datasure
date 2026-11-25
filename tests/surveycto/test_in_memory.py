@@ -14,6 +14,26 @@ from datasure.surveycto.stats import stats_rows
 from datasure.surveycto.xml_contract import parse_contract
 from tests.surveycto.farm_form import ROWS, SENTINELS, XML
 
+# Media SurveyCTO fills itself: no body control, typed by the bind's class.
+MEDIA_XML = """<?xml version="1.0"?>
+<h:html xmlns="http://www.w3.org/2002/xforms" xmlns:h="http://www.w3.org/1999/xhtml">
+  <h:head><h:title>Media form</h:title><model>
+    <instance><media id="media" version="1">
+      <photo/><all_comments/><text_audit/><audio_audit/>
+      <meta><instanceID/></meta>
+    </media></instance>
+    <bind nodeset="/media/photo" type="binary"/>
+    <bind nodeset="/media/all_comments" type="binary" appearance="class=comments"/>
+    <bind nodeset="/media/text_audit" type="binary" appearance="class=textAudit;p=100"/>
+    <bind nodeset="/media/audio_audit" type="binary" appearance="class=audioAudit;s=10"/>
+    <bind nodeset="/media/meta/instanceID" type="string" calculate="concat('uuid:', uuid())"/>
+  </model></h:head>
+  <h:body>
+    <upload ref="/media/photo" mediatype="image/*"><label>Photo</label></upload>
+  </h:body>
+</h:html>
+"""
+
 
 @pytest.fixture
 def built(tmp_path):
@@ -65,3 +85,28 @@ def test_parse_contract_reads_bytes(tmp_path):
     assert (
         parse_contract(XML.encode()).nodes.keys() == parse_contract(path).nodes.keys()
     )
+
+
+def test_media_surveycto_fills_itself_gets_a_dictionary():
+    """Comments and audit fields have no control; their bind class names the type."""
+    contract = parse_contract(MEDIA_XML.encode())
+    questions = build_questions(contract)
+    types = {q["variable_name"]: q["type"] for q in questions}
+    assert types["all_comments"] == "comments"
+    assert types["text_audit"] == "text audit"
+    assert types["audio_audit"] == "audio audit"
+
+    url = "https://example.surveycto.com/api/v1/forms/files/{}/{}"
+    row = {
+        "KEY": "uuid:1",
+        "SubmissionDate": "Mar 7, 2025 4:06:12 PM",
+        **{name: url.format(name, "f.csv") for name in types if name != "KEY"},
+    }
+    table = cast_wide([row], contract)
+    vardict = build_dictionary(table, questions, contract, {})
+    attach(
+        vardict, classify(table, vardict, questions, PiiConfig(), None), questions, []
+    )
+    buffer = io.BytesIO()
+    save_codebook(buffer, vardict, stats_rows(table, questions, vardict, {}))
+    assert load_workbook(io.BytesIO(buffer.getvalue()), read_only=True).sheetnames

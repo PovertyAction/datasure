@@ -9,13 +9,18 @@ import zipfile
 from collections.abc import Callable, Mapping
 
 import polars as pl
+import pyarrow as pa
 
 from datasure.processing.correction_log import (
     CORRECTION_LOG_SCHEMA,
     Action,
     ensure_log_columns,
 )
-from datasure.processing.form_dictionary import build_form_dictionary, dictionary_xlsx
+from datasure.processing.form_dictionary import (
+    FormDictionary,
+    build_form_dictionary,
+    dictionary_xlsx,
+)
 from datasure.replication.codebook import generate_codebook
 from datasure.replication.prep_script_generator import (
     generate_prepare_data_script,
@@ -43,6 +48,11 @@ NO_FORM_DICTIONARY = (
     "need one refresh: on the Import page, turn Refresh on for this dataset, "
     "click Load data, then build the package again. Server datasets have no "
     "data dictionary."
+)
+# Shown when the stored form could not be turned into a data dictionary.
+NO_FORM_DICTIONARY_BUILD = (
+    "No data dictionary in this package: DataSure could not build one from this "
+    "dataset's SurveyCTO form. The rest of the package is complete"
 )
 
 
@@ -161,6 +171,33 @@ def _select_import_script(
 def _with_stata_names(df: pl.DataFrame, name_map: Mapping[str, str]) -> pl.DataFrame:
     """``df`` with each mapped column renamed to its Stata name."""
     return df.rename({col: name_map[col] for col in df.columns if col in name_map})
+
+
+def _form_dictionary(
+    project_id: str,
+    alias: str,
+    raw_df: pl.DataFrame,
+    form_id: str,
+    on_warning: Callable[[str], None] | None,
+) -> FormDictionary | None:
+    """Return a SurveyCTO alias's data dictionary, or ``None`` with a note why.
+
+    The dictionary is optional: a form it cannot read leaves it out of the
+    package instead of stopping the build. Datasets that are not SurveyCTO
+    imports (no ``form_id``) get no note.
+    """
+    try:
+        form_dictionary = build_form_dictionary(
+            project_id, alias, raw_df, load_missing_codes_from_db(project_id)
+        )
+    except (ValueError, KeyError, pa.ArrowException) as e:
+        logger.exception("Could not build the data dictionary for %s", alias)
+        if on_warning is not None:
+            on_warning(f"{NO_FORM_DICTIONARY_BUILD} ({e})")
+        return None
+    if form_dictionary is None and form_id and on_warning is not None:
+        on_warning(NO_FORM_DICTIONARY)
+    return form_dictionary
 
 
 def _serialize_prep_args(x: object) -> str | None:
@@ -323,14 +360,9 @@ def build_replication_package(
     )
     _step("`0_main.do` generated")
 
-    # SurveyCTO aliases only: built from the stored form definition.
-    form_dictionary = build_form_dictionary(
-        project_id, alias, raw_df, load_missing_codes_from_db(project_id)
-    )
+    form_dictionary = _form_dictionary(project_id, alias, raw_df, form_id, on_warning)
     if form_dictionary is not None:
         _step("Data dictionary generated")
-    elif form_id and on_warning is not None:
-        on_warning(NO_FORM_DICTIONARY)
 
     readme = generate_readme(
         project_name=project_name,
