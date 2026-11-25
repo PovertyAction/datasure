@@ -110,14 +110,18 @@ _SHEET_DESCRIPTIONS = [
     [
         "Choices",
         "",
-        "Each choice list's codes and labels. A list is named after its "
-        "question: SurveyCTO's compiled form does not keep XLSForm list names",
+        (
+            "Each choice list's codes and labels. A list is named after its "
+            "question: SurveyCTO's compiled form does not keep XLSForm list names"
+        ),
     ],
     [
         "Summary stats",
         "",
-        "Counts and frequencies over the rows where each question "
-        "was asked. Columns flagged as PII show counts only",
+        (
+            "Counts and frequencies over the rows where each question "
+            "was asked. Columns flagged as PII show counts only"
+        ),
     ],
 ]
 _PERCENT = {"missing_rate", "final_missing_rate", "selected_share"}
