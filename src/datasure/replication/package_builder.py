@@ -21,7 +21,7 @@ from datasure.processing.form_dictionary import (
     build_form_dictionary,
     dictionary_xlsx,
 )
-from datasure.replication.codebook import generate_codebook
+from datasure.replication.codebook import final_columns, generate_codebook
 from datasure.replication.prep_script_generator import (
     generate_prepare_data_script,
 )
@@ -171,6 +171,28 @@ def _select_import_script(
 def _with_stata_names(df: pl.DataFrame, name_map: Mapping[str, str]) -> pl.DataFrame:
     """``df`` with each mapped column renamed to its Stata name."""
     return df.rename({col: name_map[col] for col in df.columns if col in name_map})
+
+
+def _codebook_files(
+    form_dictionary: FormDictionary | None,
+    corrected_df: pl.DataFrame,
+    name_map: Mapping[str, str],
+    safe_survey: str,
+) -> dict[str, str | bytes]:
+    """Return the package's one codebook, by file name in ``1_docs/2_codebooks``.
+
+    With a data dictionary, its workbook carries codebook.csv's final-data
+    columns (Stata name, missing rate, distinct values; no sample values) and
+    there is no CSV. Other datasets get the CSV.
+    """
+    if form_dictionary is not None:
+        final = final_columns(corrected_df, name_map)
+        return {
+            f"{safe_survey}_dictionary.xlsx": dictionary_xlsx(form_dictionary, final)
+        }
+    return {
+        "codebook.csv": generate_codebook(_with_stata_names(corrected_df, name_map))
+    }
 
 
 def _form_dictionary(
@@ -379,7 +401,7 @@ def build_replication_package(
     )
     _step("README generated")
 
-    codebook_csv = generate_codebook(_with_stata_names(corrected_df, name_map))
+    codebooks = _codebook_files(form_dictionary, corrected_df, name_map, safe_survey)
     _step("Codebook generated")
 
     # Raw CSV (input for import_data.do)
@@ -420,12 +442,8 @@ def build_replication_package(
             )
         else:
             zf.writestr(f"{root}/1_docs/1_surveys/.gitkeep", "")
-        zf.writestr(f"{root}/1_docs/2_codebooks/codebook.csv", codebook_csv)
-        if form_dictionary is not None:
-            zf.writestr(
-                f"{root}/1_docs/2_codebooks/{safe_survey}_dictionary.xlsx",
-                dictionary_xlsx(form_dictionary),
-            )
+        for name, content in codebooks.items():
+            zf.writestr(f"{root}/1_docs/2_codebooks/{name}", content)
         zf.writestr(f"{root}/1_docs/3_notes/.gitkeep", "")
 
         # 2_scripts/

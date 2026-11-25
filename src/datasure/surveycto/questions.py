@@ -285,8 +285,8 @@ def build_questions(contract: FormContract) -> list[dict]:
                     "expression": refs(node.choice_filter["expression"]),
                 },
                 "variable_name": node.name,
-                "question_text": label(node)
-                or (calculation if qtype == "calculate" else ""),
+                # A calculate's formula is its `calculation`, never its label.
+                "question_text": label(node),
                 "hint": plain_text(refs(node.hint)),
                 "constraint_message": plain_text(refs(node.constraint_message)),
                 "disabled": parent_disabled or relevance == "0",

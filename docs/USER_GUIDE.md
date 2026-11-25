@@ -960,12 +960,17 @@ names** option.
 
 #### Data dictionary (SurveyCTO forms)
 
-For a SurveyCTO form, the package also holds
+For a SurveyCTO form, the package's codebook is
 `1_docs/2_codebooks/{survey}_dictionary.xlsx`, a data dictionary to share
-with PIs, next to the statistical `codebook.csv`. It has three sheets:
+with PIs. It replaces `codebook.csv`, which other datasets still get. It has
+four sheets:
 
-- **Variables**: each column's question label, type, relevance, choice list,
-  missing rate and PII status
+- **Instructions**: what each sheet holds and what each Variables column means
+- **Variables**: one row per raw column, with its question label, type,
+  relevance, calculation, choice list, missing rate and PII status, then its
+  Stata name and missing rate and distinct values in the final data (after
+  Prepare Data and corrections). Columns added in Prepare Data come last,
+  without form details. Unlike `codebook.csv`, it shows no sample values
 - **Choices**: each choice list's codes and labels. A list is named after its
   question, because SurveyCTO's compiled form doesn't keep XLSForm list names
 - **Summary stats**: counted only over the rows where the question was asked

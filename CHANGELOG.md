@@ -18,15 +18,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`sentinels_from_missing_codes`; a code under two labels raises). `None`
   without a stored form definition. `form_table` raises when raw's columns
   and the stored schema differ, instead of dropping columns.
-  `dictionary_xlsx` writes the workbook (Variables, Choices, Summary stats)
-  with upstream's `save_codebook`; flagged columns show counts, never values.
+  `dictionary_xlsx` writes the workbook (Instructions, Variables, Choices,
+  Summary stats) with `save_codebook`; flagged columns show counts, never
+  values. Instructions describes each sheet and each Variables column
+  (`VARIABLE_DESCRIPTIONS`). A calculate's label is blank and its formula is
+  in the Variables `calculation` column.
   Choices lists each select's codes and labels once per list (`list_name`,
   `value`, `label`), and the Variables sheet's `choices` column names the
   list. The compiled XML does not keep XLSForm list names, so a list is
   named after its question; withheld `search()` lists are left out
 - **Replication package** (#398): SurveyCTO aliases get
   `1_docs/2_codebooks/{survey}_dictionary.xlsx`, listed in the README
-  (`generate_readme(include_form_dictionary=...)`). A SurveyCTO dataset
+  (`generate_readme(include_form_dictionary=...)`), in place of
+  `codebook.csv`: `replication.codebook.final_columns` adds each final-data
+  column's `stata_name`, `final_missing_rate` and `final_unique` to the
+  Variables sheet, by name (no sample values), and columns added in Prepare
+  Data are appended. Other datasets keep `codebook.csv`. A SurveyCTO dataset
   (`form_id` set) without a stored form definition gets no workbook and an
   `on_warning` note (`NO_FORM_DICTIONARY`) saying to refresh the import. A
   form the dictionary cannot read (`ValueError`, `KeyError`,

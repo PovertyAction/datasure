@@ -76,7 +76,12 @@ def test_save_codebook_to_a_file_object(built):
     save_codebook(buffer, vardict, stats_rows(table, questions, vardict, SENTINELS))
 
     workbook = load_workbook(io.BytesIO(buffer.getvalue()), read_only=True)
-    assert workbook.sheetnames == ["Variables", "Choices", "Summary stats"]
+    assert workbook.sheetnames == [
+        "Instructions",
+        "Variables",
+        "Choices",
+        "Summary stats",
+    ]
 
 
 def test_parse_contract_reads_bytes(tmp_path):

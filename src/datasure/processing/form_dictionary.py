@@ -115,14 +115,17 @@ def build_form_dictionary(
     )
 
 
-def dictionary_xlsx(form_dictionary: FormDictionary) -> bytes:
+def dictionary_xlsx(
+    form_dictionary: FormDictionary, final: dict[str, dict] | None = None
+) -> bytes:
     """Return the data dictionary workbook to share with PIs.
 
-    Sheets: Variables (labels, types, choice list, relevance, PII status),
-    Choices (each list's values and labels) and Summary stats, counted over the
-    rows where each question was asked.
-    Upstream writes it with ``save_codebook``.
+    Sheets: Instructions (what each Variables column holds), Variables (labels,
+    types, choice list, relevance, PII status), Choices (each list's values and
+    labels) and Summary stats, counted over the rows where each question was
+    asked. ``final`` (``replication.codebook.final_columns``) adds each column's
+    Stata name and final-data counts to Variables.
     """
     buffer = io.BytesIO()
-    save_codebook(buffer, form_dictionary.dictionary, form_dictionary.stats)
+    save_codebook(buffer, form_dictionary.dictionary, form_dictionary.stats, final)
     return buffer.getvalue()

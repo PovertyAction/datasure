@@ -685,9 +685,26 @@ class TestFormDictionary:
         readme = zf.read(next(n for n in names if n.endswith("0_README.txt")))
         assert b"s_dictionary.xlsx" in readme
 
+    def test_it_replaces_codebook_csv(self, no_form_dictionary):
+        """One codebook: the workbook gets the final data's Stata names and counts."""
+        no_form_dictionary.return_value = object()
+        with patch(
+            "datasure.replication.package_builder.dictionary_xlsx",
+            return_value=b"xlsx",
+        ) as write:
+            names = self._build().namelist()
+        assert not any(n.endswith("codebook.csv") for n in names)
+        final = write.call_args[0][1]
+        assert set(final) == set(_RAW.columns)  # no corrections: the prep data
+        assert all(
+            set(f) == {"stata_name", "final_missing_rate", "final_unique"}
+            for f in final.values()
+        )
+
     def test_left_out_without_a_form_definition(self):
         names = self._build().namelist()
         assert not any(n.endswith("_dictionary.xlsx") for n in names)
+        assert any(n.endswith("codebook.csv") for n in names)
 
     def test_a_surveycto_dataset_without_one_gets_a_note(self):
         warnings: list[str] = []

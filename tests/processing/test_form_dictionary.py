@@ -169,7 +169,12 @@ def test_pii_from_the_form_rules_trusting_publishable(built):
 
 def test_dictionary_workbook_hides_flagged_values(built):
     workbook = load_workbook(io.BytesIO(dictionary_xlsx(built)), read_only=True)
-    assert workbook.sheetnames == ["Variables", "Choices", "Summary stats"]
+    assert workbook.sheetnames == [
+        "Instructions",
+        "Variables",
+        "Choices",
+        "Summary stats",
+    ]
     cells = {
         str(cell)
         for sheet in workbook.worksheets
@@ -201,3 +206,54 @@ def test_dictionary_workbook_lists_each_choice_list_once(built):
     assert named["tools_77"] == "tools"
     assert named["plot_crop_2_1"] == "plot_crop"
     assert named["plots"] is None
+
+
+def _variables(workbook) -> dict[str, dict]:
+    header, *rows = workbook["Variables"].iter_rows(values_only=True)
+    # Read-only rows drop trailing empty cells.
+    padded = [(*row, *[None] * (len(header) - len(row))) for row in rows]
+    return {row[0]: dict(zip(header, row, strict=True)) for row in padded}
+
+
+def test_a_calculate_shows_its_formula_as_calculation_not_label(built):
+    workbook = load_workbook(io.BytesIO(dictionary_xlsx(built)), read_only=True)
+    variables = _variables(workbook)
+    assert variables["duration"]["label"] is None
+    assert variables["duration"]["calculation"] == "duration()"
+    assert variables["owner"]["label"] == "Owner"
+    assert variables["owner"]["calculation"] is None
+
+
+def test_final_data_columns_merge_into_variables(built):
+    """Stata names and final counts join by name; prep-added columns go last."""
+    final = {
+        "owner": {"stata_name": "owner", "final_missing_rate": 0.5, "final_unique": 2},
+        "visit": {
+            "stata_name": "visit_date",
+            "final_missing_rate": 0.0,
+            "final_unique": 1,
+        },
+        "plots_x2": {
+            "stata_name": "plots_x2",
+            "final_missing_rate": 0.0,
+            "final_unique": 2,
+        },
+    }
+    workbook = load_workbook(io.BytesIO(dictionary_xlsx(built, final)), read_only=True)
+    variables = _variables(workbook)
+    assert variables["owner"]["final_unique"] == 2
+    assert variables["visit"]["stata_name"] == "visit_date"
+    # In raw but not in the final data: dropped in Prepare Data.
+    assert variables["area"]["stata_name"] is None
+    # Only in the final data: added in Prepare Data, with no form details.
+    assert list(variables)[-1] == "plots_x2"
+    assert variables["plots_x2"]["type"] is None
+
+
+def test_instructions_describe_every_variables_column(built):
+    workbook = load_workbook(io.BytesIO(dictionary_xlsx(built)), read_only=True)
+    header, *rows = workbook["Instructions"].iter_rows(values_only=True)
+    assert header == ("sheet", "column", "description")
+    described = [column for sheet, column, _ in rows if sheet == "Variables" and column]
+    assert described == list(_variables(workbook)["owner"])
+    assert all(description for *_, description in rows)
