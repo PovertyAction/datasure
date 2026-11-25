@@ -209,6 +209,15 @@ class TestFormConfig:
         )
         assert config.alias == "a" * 40
 
+    def test_stored_alias_keeps_its_surrounding_spaces(self):
+        """A saved alias loads as stored, so refresh writes to its own table."""
+        from datasure.utils.names import STORED_NAME
+
+        config = FormConfig.model_validate(
+            {"alias": " HH ", "form_id": "f1", "server": "s1"}, context=STORED_NAME
+        )
+        assert config.alias == " HH "
+
     def test_form_config_defaults(self):
         """Test FormConfig default values."""
         config = FormConfig(alias="test", form_id="form123", server="testserver")

@@ -8,7 +8,7 @@ share storage and no name can break a file path.
 """
 
 import re
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 
 from pydantic import ValidationError, ValidationInfo
 
@@ -52,13 +52,14 @@ def validate_name(value: str, info: ValidationInfo, label: str) -> str:
     """Pydantic field validator body for an alias or page name.
 
     Trims spaces and enforces the name rule, unless the model is validated
-    with the ``STORED_NAME`` context, where only emptiness is checked.
+    with the ``STORED_NAME`` context. A stored name is returned exactly as
+    saved, because its table and settings IDs were built from it.
     """
     if not value or not value.strip():
         raise ValueError(f"{label} cannot be empty")
-    value = value.strip()
     if (info.context or {}).get("stored_name"):
         return value
+    value = value.strip()
     problem = name_problem(value, label)
     if problem:
         raise ValueError(problem)
@@ -87,18 +88,24 @@ def name_id(name: str) -> str:
 
 
 def name_clash(
-    name: str, existing: Iterable[str], *, kind: str, own: str | None = None
+    name: str,
+    existing: Iterable[str],
+    *,
+    kind: str,
+    own: str | None = None,
+    id_of: Callable[[str], str] = name_id,
 ) -> str | None:
     """Return a message if ``name`` shares its ID with an existing entry.
 
     ``kind`` names the entry type in the message ("alias", "page name").
     ``own`` is the entry's current name when renaming it, so a rename that
-    keeps its own ID (such as a change of case) is allowed.
+    keeps its own ID (such as a change of case) is allowed. ``id_of`` maps a
+    name to the ID it is stored under.
     """
-    new_id = name_id(name)
-    own_id = name_id(own) if own is not None else None
+    new_id = id_of(name)
+    own_id = id_of(own) if own is not None else None
     for other in existing:
-        if other is None or name_id(other) != new_id or new_id == own_id:
+        if other is None or id_of(other) != new_id or new_id == own_id:
             continue
         return (
             f"'{name}' is too similar to existing {kind} '{other}'. "

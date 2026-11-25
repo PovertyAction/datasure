@@ -7,7 +7,7 @@ import pandas as pd
 import polars as pl
 
 from .cache_utils import get_cache_path
-from .names import name_id
+from .names import name_clash, name_id
 
 # Set up logging
 logger = logging.getLogger(__name__)
@@ -96,6 +96,16 @@ def _validate_table_name(table_name: str) -> str:
     return sanitized
 
 
+def alias_table(alias: str) -> str:
+    """Return the DuckDB table a dataset alias is stored in."""
+    return _validate_table_name(name_id(alias))
+
+
+def alias_clash(alias: str, existing: list[str]) -> str | None:
+    """Return a message if ``alias`` would share a table with an existing alias."""
+    return name_clash(alias, existing, kind="alias", id_of=alias_table)
+
+
 def database_path(project_id: str, db_name: str) -> Path:
     """Return the path of a project's DuckDB database file.
 
@@ -125,7 +135,7 @@ def duckdb_save_table(
     db_path = database_path(project_id, db_name)
 
     # convert alias to table name format and validate
-    table_id = _validate_table_name(name_id(alias))
+    table_id = alias_table(alias)
 
     with duckdb.connect(db_path) as conn:
         table_exists = (
@@ -165,7 +175,7 @@ def duckdb_get_table(
         )
     db_path = database_path(project_id, db_name)
 
-    table_id = _validate_table_name(name_id(alias))
+    table_id = alias_table(alias)
 
     with duckdb.connect(db_path) as conn:
         # Check if the table exists
@@ -195,7 +205,7 @@ def duckdb_get_columns(project_id: str, alias: str, db_name: str) -> list[str]:
     Returns an empty list when the table does not exist, as
     ``duckdb_get_table`` returns an empty frame.
     """
-    table_id = _validate_table_name(name_id(alias))
+    table_id = alias_table(alias)
     with duckdb.connect(database_path(project_id, db_name)) as conn:
         rows = conn.execute(
             "SELECT column_name FROM information_schema.columns "
@@ -219,7 +229,7 @@ def duckdb_remove_table(project_id: str, alias: str, db_name: str) -> None:
     None
     """
     db_path = database_path(project_id, db_name)
-    table_id = _validate_table_name(name_id(alias))
+    table_id = alias_table(alias)
     with duckdb.connect(db_path) as conn:
         # Check if the table exists
         table_exists = (
@@ -277,7 +287,7 @@ def duckdb_delete_rows(
     None
     """
     db_path = database_path(project_id, db_name)
-    table_id = _validate_table_name(name_id(alias))
+    table_id = alias_table(alias)
     column_id = _validate_column_name(column)
     with duckdb.connect(db_path) as conn:
         conn.execute(f"DELETE FROM {table_id} WHERE {column_id} = ?", [value])
@@ -353,11 +363,7 @@ def duckdb_get_imported_datasets(project_id: str) -> list[str]:
             "SELECT table_name FROM information_schema.tables WHERE table_schema = 'main'"
         ).fetchall()
         table_names = {name[0] for name in table_names}
-    return [
-        alias
-        for alias in aliases
-        if _validate_table_name(name_id(alias)) in table_names
-    ]
+    return [alias for alias in aliases if alias_table(alias) in table_names]
 
 
 def duckdb_table_exists(project_id: str, alias: str, db_name: str) -> bool:
@@ -375,7 +381,7 @@ def duckdb_table_exists(project_id: str, alias: str, db_name: str) -> bool:
     """
     db_path = database_path(project_id, db_name)
 
-    table_id = _validate_table_name(name_id(alias))
+    table_id = alias_table(alias)
 
     with duckdb.connect(db_path) as conn:
         # Check if the table exists

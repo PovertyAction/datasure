@@ -577,6 +577,75 @@ class TestApplyProjectConfig:
         ]
         mock_load_local.assert_not_called()
 
+    @patch("datasure.utils.project_config.load_local_data")
+    @patch("datasure.utils.project_config.duckdb_save_table")
+    @patch("datasure.utils.project_config.ConfigurationService")
+    @patch("datasure.utils.project_config.duckdb_get_table")
+    def test_alias_with_surrounding_spaces_is_checked_as_trimmed(
+        self,
+        mock_get_table,
+        mock_config_service_cls,
+        mock_save_table,
+        mock_load_local,
+        tmp_path,
+    ):
+        """The import trims the alias, so the clash check compares it trimmed."""
+        mock_get_table.return_value = pl.DataFrame({"alias": ["baseline"]})
+        mock_config_service_cls.return_value = self._config_service_mock()
+        data_file = tmp_path / "b.csv"
+        data_file.write_text("id\n1\n")
+
+        bundle = ProjectConfigBundle(
+            exported_from_project="p",
+            exported_at="t",
+            datasets=[ImportSourceEntry(alias=" baseline ", source="local storage")],
+        )
+
+        result = apply_project_config(
+            PROJECT_ID, bundle, local_file_paths={" baseline ": str(data_file)}
+        )
+
+        assert result.datasets_imported == []
+        assert [f.step for f in result.datasets_skipped] == [" baseline "]
+        mock_load_local.assert_not_called()
+
+    @patch("datasure.utils.project_config.load_local_data")
+    @patch("datasure.utils.project_config.duckdb_save_table")
+    @patch("datasure.utils.project_config.ConfigurationService")
+    @patch("datasure.utils.project_config.duckdb_get_table")
+    def test_bundled_aliases_differing_only_by_spaces_import_once(
+        self,
+        mock_get_table,
+        mock_config_service_cls,
+        mock_save_table,
+        mock_load_local,
+        tmp_path,
+    ):
+        """A second bundled alias that trims to the first one is skipped."""
+        mock_get_table.return_value = pl.DataFrame()
+        mock_config_service_cls.return_value = self._config_service_mock()
+        data_file = tmp_path / "b.csv"
+        data_file.write_text("id\n1\n")
+
+        bundle = ProjectConfigBundle(
+            exported_from_project="p",
+            exported_at="t",
+            datasets=[
+                ImportSourceEntry(alias="baseline", source="local storage"),
+                ImportSourceEntry(alias="baseline ", source="local storage"),
+            ],
+        )
+
+        result = apply_project_config(
+            PROJECT_ID,
+            bundle,
+            local_file_paths={"baseline": str(data_file), "baseline ": str(data_file)},
+        )
+
+        assert result.datasets_imported == ["baseline"]
+        assert [f.step for f in result.datasets_skipped] == ["baseline "]
+        mock_load_local.assert_called_once()
+
     @patch("datasure.utils.project_config.download_forms")
     @patch("datasure.utils.project_config.duckdb_save_table")
     @patch("datasure.utils.project_config.list_stored_credentials")

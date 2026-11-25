@@ -2083,6 +2083,19 @@ class TestConfigurationServiceValidateEditConfiguration:
 
         assert is_valid is True, error_msg
 
+    def test_unchanged_name_typed_with_spaces_keeps_the_saved_name(self):
+        """Spaces around an unchanged name do not change the saved page name."""
+        service = ConfigurationService("test_project")
+        service.get_all_configurations = Mock(return_value=_make_multi_config_df())
+
+        is_valid, error_msg, config = service.validate_edit_configuration(
+            {"page_name": " Page One ", "survey_data_name": "s", "survey_key": "k"},
+            "Page One",
+        )
+
+        assert is_valid is True, error_msg
+        assert config.page_name == "Page One"
+
     def test_invalid_when_config_data_fails_pydantic_validation(self):
         """Invalid config data (e.g. empty page name) should fail."""
         service = ConfigurationService("test_project")

@@ -332,6 +332,8 @@ class ConfigurationService:
             unchanged = (config_data.get("page_name") or "").strip() == (
                 original_page_name
             )
+            if unchanged:
+                config_data = {**config_data, "page_name": original_page_name}
             config = CheckConfiguration.model_validate(
                 config_data, context=STORED_NAME if unchanged else None
             )

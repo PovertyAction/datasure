@@ -18,6 +18,7 @@ from datasure.surveycto.cast import cast_wide
 from datasure.surveycto.xml_contract import FormContract, parse_contract
 from datasure.utils.dataframe_utils import standardize_missing_values
 from datasure.utils.duckdb_utils import (
+    alias_clash,
     delete_form_definitions,
     duckdb_get_table,
     duckdb_save_table,
@@ -28,7 +29,6 @@ from datasure.utils.names import (
     NAME_MAX_LENGTH,
     NAME_RULE_HELP,
     STORED_NAME,
-    name_clash,
     suggest_name,
     validate_name,
     validation_message,
@@ -1279,9 +1279,7 @@ class SurveyCTOUI:
             self.project_id, alias="import_log", db_name="logs"
         )
         # Aliases sharing a storage ID would share one DuckDB table
-        clash = name_clash(
-            form_config.alias, import_log.get_column("alias").to_list(), kind="alias"
-        )
+        clash = alias_clash(form_config.alias, import_log.get_column("alias").to_list())
         if clash:
             raise ValidationError(clash)
 
