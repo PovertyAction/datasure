@@ -118,8 +118,9 @@ def build_form_dictionary(
 def dictionary_xlsx(form_dictionary: FormDictionary) -> bytes:
     """Return the data dictionary workbook to share with PIs.
 
-    Sheets: Variables (labels, types, choices, relevance, PII status) and
-    Summary stats, counted over the rows where each question was asked.
+    Sheets: Variables (labels, types, choice list, relevance, PII status),
+    Choices (each list's values and labels) and Summary stats, counted over the
+    rows where each question was asked.
     Upstream writes it with ``save_codebook``.
     """
     buffer = io.BytesIO()

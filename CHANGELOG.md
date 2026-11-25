@@ -18,8 +18,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   (`sentinels_from_missing_codes`; a code under two labels raises). `None`
   without a stored form definition. `form_table` raises when raw's columns
   and the stored schema differ, instead of dropping columns.
-  `dictionary_xlsx` writes the workbook (Variables, Summary stats) with
-  upstream's `save_codebook`; flagged columns show counts, never values
+  `dictionary_xlsx` writes the workbook (Variables, Choices, Summary stats)
+  with upstream's `save_codebook`; flagged columns show counts, never values.
+  Choices lists each select's codes and labels once per list (`list_name`,
+  `value`, `label`), and the Variables sheet's `choices` column names the
+  list. The compiled XML does not keep XLSForm list names, so a list is
+  named after its question; withheld `search()` lists are left out
 - **Replication package** (#398): SurveyCTO aliases get
   `1_docs/2_codebooks/{survey}_dictionary.xlsx`, listed in the README
   (`generate_readme(include_form_dictionary=...)`)

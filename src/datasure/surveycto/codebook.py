@@ -1,8 +1,12 @@
-"""The data dictionary workbook: a Variables and a Summary stats sheet.
+"""The data dictionary workbook: Variables, Choices and Summary stats sheets.
 
 ``save_codebook`` writes it from ``build_dictionary``'s output, with the PII
 blocks attached, and ``stats_rows``'s rows. It adds no submission values beyond
 the summary stats, which give flagged PII columns counts only.
+
+The Variables sheet's ``choices`` column names each select's list in the
+Choices sheet. The compiled XML does not keep the XLSForm list names, so each
+list is named after its question.
 """
 
 from openpyxl import Workbook
@@ -11,7 +15,7 @@ from openpyxl.styles import Alignment, Font, PatternFill
 from openpyxl.utils import get_column_letter
 
 from datasure.surveycto.stats import COLUMNS as STATS_COLUMNS
-from datasure.surveycto.survey import gates, plain_label, rule
+from datasure.surveycto.survey import choice_labels, gates, plain_label, rule
 
 VARIABLE_COLUMNS = [
     "variable",
@@ -21,6 +25,7 @@ VARIABLE_COLUMNS = [
     "type",
     "group",
     "relevance",
+    "choices",
     "value_labels",
     "arrow_type",
     "non_null",
@@ -37,11 +42,39 @@ _WRAPPED = {
     "frequencies",
     "sentinel_detail",
 }
+CHOICE_COLUMNS = ["list_name", "value", "label"]
 _PERCENT = {"missing_rate", "selected_share"}
 # One style object each: openpyxl hashes every cell's style into the workbook.
 _HEADER_FONT = Font(bold=True)
 _HEADER_FILL = PatternFill("solid", fgColor="DDE5F0")
 _WRAP = Alignment(wrap_text=True, vertical="top")
+
+
+def _choice_list(survey: dict) -> str:
+    """Return the name of a select's list in the Choices sheet, or ``""``.
+
+    A withheld list is not in the outputs, so it is not named either.
+    """
+    if survey.get("choices") and not survey.get("choices_withheld"):
+        return survey.get("choice_list") or ""
+    return ""
+
+
+def _choice_rows(variables: dict) -> list[list]:
+    """Return each listed choice once per list, in form order."""
+    rows = []
+    seen = set()
+    for v in variables.values():
+        survey = v["survey"] or {}
+        list_name = _choice_list(survey)
+        if not list_name or list_name in seen:
+            continue
+        seen.add(list_name)
+        rows.extend(
+            [list_name, value, label]
+            for value, label in choice_labels(survey["choices"]).items()
+        )
+    return rows
 
 
 def _variable_rows(variables: dict) -> list[list]:
@@ -58,6 +91,7 @@ def _variable_rows(variables: dict) -> list[list]:
                 survey.get("type") or ("system" if v.get("system") else ""),
                 survey.get("group_path", ""),
                 relevance,
+                _choice_list(survey),
                 "; ".join(
                     f"{c['value']} = {c['label']}" for c in v.get("value_labels", [])
                 ),
@@ -126,6 +160,7 @@ def save_codebook(dest, dictionary: dict, stats: list[dict]) -> None:
     _sheet(
         workbook, "Variables", VARIABLE_COLUMNS, _variable_rows(dictionary["variables"])
     )
+    _sheet(workbook, "Choices", CHOICE_COLUMNS, _choice_rows(dictionary["variables"]))
     _sheet(
         workbook,
         "Summary stats",

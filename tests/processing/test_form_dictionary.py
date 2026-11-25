@@ -169,7 +169,7 @@ def test_pii_from_the_form_rules_trusting_publishable(built):
 
 def test_dictionary_workbook_hides_flagged_values(built):
     workbook = load_workbook(io.BytesIO(dictionary_xlsx(built)), read_only=True)
-    assert workbook.sheetnames == ["Variables", "Summary stats"]
+    assert workbook.sheetnames == ["Variables", "Choices", "Summary stats"]
     cells = {
         str(cell)
         for sheet in workbook.worksheets
@@ -178,3 +178,26 @@ def test_dictionary_workbook_hides_flagged_values(built):
         if cell is not None
     }
     assert not any("Ana Maria" in c or "3104567890" in c for c in cells)
+
+
+def test_dictionary_workbook_lists_each_choice_list_once(built):
+    """Choices holds each select's list once; Variables names it per column."""
+    workbook = load_workbook(io.BytesIO(dictionary_xlsx(built)), read_only=True)
+    choices = list(workbook["Choices"].iter_rows(values_only=True))
+    assert choices == [
+        ("list_name", "value", "label"),
+        ("crop", "01", "Maize"),
+        ("crop", "02", "Rice"),
+        ("tools", "1", "Hoe"),
+        ("tools", "2", "Plough"),
+        ("tools", "77", "Other"),
+        ("plot_crop", "1", "Maize"),
+        ("plot_crop", "2", "Rice"),
+    ]
+
+    header, *rows = workbook["Variables"].iter_rows(values_only=True)
+    named = {row[0]: row[header.index("choices")] for row in rows}
+    assert named["crop"] == "crop"
+    assert named["tools_77"] == "tools"
+    assert named["plot_crop_2_1"] == "plot_crop"
+    assert named["plots"] is None
