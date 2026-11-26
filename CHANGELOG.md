@@ -580,6 +580,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Outliers & Constraints crash on a blank bound** (#483):
+  `compute_constraint_violations` (`checks/outliers/compute.py`) wrote each
+  bound with an untyped `pl.lit`, so a blank bound became a `Null` column and
+  `vstack` failed with `type Float64 is incompatible with expected type Null`
+  when an earlier constraint row left a bound blank and a later row set it.
+  Bound literals are now typed `Float64`
 - **`4_corrections.do` type mismatch** (#482): `_emit_stata`
   (`replication/script_generators.py`) chose the Stata literal from the new
   value, so `replace age = 40` failed on a string `age` (the generic import

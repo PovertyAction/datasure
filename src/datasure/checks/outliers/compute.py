@@ -1032,14 +1032,17 @@ def compute_constraint_violations(
 
             col_df = col_df.with_columns(violation_expr.alias(VIOLATION_REASON_COL))
 
-            # add hard and soft bounds columns
+            # add hard and soft bounds columns; type them so a blank bound is a
+            # Float64 null rather than a Null column that vstack can't combine
             for bound_name, bound_value in [
                 ("hard_min", hard_min),
                 ("soft_min", soft_min),
                 ("soft_max", soft_max),
                 ("hard_max", hard_max),
             ]:
-                col_df = col_df.with_columns(pl.lit(bound_value).alias(bound_name))
+                col_df = col_df.with_columns(
+                    pl.lit(bound_value, dtype=pl.Float64).alias(bound_name)
+                )
 
             col_df = col_df.rename({col: "column value"})
             col_df = col_df.with_columns(pl.lit(col).alias("column name")).select(

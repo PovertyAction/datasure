@@ -16,6 +16,14 @@ To check which version you have, run `datasure --version`. Versions with `a`, `b
 
 ## Open issues
 
+### KI-039: Outliers & Constraints tab crashes with `type Float64 is incompatible with expected type Null`
+
+- **Status:** 🔴 Open
+- **Affected versions:** 1.3.0a4 and earlier
+- **Symptom:** The **Outliers & Constraints** tab fails to load, and the terminal shows `SchemaError: type Float64 is incompatible with expected type Null` with `failed to vstack column 'soft_min'` (or another bound). It happens when one constraint leaves a bound blank and a constraint below it sets that bound.
+- **Workaround:** Fill in all four bounds (hard min, soft min, soft max, hard max) on the first constraint, or move a constraint with all four bounds set to the top.
+- **Issue:** [#483](https://github.com/PovertyAction/datasure/issues/483)
+
 ### KI-038: The replication package stops with "type mismatch" at a correction
 
 - **Status:** 🔴 Open
