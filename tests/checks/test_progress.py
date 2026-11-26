@@ -416,6 +416,67 @@ class TestConditionValuesSaved:
         assert picker["default"] == ["yes", "maybe"]
         assert self._saved(settings_file) == saved
 
+    def test_consent_and_outcome_are_kept_apart_and_restored(self, real_saving):
+        """Each condition part reopens with its own column and values (#450)."""
+        from datasure.utils import settings_utils
+
+        mock_st, settings_file = real_saving
+        picks = {"consent": ("consent", ["yes"]), "outcome": ("outcome", ["complete"])}
+
+        def render(setting, default_column, default_values):
+            mock_st.selectbox.return_value = picks[setting][0]
+            mock_st.multiselect.return_value = picks[setting][1]
+            progress_module._render_condition_part(
+                SURVEY,
+                str(settings_file),
+                setting,
+                f"{setting} column",
+                ["hhid", "consent", "outcome"],
+                default_column,
+                default_values,
+                "help",
+            )
+
+        # The user chooses both parts on an empty page: the widgets' on_change
+        # set these save flags
+        for setting in picks:
+            mock_st.session_state[f"progress_{setting}"] = True
+            mock_st.session_state[f"progress_{setting}_vals"] = True
+            render(setting, None, None)
+
+        assert self._saved(settings_file) == {
+            "consent": "consent",
+            "consent_vals": ["yes"],
+            "outcome": "outcome",
+            "outcome_vals": ["complete"],
+        }
+        save_flags = [c.kwargs["kwargs"] for c in mock_st.selectbox.call_args_list]
+        assert save_flags == [
+            {"state_name": "progress_consent"},
+            {"state_name": "progress_outcome"},
+        ]
+
+        # The check reopens: both parts start from what was saved
+        with patch(
+            "datasure.checks.progress.load_check_settings",
+            settings_utils.load_check_settings,
+        ):
+            loaded = load_default_settings(str(settings_file), _settings())
+        mock_st.selectbox.reset_mock()
+        mock_st.multiselect.reset_mock()
+        render("consent", loaded.consent, loaded.consent_vals)
+        render("outcome", loaded.outcome, loaded.outcome_vals)
+
+        selects = mock_st.selectbox.call_args_list
+        assert [c.kwargs["options"][c.kwargs["index"]] for c in selects] == [
+            "consent",
+            "outcome",
+        ]
+        assert [c.kwargs["default"] for c in mock_st.multiselect.call_args_list] == [
+            ["yes"],
+            ["complete"],
+        ]
+
     def test_unchanged_values_are_not_saved_again(self, real_saving):
         mock_st, settings_file = real_saving
         saved = {"consent": "consent", "consent_vals": ["yes"]}

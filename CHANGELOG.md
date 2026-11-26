@@ -580,6 +580,14 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Progress consent and outcome settings not restored** (#450): the old
+  pickers saved both columns under one `chart` key and never preselected
+  the saved values, so both were empty when the check reopened. The #408
+  completion condition (`checks/progress.py`, `_render_condition_part`) saves them under
+  `consent` / `consent_vals` and `outcome` / `outcome_vals` and restores
+  both; a regression test covers the round trip. A project saved before
+  this has only `chart`, which is ignored, so its consent and outcome
+  columns must be chosen once more
 - **Stata name mapping edge cases** (#463)
   - A valid column could keep Stata's `v#` name after import: Stata imports
     `visit date` as `visitdate`, so a later real `visitdate` column became
