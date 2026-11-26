@@ -98,8 +98,10 @@ def _rename_imported_columns(
         "unab ds_vars : _all",
         f"local ds_names {' '.join(_stata_names(columns, name_map))}",
         "if `: word count `ds_vars'' != `: word count `ds_names'' {",
-        '    display as error "Stata imported a different number of columns '
-        'than the CSV has, so they cannot be renamed by position."',
+        (
+            '    display as error "Stata imported a different number of columns '
+            'than the CSV has, so they cannot be renamed by position."'
+        ),
         "    exit 459",
         "}",
         "local ds_old",

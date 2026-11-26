@@ -65,8 +65,10 @@ class TestImportScriptRenamesByPosition:
             "local ds_names KEY visit_date visitdate",
             # Positions only line up if Stata imported every CSV column.
             "if `: word count `ds_vars'' != `: word count `ds_names'' {",
-            'display as error "Stata imported a different number of columns '
-            'than the CSV has, so they cannot be renamed by position."',
+            (
+                'display as error "Stata imported a different number of columns '
+                'than the CSV has, so they cannot be renamed by position."'
+            ),
             "exit 459",
             "}",
             "local ds_old",
