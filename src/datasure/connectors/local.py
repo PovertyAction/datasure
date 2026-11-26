@@ -9,9 +9,25 @@ import streamlit as st
 from openpyxl import load_workbook
 from openpyxl.utils.exceptions import InvalidFileException
 from polars_readstat import scan_readstat
-from pydantic import BaseModel, Field, ValidationError, field_validator
+from pydantic import (
+    BaseModel,
+    Field,
+    ValidationError,
+    ValidationInfo,
+    field_validator,
+)
 
-from datasure.utils.duckdb_utils import duckdb_get_table, duckdb_save_table
+from datasure.utils.duckdb_utils import (
+    alias_clash,
+    duckdb_get_table,
+    duckdb_save_table,
+)
+from datasure.utils.names import (
+    NAME_MAX_LENGTH,
+    NAME_RULE_HELP,
+    STORED_NAME,
+    validate_name,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -30,19 +46,16 @@ XLS_NOT_SUPPORTED_MESSAGE = (
 class FileConfig(BaseModel):
     """Configuration for file import with validation."""
 
-    alias: str = Field(
-        ..., min_length=1, max_length=20, description="Unique alias for the file"
-    )
+    alias: str = Field(..., min_length=1, description="Unique alias for the file")
     filename: str = Field(..., description="Full path to the file")
     sheet_name: str | None = Field(None, description="Sheet name for Excel files")
     source: str = Field(default="local storage", description="Source of the file")
 
     @field_validator("alias")
-    def validate_alias(cls, v):
-        """Validate alias to ensure it's non-empty and trimmed."""
-        if not v or not v.strip():
-            raise ValueError("Alias cannot be empty")
-        return v.strip()
+    @classmethod
+    def validate_alias(cls, v: str, info: ValidationInfo) -> str:
+        """Trim the alias and check it against the shared name rule."""
+        return validate_name(v, info, "Alias")
 
     @field_validator("filename")
     def validate_filename(cls, v):
@@ -190,9 +203,9 @@ def render_local_file_form(
         alias = st.text_input(
             label="Alias*",
             value=defaults.get("alias", ""),
-            help="Enter a unique, short, descriptive name for the file (max 20 characters)",
+            help=f"Unique, short, descriptive name for the file. {NAME_RULE_HELP}",
             disabled=edit_mode,
-            max_chars=20,
+            max_chars=NAME_MAX_LENGTH,
             key=f"alias_input_{mode}",
         )
 
@@ -264,16 +277,20 @@ def _handle_form_submission(
     """Handle form submission with validation."""
     try:
         # Validate using Pydantic
-        file_config = FileConfig(alias=alias, filename=file_path, sheet_name=sheet_name)
+        file_config = FileConfig.model_validate(
+            {"alias": alias, "filename": file_path, "sheet_name": sheet_name},
+            # The alias can't be edited, so a stored one is kept as is.
+            context=STORED_NAME if edit_mode else None,
+        )
 
         # Get existing import log
         import_log = duckdb_get_table(project_id, alias="import_log", db_name="logs")
 
-        # Check alias uniqueness
-        if not import_log.is_empty():
-            existing_aliases = import_log.select("alias").to_series().to_list()
-            if not edit_mode and alias in existing_aliases:
-                st.error("Alias already exists. Please choose a different alias.")
+        # Aliases sharing a storage ID would share one DuckDB table
+        if not edit_mode and not import_log.is_empty():
+            clash = alias_clash(file_config.alias, import_log["alias"].to_list())
+            if clash:
+                st.error(clash)
                 return
 
         if edit_mode:

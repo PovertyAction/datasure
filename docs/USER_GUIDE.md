@@ -169,6 +169,16 @@ When you import a configuration file:
 
 Import sources are added via the **"Add Import Configuration"** popover. Click it and select the import type from the **Import Type** dropdown.
 
+**Naming rules.** Dataset aliases and check page names follow the same rules:
+
+- Start with a letter
+- Use only letters, digits, spaces, underscores (`_`) and hyphens (`-`)
+- Use at most 20 characters
+- Don't reuse a name that differs from an existing one only in case, spaces
+  or hyphens. `Baseline 1`, `baseline-1` and `baseline_1` count as the same
+  name, so DataSure rejects the second one and names the existing one it
+  clashes with
+
 ##### Option A: SurveyCTO Integration
 
 First save your SurveyCTO sign-in, once per server:
@@ -192,7 +202,7 @@ Then add each form:
 3. Choose the saved sign-in under **Select Server Credentials**
 4. Choose the form under **Select Form ID**
 5. Configure import settings:
-   - **Alias**: A short name for the dataset
+   - **Alias**: A short name for the dataset (see **Naming rules** above)
    - **Download attachments** (optional)
    - **File path for Private Key** (encrypted forms only)
    - **File path to save data** (optional)
@@ -213,7 +223,7 @@ you update in place is picked up on the next load.
 1. Click **Add Import Configuration**
 2. Select **"local storage"** from the Import Type dropdown
 3. Enter:
-   - **Alias**: A short name for the dataset (up to 20 characters)
+   - **Alias**: A short name for the dataset (see **Naming rules** above)
    - **File Path**: The file's full path, for example `C:/data/survey.dta`.
      Supported formats: .csv, .xlsx, .json, .dta (Stata), .parquet. Save
      legacy Excel (.xls) files as .xlsx first
@@ -515,7 +525,8 @@ Convert `submissiondate` column to datetime format for both survey and backcheck
 
 1. Click "Add New Check Configuration" (+ button)
 2. **Configuration Details**:
-   - **Name**: Descriptive name of up to 20 characters (e.g., "Household HFCs")
+   - **Name**: Descriptive name (e.g., "Household HFCs"), following the same
+     naming rules as dataset aliases
    - **Survey Dataset**: Select main survey dataset (e.g., "demo_survey")
 
 3. **Configure Key Columns**:

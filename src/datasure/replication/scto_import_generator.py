@@ -17,6 +17,7 @@ from datasure.replication.script_generators import (
     _rename_imported_columns,
     _stata_names,
 )
+from datasure.utils.names import name_id
 
 _HTML_TAG_RE = re.compile(r"<[^>]+>")
 
@@ -530,7 +531,7 @@ def generate_scto_import_script(
     str
         Stata do-file content as a string.
     """
-    safe_s = survey_name.lower().replace(" ", "_")
+    safe_s = name_id(survey_name)
     csv_file = f"{safe_s}_raw.csv"
     dta_file = f"{safe_s}_raw.dta"
 

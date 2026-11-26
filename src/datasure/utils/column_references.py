@@ -28,8 +28,8 @@ from datasure.utils.duckdb_utils import (
     OUTLIERS_TABLE,
     check_table_name,
     duckdb_get_table,
-    name_id,
 )
+from datasure.utils.names import name_id
 from datasure.utils.view_state import read_settings, without_view_state
 
 logger = logging.getLogger(__name__)

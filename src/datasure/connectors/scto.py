@@ -11,17 +11,27 @@ import polars as pl
 import polars.selectors as cs
 import pyarrow as pa
 import streamlit as st
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, ValidationInfo, field_validator
+from pydantic import ValidationError as PydanticValidationError
 
 from datasure.surveycto.cast import cast_wide
 from datasure.surveycto.xml_contract import FormContract, parse_contract
 from datasure.utils.dataframe_utils import standardize_missing_values
 from datasure.utils.duckdb_utils import (
+    alias_clash,
     delete_form_definitions,
     duckdb_get_table,
     duckdb_save_table,
     load_form_definition,
     save_form_definition,
+)
+from datasure.utils.names import (
+    NAME_MAX_LENGTH,
+    NAME_RULE_HELP,
+    STORED_NAME,
+    suggest_name,
+    validate_name,
+    validation_message,
 )
 from datasure.utils.scto_api import (
     SurveyCTOAPIClient,
@@ -110,7 +120,7 @@ class ServerCredentials(BaseModel):
 class FormConfig(BaseModel):
     """Model for form configuration."""
 
-    alias: str = Field(..., min_length=1, max_length=64)
+    alias: str = Field(..., min_length=1)
     form_id: str = Field(..., min_length=1, max_length=64)
     server: str = Field(..., min_length=2, max_length=64)
     username: str | None = Field(None, min_length=4, max_length=128)
@@ -118,6 +128,12 @@ class FormConfig(BaseModel):
     save_to: str | None = None
     attachments: bool = False
     refresh: bool = True
+
+    @field_validator("alias")
+    @classmethod
+    def validate_alias(cls, v: str, info: ValidationInfo) -> str:
+        """Trim the alias and check it against the shared name rule."""
+        return validate_name(v, info, "Alias")
 
 
 # --- Exceptions --- #
@@ -1021,13 +1037,14 @@ class SurveyCTOUI:
         self, form_data: dict, defaults: dict, edit_mode: bool
     ) -> str:
         """Render alias input field."""
-        alias_default = re.sub(r"[^\w]", "_", form_data["form_title"])
         return st.text_input(
             "Alias*",
-            help="Unique identifier for this form",
-            value=defaults.get("alias", alias_default),
+            help=f"Unique name for this form. {NAME_RULE_HELP}",
+            value=defaults.get("alias", suggest_name(form_data["form_title"])),
             key=f"surveyctoui_alias{edit_mode}",
             disabled=edit_mode,
+            # A stored alias may predate the limit; it can't be edited anyway.
+            max_chars=None if edit_mode else NAME_MAX_LENGTH,
         )
 
     def _render_private_key_field(
@@ -1110,15 +1127,23 @@ class SurveyCTOUI:
             st.error("Please select or enter a form ID.")
             return
 
-        form_config = FormConfig(
-            alias=config_data["alias"],
-            form_id=form_data["form_id"],
-            server=credentials.server,
-            username=credentials.user,
-            private_key=str(config_data["private_key_file"]) or None,
-            save_to=str(config_data["save_file"]) or None,
-            attachments=config_data["attachments"],
-        )
+        try:
+            form_config = FormConfig.model_validate(
+                {
+                    "alias": config_data["alias"],
+                    "form_id": form_data["form_id"],
+                    "server": credentials.server,
+                    "username": credentials.user,
+                    "private_key": str(config_data["private_key_file"]) or None,
+                    "save_to": str(config_data["save_file"]) or None,
+                    "attachments": config_data["attachments"],
+                },
+                # The alias can't be edited, so a stored one is kept as is.
+                context=STORED_NAME if edit_mode else None,
+            )
+        except PydanticValidationError as e:
+            st.error(validation_message(e))
+            return
 
         try:
             if edit_mode:
@@ -1253,8 +1278,10 @@ class SurveyCTOUI:
         import_log = duckdb_get_table(
             self.project_id, alias="import_log", db_name="logs"
         )
-        if form_config.alias in import_log.get_column("alias").to_list():
-            raise ValidationError(f"Alias '{form_config.alias}' already exists")
+        # Aliases sharing a storage ID would share one DuckDB table
+        clash = alias_clash(form_config.alias, import_log.get_column("alias").to_list())
+        if clash:
+            raise ValidationError(clash)
 
         # Add to import log
         new_entry = {

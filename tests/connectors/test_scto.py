@@ -189,6 +189,35 @@ class TestServerCredentials:
 class TestFormConfig:
     """Test FormConfig model."""
 
+    @pytest.mark.parametrize(
+        "alias",
+        ["baseline.1", "HH/HFC", "Round 1: HH", "HH?", "2024 HH", "a" * 21],
+    )
+    def test_alias_outside_the_name_rule_is_rejected(self, alias):
+        with pytest.raises(ValidationError, match="Alias"):
+            FormConfig(alias=alias, form_id="f1", server="testserver")
+
+    def test_alias_shares_the_local_length_limit(self):
+        assert FormConfig(alias="a" * 20, form_id="f1", server="s1").alias == "a" * 20
+
+    def test_stored_alias_longer_than_the_limit_still_loads(self):
+        from datasure.utils.names import STORED_NAME
+
+        config = FormConfig.model_validate(
+            {"alias": "a" * 40, "form_id": "f1", "server": "s1"},
+            context=STORED_NAME,
+        )
+        assert config.alias == "a" * 40
+
+    def test_stored_alias_keeps_its_surrounding_spaces(self):
+        """A saved alias loads as stored, so refresh writes to its own table."""
+        from datasure.utils.names import STORED_NAME
+
+        config = FormConfig.model_validate(
+            {"alias": " HH ", "form_id": "f1", "server": "s1"}, context=STORED_NAME
+        )
+        assert config.alias == " HH "
+
     def test_form_config_defaults(self):
         """Test FormConfig default values."""
         config = FormConfig(alias="test", form_id="form123", server="testserver")
@@ -1489,7 +1518,21 @@ class TestSurveyCTOUIExtended:
         form_config = FormConfig(
             alias="existing_form", form_id="form123", server="testserver"
         )
-        with pytest.raises(SctoValidationError, match="already exists"):
+        with pytest.raises(SctoValidationError, match="too similar"):
+            ui._add_form_to_project(form_config)
+
+    @pytest.mark.parametrize("alias", ["baseline-1", "Baseline 1", "BASELINE_1"])
+    @patch("datasure.connectors.scto.duckdb_get_table")
+    def test_add_form_to_project_rejects_alias_sharing_a_table(
+        self, mock_get_table, alias
+    ):
+        """An alias that maps to an existing alias's table is rejected."""
+        ui = SurveyCTOUI("test1234")
+        mock_get_table.return_value = pl.DataFrame({"alias": ["baseline_1"]})
+        form_config = FormConfig(alias=alias, form_id="form123", server="testserver")
+        with pytest.raises(
+            SctoValidationError, match="too similar to existing alias 'baseline_1'"
+        ):
             ui._add_form_to_project(form_config)
 
     # --- _update_form_on_project ---
@@ -1759,6 +1802,22 @@ class TestSurveyCTOUIRendering:
         ui = SurveyCTOUI("test1234")
         result = ui._render_alias_field({"form_title": "My Survey"}, {}, False)
         assert result == "my_alias"
+
+    @pytest.mark.parametrize(
+        ("title", "suggested"),
+        [
+            ("HH survey (v2)", "HH survey _v2_"),
+            ("2024 Household Survey", ""),
+            ("A very long household survey title", "A very long househol"),
+        ],
+    )
+    @patch("datasure.connectors.scto.st")
+    def test_suggested_alias_follows_the_name_rule(self, mock_st, title, suggested):
+        """The alias suggested from the form title is valid, or left empty."""
+        ui = SurveyCTOUI("test1234")
+        ui._render_alias_field({"form_title": title}, {}, False)
+        assert mock_st.text_input.call_args.kwargs["value"] == suggested
+        assert mock_st.text_input.call_args.kwargs["max_chars"] == 20
 
     # --- _render_private_key_field ---
 
