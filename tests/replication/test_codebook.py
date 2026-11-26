@@ -4,7 +4,7 @@ from __future__ import annotations
 
 import polars as pl
 
-from datasure.replication.codebook import generate_codebook
+from datasure.replication.codebook import final_columns, generate_codebook
 
 
 class TestGenerateCodebook:
@@ -78,3 +78,25 @@ class TestGenerateCodebook:
         result = generate_codebook(df)
         # Multiple unique values are joined with " | "
         assert " | " in result or "a" in result  # at least some values present
+
+
+class TestFinalColumns:
+    def test_stata_name_and_counts_keyed_by_the_original_name(self):
+        df = pl.DataFrame({"visit date": ["a", None, "a", None], "n": [1, 2, 3, 4]})
+        final = final_columns(df, {"visit date": "visit_date"})
+        assert final == {
+            "visit date": {
+                "stata_name": "visit_date",
+                "final_missing_rate": 0.5,
+                "final_unique": 2,
+            },
+            "n": {"stata_name": "n", "final_missing_rate": 0.0, "final_unique": 4},
+        }
+
+    def test_no_sample_values(self):
+        final = final_columns(pl.DataFrame({"owner": ["Ana Maria"]}), {})
+        assert "Ana Maria" not in str(final)
+
+    def test_empty_dataframe_has_no_missing_rate(self):
+        final = final_columns(pl.DataFrame({"x": []}, schema={"x": pl.String}), {})
+        assert final["x"]["final_missing_rate"] is None

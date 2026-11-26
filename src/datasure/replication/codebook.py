@@ -2,7 +2,28 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+
 import polars as pl
+
+
+def final_columns(df: pl.DataFrame, name_map: Mapping[str, str]) -> dict[str, dict]:
+    """Return each final-data column's Stata name and counts, for the dictionary.
+
+    Keyed by the column's name before Stata renaming, as the data dictionary's
+    variables are. ``name_map`` holds only the names Stata can't use. Sample
+    values are left out: the dictionary never shows values of PII columns.
+    """
+    return {
+        col: {
+            "stata_name": name_map.get(col, col),
+            "final_missing_rate": df[col].null_count() / df.height
+            if df.height
+            else None,
+            "final_unique": df[col].n_unique(),
+        }
+        for col in df.columns
+    }
 
 
 def generate_codebook(df: pl.DataFrame) -> str:

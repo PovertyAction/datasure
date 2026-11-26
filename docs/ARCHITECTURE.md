@@ -58,10 +58,13 @@ src/datasure/
 │   ├── correction_log.py   # Correction log schema/backfill, Action enum (no Streamlit)
 │   ├── column_names.py     # Stata name rules and mapping for replication (no Streamlit)
 │   ├── rename_plan.py      # Rename specs -> old/new pairs, collisions (no Streamlit)
-│   └── row_index.py        # Row-index parsing shared by prep and replication (no Streamlit)
+│   ├── row_index.py        # Row-index parsing shared by prep and replication (no Streamlit)
+│   └── form_dictionary.py  # SurveyCTO data dictionary: labels, relevance, PII
+│                           # rules and skip-logic stats (no Streamlit)
 ├── replication/            # Stata/Python replication package export
 ├── surveycto/              # SurveyCTO form contract (xml_contract, xpath) and typed
-│                           # cast, adapted from surveycto_python_dict; maintained here.
+│                           # cast, dictionary, skip-logic stats, workbook writer and
+│                           # PII rules, adapted from surveycto_python_dict; maintained here.
 │                           # xlsform rebuilds the design JSON from the XML (HTTP 430)
 ├── models/
 │   ├── schemas.py          # Pydantic models
@@ -90,8 +93,10 @@ The `archived/` directory holds legacy code and is gitignored.
 1. **Import** (`views/import_view.py` + `connectors/`): SurveyCTO API or local
    files. A SurveyCTO form is typed from its compiled XML: `connectors/scto.py`
    downloads it, parses it with `surveycto.xml_contract.parse_contract`, casts the wide
-   JSON with `cast_wide` and keeps the XML per form version in `logs.duckdb`
-   (`form_definitions`), after the raw save. An ID whose form XML cannot be
+   JSON with `cast_wide` and keeps the XML and the cast's Arrow schema per form
+   version in `logs.duckdb` (`form_definitions`), after the raw save. The schema
+   holds the field metadata Polars drops; `processing/form_dictionary.py` casts
+   raw back to it to build the data dictionary. An ID whose form XML cannot be
    downloaded or parsed, and that is on the server's dataset list, imports as
    a server dataset CSV instead; any other error fails the import
 2. **Storage**: per-project DuckDB databases via `utils/duckdb_utils.py`
@@ -504,7 +509,8 @@ Per project (UUID-keyed):
   selection `descriptive_columns_{page_name_id}`, the project's missing
   codes `missing_codes_{project_id}`, the Stata names chosen on the
   Replication page `stata_names_{alias}`, and the SurveyCTO form XML
-  `form_definitions`, one row per alias and form version), JSON settings
+  `form_definitions`: XML and cast Arrow schema, one row per alias and form
+  version), JSON settings
   (including
   each check page's, Prepare Data's and Corrections'
   [view state](#view-state)), and credential metadata

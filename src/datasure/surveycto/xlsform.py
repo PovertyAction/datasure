@@ -210,14 +210,19 @@ def _field_type(node: Node, list_name: str) -> str:
     if node.preload == "property" and node.preload_params:
         return node.preload_params
     if node.xml_type == "binary":
-        return _binary_type(node)
+        return binary_type(node)
     if node.calculate and node.control is None:
         return "calculate"
     return _XML_TYPES.get(node.xml_type or "", "text")
 
 
-def _binary_type(node: Node) -> str:
-    """Return the XLSForm type of a media field."""
+def binary_type(node: Node) -> str:
+    """Return the XLSForm type of a media field.
+
+    Uploads go by their mediatype. Media SurveyCTO fills itself has no upload
+    control and goes by its bind class (``class=comments``, ``textAudit``,
+    ``audioAudit``); any other is a file.
+    """
     if node.mediatype:
         return next(
             (

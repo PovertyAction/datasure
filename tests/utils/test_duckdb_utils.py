@@ -612,19 +612,39 @@ class TestFormDefinitions:
         assert load_form_definition("p", "farm") is None
 
     def test_round_trip(self):
-        save_form_definition("p", "farm", "farm", "3", b"<v3/>")
+        save_form_definition("p", "farm", "farm", "3", b"<v3/>", b"s-v3")
 
-        assert load_form_definition("p", "farm") == b"<v3/>"
+        assert load_form_definition("p", "farm") == (b"<v3/>", b"s-v3")
         assert load_form_definition("p", "other") is None
 
     def test_latest_version_wins(self):
-        save_form_definition("p", "farm", "farm", "3", b"<v3/>")
-        save_form_definition("p", "farm", "farm", "4", b"<v4/>")
+        save_form_definition("p", "farm", "farm", "3", b"<v3/>", b"s-v3")
+        save_form_definition("p", "farm", "farm", "4", b"<v4/>", b"s-v4")
 
-        assert load_form_definition("p", "farm") == b"<v4/>"
+        assert load_form_definition("p", "farm") == (b"<v4/>", b"s-v4")
 
     def test_same_version_replaces_its_row(self):
-        save_form_definition("p", "farm", "farm", "3", b"<old/>")
-        save_form_definition("p", "farm", "farm", "3", b"<new/>")
+        save_form_definition("p", "farm", "farm", "3", b"<old/>", b"s-old")
+        save_form_definition("p", "farm", "farm", "3", b"<new/>", b"s-new")
 
-        assert load_form_definition("p", "farm") == b"<new/>"
+        assert load_form_definition("p", "farm") == (b"<new/>", b"s-new")
+
+    def test_a_1_3_0a4_table_is_upgraded(self, tmp_path):
+        """1.3.0a4's table has no arrow_schema; its rows load with no schema."""
+        import duckdb
+
+        with duckdb.connect(str(tmp_path / "logs.duckdb")) as conn:
+            conn.execute(
+                "CREATE TABLE form_definitions (alias VARCHAR, form_id VARCHAR, "
+                "formdef_version VARCHAR, xml BLOB, downloaded_at TIMESTAMP, "
+                "PRIMARY KEY (alias, formdef_version))"
+            )
+            conn.execute(
+                "INSERT INTO form_definitions VALUES "
+                "('farm', 'farm', '3', '<v3/>'::BLOB, '2026-11-19 00:00:00')"
+            )
+
+        assert load_form_definition("p", "farm") == (b"<v3/>", None)
+
+        save_form_definition("p", "farm", "farm", "4", b"<v4/>", b"s-v4")
+        assert load_form_definition("p", "farm") == (b"<v4/>", b"s-v4")

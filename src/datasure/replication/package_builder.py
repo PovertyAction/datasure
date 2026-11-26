@@ -9,13 +9,19 @@ import zipfile
 from collections.abc import Callable, Mapping
 
 import polars as pl
+import pyarrow as pa
 
 from datasure.processing.correction_log import (
     CORRECTION_LOG_SCHEMA,
     Action,
     ensure_log_columns,
 )
-from datasure.replication.codebook import generate_codebook
+from datasure.processing.form_dictionary import (
+    FormDictionary,
+    build_form_dictionary,
+    dictionary_xlsx,
+)
+from datasure.replication.codebook import final_columns, generate_codebook
 from datasure.replication.prep_script_generator import (
     generate_prepare_data_script,
 )
@@ -31,9 +37,23 @@ from datasure.replication.scto_import_generator import (
     generate_scto_import_script,
 )
 from datasure.replication.stata_names import package_name_map
-from datasure.utils.duckdb_utils import duckdb_get_table
+from datasure.utils.duckdb_utils import duckdb_get_table, load_missing_codes_from_db
 
 logger = logging.getLogger(__name__)
+
+# Shown when a SurveyCTO dataset's package has no data dictionary workbook.
+NO_FORM_DICTIONARY = (
+    "No data dictionary in this package: DataSure has no SurveyCTO form "
+    "definition stored for this dataset. Datasets imported before version 1.3 "
+    "need one refresh: on the Import page, turn Refresh on for this dataset, "
+    "click Load data, then build the package again. Server datasets have no "
+    "data dictionary."
+)
+# Shown when the stored form could not be turned into a data dictionary.
+NO_FORM_DICTIONARY_BUILD = (
+    "No data dictionary in this package: DataSure could not build one from this "
+    "dataset's SurveyCTO form. The rest of the package is complete"
+)
 
 
 def _get_version() -> str:
@@ -151,6 +171,55 @@ def _select_import_script(
 def _with_stata_names(df: pl.DataFrame, name_map: Mapping[str, str]) -> pl.DataFrame:
     """``df`` with each mapped column renamed to its Stata name."""
     return df.rename({col: name_map[col] for col in df.columns if col in name_map})
+
+
+def _codebook_files(
+    form_dictionary: FormDictionary | None,
+    corrected_df: pl.DataFrame,
+    name_map: Mapping[str, str],
+    safe_survey: str,
+) -> dict[str, str | bytes]:
+    """Return the package's one codebook, by file name in ``1_docs/2_codebooks``.
+
+    With a data dictionary, its workbook carries codebook.csv's final-data
+    columns (Stata name, missing rate, distinct values; no sample values) and
+    there is no CSV. Other datasets get the CSV.
+    """
+    if form_dictionary is not None:
+        final = final_columns(corrected_df, name_map)
+        return {
+            f"{safe_survey}_dictionary.xlsx": dictionary_xlsx(form_dictionary, final)
+        }
+    return {
+        "codebook.csv": generate_codebook(_with_stata_names(corrected_df, name_map))
+    }
+
+
+def _form_dictionary(
+    project_id: str,
+    alias: str,
+    raw_df: pl.DataFrame,
+    form_id: str,
+    on_warning: Callable[[str], None] | None,
+) -> FormDictionary | None:
+    """Return a SurveyCTO alias's data dictionary, or ``None`` with a note why.
+
+    The dictionary is optional: a form it cannot read leaves it out of the
+    package instead of stopping the build. Datasets that are not SurveyCTO
+    imports (no ``form_id``) get no note.
+    """
+    try:
+        form_dictionary = build_form_dictionary(
+            project_id, alias, raw_df, load_missing_codes_from_db(project_id)
+        )
+    except (ValueError, KeyError, pa.ArrowException) as e:
+        logger.exception("Could not build the data dictionary for %s", alias)
+        if on_warning is not None:
+            on_warning(f"{NO_FORM_DICTIONARY_BUILD} ({e})")
+        return None
+    if form_dictionary is None and form_id and on_warning is not None:
+        on_warning(NO_FORM_DICTIONARY)
+    return form_dictionary
 
 
 def _serialize_prep_args(x: object) -> str | None:
@@ -313,6 +382,10 @@ def build_replication_package(
     )
     _step("`0_main.do` generated")
 
+    form_dictionary = _form_dictionary(project_id, alias, raw_df, form_id, on_warning)
+    if form_dictionary is not None:
+        _step("Data dictionary generated")
+
     readme = generate_readme(
         project_name=project_name,
         survey_name=survey_name,
@@ -324,10 +397,11 @@ def build_replication_package(
         corrected_rows=corrected_df.height if not corrected_df.is_empty() else 0,
         n_corrections_by_action=n_by_action,
         include_scto_form=scto_form_xlsx is not None,
+        include_form_dictionary=form_dictionary is not None,
     )
     _step("README generated")
 
-    codebook_csv = generate_codebook(_with_stata_names(corrected_df, name_map))
+    codebooks = _codebook_files(form_dictionary, corrected_df, name_map, safe_survey)
     _step("Codebook generated")
 
     # Raw CSV (input for import_data.do)
@@ -368,7 +442,8 @@ def build_replication_package(
             )
         else:
             zf.writestr(f"{root}/1_docs/1_surveys/.gitkeep", "")
-        zf.writestr(f"{root}/1_docs/2_codebooks/codebook.csv", codebook_csv)
+        for name, content in codebooks.items():
+            zf.writestr(f"{root}/1_docs/2_codebooks/{name}", content)
         zf.writestr(f"{root}/1_docs/3_notes/.gitkeep", "")
 
         # 2_scripts/

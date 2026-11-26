@@ -17,8 +17,10 @@ from datasure.surveycto.cast import cast_wide
 from datasure.surveycto.xml_contract import FormContract, parse_contract
 from datasure.utils.dataframe_utils import standardize_missing_values
 from datasure.utils.duckdb_utils import (
+    delete_form_definitions,
     duckdb_get_table,
     duckdb_save_table,
+    load_form_definition,
     save_form_definition,
 )
 from datasure.utils.scto_api import (
@@ -265,6 +267,30 @@ def media_field_names(contract: FormContract) -> list[str]:
             if node.xml_type == "binary" and node.is_leaf
         )
     )
+
+
+def merged_schema(
+    earlier: bytes | None, existing: pl.DataFrame, batch: pa.Schema
+) -> pa.Schema:
+    """Return the cast schema of raw after adding a batch to earlier batches.
+
+    Raw is the diagonal concat of the batches, so its columns are the union of
+    theirs. A column in both takes the batch's field.
+
+    ``earlier`` is the stored schema of the batches raw already holds. Without
+    one (raw imported by 1.3.0a4 or earlier, which kept no schema), the earlier
+    columns come from raw itself: their types are kept, but not the form
+    metadata the dictionary reads, so the dictionary lists them without form
+    details.
+    """
+    earlier_schema = (
+        pa.ipc.read_schema(pa.py_buffer(earlier))
+        if earlier is not None
+        else existing.to_arrow().schema
+    )
+    fields = {f.name: f for f in earlier_schema}
+    fields.update({f.name: f for f in batch})
+    return pa.schema(list(fields.values()), metadata=batch.metadata)
 
 
 class MediaDownloader:
@@ -626,6 +652,8 @@ class SurveyCTOClient:
 
         # Save to DuckDB
         duckdb_save_table(self.project_id, data, alias=form_config.alias, db_name="raw")
+        # Raw is no longer the form's cast, so its definitions no longer apply.
+        delete_form_definitions(self.project_id, form_config.alias)
 
         return len(data)
 
@@ -670,7 +698,8 @@ class SurveyCTOClient:
             private_key=private_key,
         )
 
-        new_data = typed_frame(cast_wide(new_data_json, contract))
+        table = cast_wide(new_data_json, contract)
+        new_data = typed_frame(table)
         new_count = len(new_data)
 
         # Combine data
@@ -690,6 +719,13 @@ class SurveyCTOClient:
                 private_key,
             )
 
+        # Raw holds the earlier batches too: their columns stay in the schema.
+        # Worked out before raw is saved, so a failure here leaves raw as it was.
+        schema = table.schema
+        if not existing_data.is_empty():
+            earlier = load_form_definition(self.project_id, form_config.alias)
+            schema = merged_schema(earlier and earlier[1], existing_data, schema)
+
         # Save to DuckDB
         duckdb_save_table(
             self.project_id, combined_data, alias=form_config.alias, db_name="raw"
@@ -701,6 +737,7 @@ class SurveyCTOClient:
             form_config.form_id,
             contract.formdef_version,
             xml,
+            schema.serialize().to_pybytes(),
         )
 
         return new_count

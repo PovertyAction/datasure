@@ -11,6 +11,8 @@ import pytest
 
 from datasure.processing.correction_log import CORRECTION_LOG_SCHEMA
 from datasure.replication.package_builder import (
+    NO_FORM_DICTIONARY,
+    NO_FORM_DICTIONARY_BUILD,
     _action_summary,
     _load_corrected,
     _load_correction_log,
@@ -59,6 +61,22 @@ def _mock_loader(project_id, alias, db_name):
 # ---------------------------------------------------------------------------
 # Loader helpers
 # ---------------------------------------------------------------------------
+
+
+@pytest.fixture(autouse=True)
+def no_form_dictionary():
+    """Aliases here have no stored SurveyCTO form, unless a test says so."""
+    with (
+        patch(
+            "datasure.replication.package_builder.load_missing_codes_from_db",
+            return_value=pl.DataFrame(),
+        ),
+        patch(
+            "datasure.replication.package_builder.build_form_dictionary",
+            return_value=None,
+        ) as build,
+    ):
+        yield build
 
 
 class TestLoadDataset:
@@ -631,3 +649,88 @@ class TestPackageUsesStataNames:
         files = self._build(edits={"visit date": "vdate"})
         assert "(vdate _2nd_visit age in_)" in files["2_import_data.do"]
         assert "replace vdate =" in files["4_corrections.do"]
+
+
+class TestFormDictionary:
+    """A SurveyCTO alias's data dictionary goes into 1_docs/2_codebooks."""
+
+    def _build(
+        self, form_id: str = "", warnings: list[str] | None = None
+    ) -> zipfile.ZipFile:
+        with patch(
+            "datasure.replication.package_builder.duckdb_get_table",
+            side_effect=_mock_loader,
+        ):
+            zip_bytes = build_replication_package(
+                project_id="p",
+                project_name="P",
+                survey_name="S",
+                alias="s",
+                key_col="key",
+                form_id=form_id,
+                on_warning=None if warnings is None else warnings.append,
+            )
+        return zipfile.ZipFile(BytesIO(zip_bytes))
+
+    def test_included_with_its_readme_line(self, no_form_dictionary):
+        no_form_dictionary.return_value = object()
+        with patch(
+            "datasure.replication.package_builder.dictionary_xlsx",
+            return_value=b"xlsx",
+        ):
+            zf = self._build()
+        names = zf.namelist()
+        path = next(n for n in names if n.endswith("2_codebooks/s_dictionary.xlsx"))
+        assert zf.read(path) == b"xlsx"
+        readme = zf.read(next(n for n in names if n.endswith("0_README.txt")))
+        assert b"s_dictionary.xlsx" in readme
+
+    def test_it_replaces_codebook_csv(self, no_form_dictionary):
+        """One codebook: the workbook gets the final data's Stata names and counts."""
+        no_form_dictionary.return_value = object()
+        with patch(
+            "datasure.replication.package_builder.dictionary_xlsx",
+            return_value=b"xlsx",
+        ) as write:
+            names = self._build().namelist()
+        assert not any(n.endswith("codebook.csv") for n in names)
+        final = write.call_args[0][1]
+        assert set(final) == set(_RAW.columns)  # no corrections: the prep data
+        assert all(
+            set(f) == {"stata_name", "final_missing_rate", "final_unique"}
+            for f in final.values()
+        )
+
+    def test_left_out_without_a_form_definition(self):
+        names = self._build().namelist()
+        assert not any(n.endswith("_dictionary.xlsx") for n in names)
+        assert any(n.endswith("codebook.csv") for n in names)
+
+    def test_a_surveycto_dataset_without_one_gets_a_note(self):
+        warnings: list[str] = []
+        self._build(form_id="farm", warnings=warnings)
+        assert NO_FORM_DICTIONARY in warnings
+
+    def test_no_note_for_a_dataset_not_from_surveycto(self):
+        warnings: list[str] = []
+        self._build(warnings=warnings)
+        assert NO_FORM_DICTIONARY not in warnings
+
+    def test_a_form_it_cannot_read_leaves_it_out_with_a_note(self, no_form_dictionary):
+        """One unreadable form does not stop the package (it used to abort it)."""
+        no_form_dictionary.side_effect = ValueError("node 'x': no XLSForm type")
+        warnings: list[str] = []
+        names = self._build(form_id="farm", warnings=warnings).namelist()
+        assert not any(n.endswith("_dictionary.xlsx") for n in names)
+        assert any(n.endswith("codebook.csv") for n in names)
+        assert warnings == [f"{NO_FORM_DICTIONARY_BUILD} (node 'x': no XLSForm type)"]
+
+    def test_no_note_when_the_dictionary_is_built(self, no_form_dictionary):
+        no_form_dictionary.return_value = object()
+        warnings: list[str] = []
+        with patch(
+            "datasure.replication.package_builder.dictionary_xlsx",
+            return_value=b"xlsx",
+        ):
+            self._build(form_id="farm", warnings=warnings)
+        assert NO_FORM_DICTIONARY not in warnings

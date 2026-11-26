@@ -5,6 +5,7 @@ from pathlib import Path
 from unittest.mock import Mock, patch
 
 import polars as pl
+import pyarrow as pa
 import pytest
 from pydantic_core import ValidationError
 
@@ -720,11 +721,12 @@ class TestSurveyCTOClient:
         with pytest.raises(ConnectionError, match="Invalid server name"):
             client.connect(credentials)
 
+    @patch("datasure.connectors.scto.delete_form_definitions")
     @patch("datasure.connectors.scto.pl.read_csv")
     @patch("datasure.connectors.scto.duckdb_save_table")
     @patch("datasure.connectors.scto.standardize_missing_values")
     def test_import_server_dataset(
-        self, mock_standardize, mock_save_table, mock_read_csv
+        self, mock_standardize, mock_save_table, mock_read_csv, mock_delete
     ):
         """Test importing from server dataset."""
         client = SurveyCTOClient("test1234")
@@ -2233,9 +2235,10 @@ class TestTypedImport:
     ):
         client._import_regular_form(form_config)
 
-        mock_save_definition.assert_called_once_with(
-            "test1234", "farm", "farm", "3", FARM_XML.encode()
-        )
+        args = mock_save_definition.call_args[0]
+        assert args[:5] == ("test1234", "farm", "farm", "3", FARM_XML.encode())
+        schema = pa.ipc.read_schema(pa.py_buffer(args[5]))
+        assert schema.field("visit").metadata[b"xml_type"] == b"date"
 
     @patch("datasure.connectors.scto.save_form_definition")
     @patch("datasure.connectors.scto.duckdb_save_table")
@@ -2289,8 +2292,95 @@ class TestTypedImport:
             alias="farm", form_id="farm", server="testserver", save_to="/x/farm.csv"
         )
 
-        assert client._import_regular_form(form_config) == len(FARM_ROWS) - 1
-        assert len(mock_save.call_args[0][1]) == len(FARM_ROWS)
+        earlier = cast_wide(FARM_ROWS[:1], contract).schema.serialize().to_pybytes()
+        with patch(
+            "datasure.connectors.scto.load_form_definition",
+            return_value=(FARM_XML.encode(), earlier),
+        ):
+            assert client._import_regular_form(form_config) == len(FARM_ROWS) - 1
+        combined = mock_save.call_args[0][1]
+        assert len(combined) == len(FARM_ROWS)
+        # The stored schema covers raw's columns, the earlier batch's included.
+        schema = pa.ipc.read_schema(pa.py_buffer(mock_save_definition.call_args[0][5]))
+        assert set(schema.names) == set(combined.columns)
+
+    @patch("datasure.connectors.scto.save_form_definition")
+    @patch("datasure.connectors.scto.duckdb_save_table")
+    def test_a_refresh_with_no_new_rows_keeps_the_schema(
+        self, mock_save, mock_save_definition, client
+    ):
+        contract = parse_contract(FARM_XML.encode())
+        existing = typed_frame(cast_wide(FARM_ROWS, contract))
+        client.cache_manager.get_existing_data = Mock(
+            return_value=(existing, datetime(2024, 1, 1, tzinfo=UTC))
+        )
+        client._scto_client.download_form_data_json.return_value = []
+        earlier = cast_wide(FARM_ROWS, contract).schema.serialize().to_pybytes()
+        form_config = FormConfig(
+            alias="farm", form_id="farm", server="testserver", save_to="/x/farm.csv"
+        )
+        with patch(
+            "datasure.connectors.scto.load_form_definition",
+            return_value=(FARM_XML.encode(), earlier),
+        ):
+            client._import_regular_form(form_config)
+
+        schema = pa.ipc.read_schema(pa.py_buffer(mock_save_definition.call_args[0][5]))
+        assert set(schema.names) == set(existing.columns)
+
+    @patch("datasure.connectors.scto.save_form_definition")
+    @patch("datasure.connectors.scto.duckdb_save_table")
+    def test_without_a_stored_schema_raw_keeps_its_earlier_columns(
+        self, mock_save, mock_save_definition, client
+    ):
+        """Raw imported by 1.3.0a4 has no stored schema; the refresh still saves."""
+        contract = parse_contract(FARM_XML.encode())
+        existing = typed_frame(cast_wide(FARM_ROWS[:1], contract))
+        client.cache_manager.get_existing_data = Mock(
+            return_value=(existing, datetime(2024, 1, 1, tzinfo=UTC))
+        )
+        client._scto_client.download_form_data_json.return_value = FARM_ROWS[1:]
+        form_config = FormConfig(
+            alias="farm", form_id="farm", server="testserver", save_to="/x/farm.csv"
+        )
+
+        with patch(
+            "datasure.connectors.scto.load_form_definition",
+            return_value=(FARM_XML.encode(), None),
+        ):
+            client._import_regular_form(form_config)
+
+        combined = mock_save.call_args[0][1]
+        schema = pa.ipc.read_schema(pa.py_buffer(mock_save_definition.call_args[0][5]))
+        assert set(schema.names) == set(combined.columns)
+
+    @patch("datasure.connectors.scto.save_form_definition")
+    @patch("datasure.connectors.scto.duckdb_save_table")
+    def test_raw_is_not_saved_when_the_schema_cannot_be_read(
+        self, mock_save, mock_save_definition, client
+    ):
+        """The schema is worked out first, so a failure leaves raw as it was."""
+        contract = parse_contract(FARM_XML.encode())
+        existing = typed_frame(cast_wide(FARM_ROWS[:1], contract))
+        client.cache_manager.get_existing_data = Mock(
+            return_value=(existing, datetime(2024, 1, 1, tzinfo=UTC))
+        )
+        client._scto_client.download_form_data_json.return_value = FARM_ROWS[1:]
+        form_config = FormConfig(
+            alias="farm", form_id="farm", server="testserver", save_to="/x/farm.csv"
+        )
+
+        with (
+            patch(
+                "datasure.connectors.scto.load_form_definition",
+                side_effect=OSError("logs.duckdb is locked"),
+            ),
+            pytest.raises(OSError, match="locked"),
+        ):
+            client._import_regular_form(form_config)
+
+        mock_save.assert_not_called()
+        mock_save_definition.assert_not_called()
 
     @patch("datasure.connectors.scto.save_form_definition")
     @patch("datasure.connectors.scto.duckdb_save_table")
@@ -2339,6 +2429,18 @@ class TestTypedImport:
         )
 
         assert client.import_data(form_config) == 4
+
+    @patch("datasure.connectors.scto.delete_form_definitions")
+    @patch("datasure.connectors.scto.duckdb_save_table")
+    def test_a_dataset_import_drops_the_alias_form_definitions(
+        self, mock_save, mock_delete, client
+    ):
+        client._scto_client.download_dataset_csv.return_value = b"id,x\n1,2\n"
+        form_config = FormConfig(alias="prev", form_id="prev_round", server="srv")
+
+        client._import_server_dataset(form_config)
+
+        mock_delete.assert_called_once_with("test1234", "prev")
 
     def test_an_id_without_form_xml_or_dataset_raises(self, client, form_config):
         client._scto_client.download_form_xml.side_effect = FormNotFoundError("404")

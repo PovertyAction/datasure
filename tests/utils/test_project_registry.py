@@ -12,7 +12,10 @@ from datasure.utils.project_registry import read_registry, update_registry
 
 @pytest.fixture
 def registry(tmp_path):
-    return tmp_path / "projects.json"
+    # Its own directory: the autouse isolated_cache fixture adds tmp_path/cache
+    directory = tmp_path / "registry"
+    directory.mkdir()
+    return directory / "projects.json"
 
 
 def _add(project_id, info):
