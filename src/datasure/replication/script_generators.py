@@ -74,25 +74,46 @@ def _stata_names(names: Iterable[str], name_map: Mapping[str, str]) -> list[str]
 def _rename_imported_columns(
     columns: Iterable[str], name_map: Mapping[str, str]
 ) -> list[str]:
-    """Rename the imported columns that have a Stata name, by position.
+    """Rename imported columns to their package names, by position.
 
     Stata changes a name it can't use while importing (to ``v#``, or with
     characters removed), and how depends on the name and Stata version, so
-    the columns are found by their position in the CSV instead. One group
-    ``rename`` applies every change at once, so a name Stata made up can't
-    clash with a new one. Empty when no imported column is mapped.
+    the columns are found by their position in the CSV instead. A valid name
+    can change too: Stata imports ``visit date`` as ``visitdate``, so a later
+    real ``visitdate`` column becomes ``v#``. The do-file therefore compares
+    every position's imported name with its package name and renames each
+    one that differs. One group ``rename`` applies every change at once, so
+    a name Stata made up can't clash with a new one. Empty when no imported
+    column is mapped.
     """
-    mapped = [(i, col) for i, col in enumerate(columns, 1) if col in name_map]
+    columns = list(columns)
+    mapped = [col for col in columns if col in name_map]
     if not mapped:
         return []
-    old = " ".join(f"`:word {i} of `ds_vars''" for i, _ in mapped)
-    new = " ".join(name_map[col] for _, col in mapped)
     return [
-        f"{_C} Rename columns whose names Stata can't use, by their position in",
-        f"{_C} the CSV. Each keeps its DataSure name as its label.",
+        f"{_C} Rename each column whose imported name differs from its package",
+        f"{_C} name, by its position in the CSV. Stata changes names it can't",
+        f"{_C} use, and a valid name it then sees twice. A column whose name",
+        f"{_C} Stata can't use keeps its DataSure name as its label.",
         "unab ds_vars : _all",
-        f"rename ({old}) ({new})",
-        *_mapped_name_labels([col for _, col in mapped], name_map),
+        f"local ds_names {' '.join(_stata_names(columns, name_map))}",
+        "if `: word count `ds_vars'' != `: word count `ds_names'' {",
+        '    display as error "Stata imported a different number of columns '
+        'than the CSV has, so they cannot be renamed by position."',
+        "    exit 459",
+        "}",
+        "local ds_old",
+        "local ds_new",
+        "forvalues ds_i = 1/`: word count `ds_names'' {",
+        "    local ds_have : word `ds_i' of `ds_vars'",
+        "    local ds_want : word `ds_i' of `ds_names'",
+        '    if "`ds_have\'" != "`ds_want\'" {',
+        "        local ds_old `ds_old' `ds_have'",
+        "        local ds_new `ds_new' `ds_want'",
+        "    }",
+        "}",
+        'if "`ds_old\'" != "" rename (`ds_old\') (`ds_new\')',
+        *_mapped_name_labels(mapped, name_map),
         "",
     ]
 

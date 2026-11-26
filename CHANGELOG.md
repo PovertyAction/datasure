@@ -580,6 +580,20 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Stata name mapping edge cases** (#463)
+  - A valid column could keep Stata's `v#` name after import: Stata imports
+    `visit date` as `visitdate`, so a later real `visitdate` column became
+    `v3`. `script_generators._rename_imported_columns` now writes every
+    column's package name in order (`local ds_names`), and the do-file
+    renames each CSV position whose imported name differs, valid names
+    included, in one group `rename`. It stops with an error (`exit 459`)
+    when Stata imported a different number of columns than the CSV has
+  - Variables rebuilt with `gen` + `drop` + `rename` lost their label, so a
+    mapped SurveyCTO date or datetime field, or a mapped column after a
+    Prep "to string" / "to number" step, had none.
+    `scto_import_generator._emit_format_date_fields`,
+    `prep_script_generator._stata_to_string` and `_stata_to_number` now save
+    the label in `ds_label` and restore it with `macval`
 - **Aliases and check page names sharing storage or breaking file names**
   (#350): `baseline-1`, `baseline_1` and `Baseline 1` were all accepted but
   mapped to one DuckDB table, so importing one replaced the other; page

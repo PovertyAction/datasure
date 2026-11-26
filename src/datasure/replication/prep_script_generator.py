@@ -205,6 +205,16 @@ def _stata_remove_rows(args: dict, _desc: str) -> list[str]:
     return lines
 
 
+def _restore_label(col: str) -> str:
+    """Line giving ``col`` back the label saved in the ``ds_label`` local.
+
+    ``gen`` + ``drop`` + ``rename`` rebuilds a variable without its label,
+    which for a mapped column is its DataSure name. ``macval`` keeps a ``$``
+    or backtick in the label from being expanded.
+    """
+    return f"    label variable {col} `\"`macval(ds_label)'\"'"
+
+
 def _stata_to_string(col: str) -> list[str]:
     """Convert a column to text the way DataSure's ``to string`` does.
 
@@ -241,6 +251,7 @@ def _stata_to_string(col: str) -> list[str]:
         f"capture confirm numeric variable {col}",
         "if !_rc {",
         "    tempvar s",
+        f"    local ds_label : variable label {col}",
         f"    local fmt : format {col}",
         '    if strpos("`fmt\'", "%td") {',
         (
@@ -265,6 +276,7 @@ def _stata_to_string(col: str) -> list[str]:
         f"    order `s', after({col})",
         f"    drop {col}",
         f"    rename `s' {col}",
+        _restore_label(col),
         "}",
     ]
 
@@ -279,11 +291,13 @@ def _stata_to_number(col: str) -> list[str]:
         f"capture confirm string variable {col}",
         "if !_rc {",
         "    tempvar n",
+        f"    local ds_label : variable label {col}",
         f'    gen byte `n\' = 1 if {col} == "true"',
         f'    replace `n\' = 0 if {col} == "false"',
         f"    order `n', after({col})",
         f"    drop {col}",
         f"    rename `n' {col}",
+        _restore_label(col),
         "}",
     ]
 
