@@ -226,6 +226,65 @@ class TestGenerateCorrectionsScript:
         script = generate_corrections_script(log, "KEY", "P", "S", "0.1")
         assert "replace notes" in script
 
+    def test_number_into_a_text_variable_is_quoted(self):
+        """The import may read a numeric-looking column as text (#482)."""
+        log = pl.DataFrame(
+            {
+                "action": ["modify value"],
+                "KEY": ["k001"],
+                "column": ["age"],
+                "new_value": ["40"],
+                "reason": ["typo"],
+            }
+        )
+        lines = generate_corrections_script(log, "KEY", "P", "S", "0.1").splitlines()
+        check = lines.index("capture confirm string variable age")
+        assert lines[check + 1 : check + 7] == [
+            "if !_rc {",
+            '    replace age = "40" if KEY == "k001"',
+            "}",
+            "else {",
+            '    replace age = 40 if KEY == "k001"',
+            "}",
+        ]
+
+    def test_removed_value_matches_the_variable_type(self):
+        """A numeric variable is cleared with ".", a text one with "" (#482)."""
+        log = pl.DataFrame(
+            {
+                "action": ["remove value"],
+                "KEY": ["k001"],
+                "column": ["age"],
+                "new_value": [None],
+                "reason": ["implausible"],
+            },
+            schema_overrides={"new_value": pl.String},
+        )
+        lines = generate_corrections_script(log, "KEY", "P", "S", "0.1").splitlines()
+        check = lines.index("capture confirm string variable age")
+        assert lines[check + 1 : check + 7] == [
+            "if !_rc {",
+            '    replace age = "" if KEY == "k001"',
+            "}",
+            "else {",
+            '    replace age = . if KEY == "k001"',
+            "}",
+        ]
+
+    def test_text_value_stays_quoted_without_a_type_check(self):
+        log = pl.DataFrame(
+            {
+                "action": ["modify value"],
+                "KEY": ["k001"],
+                "column": ["village"],
+                "new_value": ["Town"],
+                "reason": ["typo"],
+            }
+        )
+        script = generate_corrections_script(log, "KEY", "P", "S", "0.1")
+        assert 'replace village = "Town" if KEY == "k001"' in script
+        assert "confirm string variable village" not in script
+
     def test_correction_that_failed_in_datasure_is_skipped(self):
         """A correction DataSure skipped, say on a dropped column, is not run (#480)."""
         log = pl.DataFrame(

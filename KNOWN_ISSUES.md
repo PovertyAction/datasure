@@ -16,6 +16,14 @@ To check which version you have, run `datasure --version`. Versions with `a`, `b
 
 ## Open issues
 
+### KI-038: The replication package stops with "type mismatch" at a correction
+
+- **Status:** 🔴 Open
+- **Affected versions:** 1.3.0a4 and earlier
+- **Symptom:** Running the replication package in Stata stops in `4_corrections.do` with `type mismatch`, at a line such as `replace age = 40 if KEY == "..."`. It happens when a correction sets a number in a column Stata holds as text, or removes a value from a column Stata holds as numbers.
+- **Workaround:** In `4_corrections.do`, put quotes around the number (`replace age = "40" ...`) for a text column, or replace `""` with `.` for a numeric one, then run the package again.
+- **Issue:** [#482](https://github.com/PovertyAction/datasure/issues/482)
+
 ### KI-037: The replication package stops at a correction to a column that prep drops
 
 - **Status:** 🔴 Open

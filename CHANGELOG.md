@@ -580,6 +580,16 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **`4_corrections.do` type mismatch** (#482): `_emit_stata`
+  (`replication/script_generators.py`) chose the Stata literal from the new
+  value, so `replace age = 40` failed on a string `age` (the generic import
+  reads every column as text with `stringcols(_all)`), and "remove value"
+  always wrote `= ""`, which failed on a numeric variable. A numeric-looking
+  "modify value" and every "remove value" now check the variable's type at
+  run time (`capture confirm string variable`, via `_by_variable_type`) and
+  write the quoted or unquoted form to match, as DataSure stores a number
+  in a text column as text. A non-numeric value is still written quoted
+  with no check
 - **Replication package replaying corrections DataSure skipped** (#480):
   `generate_corrections_script` (`replication/script_generators.py`)
   dropped only "accept" rows, so a correction whose log `status` is

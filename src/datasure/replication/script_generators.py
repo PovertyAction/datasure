@@ -158,26 +158,41 @@ def _emit_stata(
     reason: str,
 ) -> list[str]:
     comment = _correction_comment(action, key_col, key_val, col, reason)
-
-    escaped_key = _escape(key_val)
-    escaped_val = _escape(new_val) if new_val is not None else None
+    where = f'if {key_col} == "{_escape(key_val)}"'
 
     if action == Action.MODIFY_VALUE and col and new_val is not None:
-        if _is_numeric(new_val):
-            stmt = f'replace {col} = {new_val} if {key_col} == "{escaped_key}"'
-        else:
-            stmt = f'replace {col} = "{escaped_val}" if {key_col} == "{escaped_key}"'
+        text = f'replace {col} = "{_escape(new_val)}" {where}'
+        if not _is_numeric(new_val):
+            return [comment, text, ""]
+        stmts = _by_variable_type(col, text, f"replace {col} = {new_val} {where}")
     elif action == Action.REMOVE_VALUE and col:
-        if _is_numeric(new_val):
-            stmt = f'replace {col} = . if {key_col} == "{escaped_key}"'
-        else:
-            stmt = f'replace {col} = "" if {key_col} == "{escaped_key}"'
+        stmts = _by_variable_type(
+            col, f'replace {col} = "" {where}', f"replace {col} = . {where}"
+        )
     elif action == Action.REMOVE_ROW:
-        stmt = f'drop if {key_col} == "{escaped_key}"'
+        stmts = [f"drop {where}"]
     else:
         return []
 
-    return [comment, stmt, ""]
+    return [comment, *stmts, ""]
+
+
+def _by_variable_type(col: str, text_stmt: str, number_stmt: str) -> list[str]:
+    """Run `text_stmt` if `col` is a string variable in Stata, else `number_stmt`.
+
+    The variable's type depends on the import: the generic import reads
+    every column as text, the SurveyCTO import types them, and prep steps
+    can convert them. DataSure stores a number in a text column as text.
+    """
+    return [
+        f"capture confirm string variable {col}",
+        "if !_rc {",
+        f"    {text_stmt}",
+        "}",
+        "else {",
+        f"    {number_stmt}",
+        "}",
+    ]
 
 
 # ── Public API (in execution order: master → install → import → corrections) ──
