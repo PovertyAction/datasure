@@ -137,6 +137,18 @@ def _is_numeric(value: str | None) -> bool:
         return True
 
 
+def _correction_comment(
+    action: str, key_col: str, key_val: str, col: str | None, reason: str
+) -> str:
+    """Return the comment line that describes one correction."""
+    comment = f"{_C} {action}: {key_col}=={key_val!r}"
+    if col:
+        comment += f" | {col}"
+    if reason:
+        comment += f" | {reason}"
+    return comment
+
+
 def _emit_stata(
     action: str,
     key_col: str,
@@ -145,11 +157,7 @@ def _emit_stata(
     new_val: str | None,
     reason: str,
 ) -> list[str]:
-    comment = f"{_C} {action}: {key_col}=={key_val!r}"
-    if col:
-        comment += f" | {col}"
-    if reason:
-        comment += f" | {reason}"
+    comment = _correction_comment(action, key_col, key_val, col, reason)
 
     escaped_key = _escape(key_val)
     escaped_val = _escape(new_val) if new_val is not None else None
@@ -450,6 +458,17 @@ def generate_corrections_script(
         col = name_map.get(col, col) if col else col
         new_val = row.get("new_value")
         reason = str(row.get("reason") or "")
+        # DataSure skipped this correction the last time it reapplied the
+        # log, say because a prep step now drops its column: running it here
+        # would differ from the data, and can stop the do-file
+        if row.get("status") == "Failed":
+            lines += [
+                _correction_comment(action, key_col, key_val, col, reason),
+                f"{_C} Skipped: this correction failed the last time DataSure "
+                "applied it, so it changed nothing.",
+                "",
+            ]
+            continue
         lines += _emit_stata(action, key_col, key_val, col, new_val, reason)
 
     lines.append(_LOG_CLOSE)

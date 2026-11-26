@@ -16,6 +16,14 @@ To check which version you have, run `datasure --version`. Versions with `a`, `b
 
 ## Open issues
 
+### KI-037: The replication package stops at a correction to a column that prep drops
+
+- **Status:** 🔴 Open
+- **Affected versions:** 1.3.0a4 and earlier
+- **Symptom:** Running the replication package in Stata stops in `4_corrections.do` with `variable <column> not found`, at a correction to a column that a Prep step removes. In DataSure, that correction shows as failed on the **Corrections** page and changed nothing. The package's README also counts it.
+- **Workaround:** On the **Corrections** page, remove the failed correction, then build the replication package again.
+- **Issue:** [#480](https://github.com/PovertyAction/datasure/issues/480)
+
 ### KI-036: Some SurveyCTO forms fail to import with a 403 error
 
 - **Status:** 🔴 Open

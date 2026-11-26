@@ -226,6 +226,43 @@ class TestGenerateCorrectionsScript:
         script = generate_corrections_script(log, "KEY", "P", "S", "0.1")
         assert "replace notes" in script
 
+    def test_correction_that_failed_in_datasure_is_skipped(self):
+        """A correction DataSure skipped, say on a dropped column, is not run (#480)."""
+        log = pl.DataFrame(
+            {
+                "action": ["modify value", "modify value"],
+                "KEY": ["k001", "k002"],
+                "column": ["village", "age"],
+                "new_value": ["Town", "30"],
+                "reason": ["typo", "typo"],
+                "status": ["Failed", "Successful"],
+            }
+        )
+        script = generate_corrections_script(log, "KEY", "P", "S", "0.1")
+        assert "replace village" not in script
+        assert "Skipped: this correction failed" in script
+        assert 'replace age = 30 if KEY == "k002"' in script
+
+    def test_row_removal_that_failed_in_datasure_keeps_the_row(self):
+        log = pl.DataFrame(
+            {
+                "action": ["remove row"],
+                "KEY": ["k001"],
+                "reason": ["duplicate"],
+                "status": ["Failed"],
+            }
+        )
+        script = generate_corrections_script(log, "KEY", "P", "S", "0.1")
+        assert "drop if" not in script
+        assert "Skipped: this correction failed" in script
+
+    def test_log_without_status_applies_every_correction(self):
+        log = pl.DataFrame(
+            {"action": ["remove row"], "KEY": ["k001"], "reason": ["duplicate"]}
+        )
+        script = generate_corrections_script(log, "KEY", "P", "S", "0.1")
+        assert 'drop if KEY == "k001"' in script
+
     def test_ends_with_newline(self):
         log = pl.DataFrame(schema={"action": pl.String, "KEY": pl.String})
         script = generate_corrections_script(log, "key", "P", "S", "1.0")

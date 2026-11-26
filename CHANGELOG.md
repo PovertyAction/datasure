@@ -580,6 +580,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Replication package replaying corrections DataSure skipped** (#480):
+  `generate_corrections_script` (`replication/script_generators.py`)
+  dropped only "accept" rows, so a correction whose log `status` is
+  `Failed` (say, a "modify value" on a column a prep step now drops) was
+  written as a `replace` and stopped `4_corrections.do` with `variable ...
+  not found`. Such a row now gets its comment and a "Skipped" note, as
+  `prepare_data.do` already did for failed prep steps.
+  `package_builder._applied_corrections` leaves failed rows out too, so the
+  README's correction count and per-action summary match the do-file
 - **Progress consent and outcome settings not restored** (#450): the old
   pickers saved both columns under one `chart` key and never preselected
   the saved values, so both were empty when the check reopened. The #408

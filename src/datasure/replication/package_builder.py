@@ -111,10 +111,17 @@ def _load_correction_log(project_id: str, alias: str) -> pl.DataFrame:
 
 
 def _applied_corrections(correction_log: pl.DataFrame) -> pl.DataFrame:
-    """Return the log rows that change data, dropping "accept" review records."""
+    """Return the log rows that change data.
+
+    Drops "accept" review records and corrections that failed the last time
+    DataSure reapplied them, which ``4_corrections.do`` skips too.
+    """
     if "action" not in correction_log.columns:
         return correction_log
-    return correction_log.filter(pl.col("action") != Action.ACCEPT)
+    applied = correction_log.filter(pl.col("action") != Action.ACCEPT)
+    if "status" in applied.columns:
+        applied = applied.filter(pl.col("status").fill_null("") != "Failed")
+    return applied
 
 
 def _blank_reviewer_names(correction_log: pl.DataFrame) -> pl.DataFrame:
