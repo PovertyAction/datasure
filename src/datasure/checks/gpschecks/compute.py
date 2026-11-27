@@ -1,12 +1,13 @@
 from __future__ import annotations
 
 import re
+from typing import Any
 
 import numpy as np
+import pandas as pd
 import polars as pl
 import pydeck
 import streamlit as st
-from geopy.distance import geodesic
 from sklearn.neighbors import LocalOutlierFactor
 
 from datasure.checks.gpschecks.models import _CATEGORY_COLORS, TAB_NAME
@@ -54,8 +55,47 @@ def _build_tooltip_config(fields: list[str]) -> dict:
     """
     return {
         "html": "<br>".join([f"<b>{field}:</b> {{{field}}}" for field in fields]),
-        "style": {"backgroundColor": "steelblue", "color": "white"},
+        # Wrap long values (such as an outlier reason) so they stay on the map.
+        "style": {
+            "backgroundColor": "steelblue",
+            "color": "white",
+            "maxWidth": "360px",
+            "whiteSpace": "normal",
+        },
     }
+
+
+def _stringify_temporal_columns(map_pd):
+    """Return a copy of map_pd with datetime and timedelta columns as text.
+
+    pydeck serializes pandas Timestamps as JSON objects, which the deck.gl
+    tooltip renders as "[object Object]". Formatting them as strings first
+    makes the tooltip show the actual value.
+
+    Parameters
+    ----------
+    map_pd : pd.DataFrame
+        Data passed to the pydeck layer.
+
+    Returns
+    -------
+    pd.DataFrame
+        The same data with temporal columns converted to strings (missing
+        values become empty strings). Other columns are unchanged.
+    """
+    temporal_cols = [
+        col
+        for col in map_pd.columns
+        if pd.api.types.is_datetime64_any_dtype(map_pd[col])
+        or pd.api.types.is_timedelta64_dtype(map_pd[col])
+    ]
+    if not temporal_cols:
+        return map_pd
+    map_pd = map_pd.copy()
+    for col in temporal_cols:
+        series = map_pd[col]
+        map_pd[col] = series.astype(str).where(series.notna(), "")
+    return map_pd
 
 
 def load_default_gpschecks_settings(
@@ -332,6 +372,10 @@ def _build_map_dataframe(
 
     if color_by:
         map_df = map_df.with_columns(data[color_by].alias("color_group"))
+        # The tooltip reads {field} from the layer data, so the color column
+        # must exist under the name it is listed by.
+        if color_by not in map_df.columns:
+            map_df = map_df.with_columns(data[color_by].alias(color_by))
         tooltip_fields.append(color_by)
 
     map_pd = map_df.to_pandas()
@@ -347,9 +391,106 @@ def _build_map_dataframe(
     return map_pd, tooltip_fields
 
 
+EARTH_RADIUS_METERS = 6_371_008.8
+"""Mean Earth radius (IUGG) used by `haversine_meters`."""
+
+
+def haversine_meters(
+    lat_1: str | pl.Expr,
+    lon_1: str | pl.Expr,
+    lat_2: str | pl.Expr,
+    lon_2: str | pl.Expr,
+) -> pl.Expr:
+    """Great-circle distance in metres between two points, as a Polars expression.
+
+    Treats the Earth as a sphere, so it differs from the WGS-84 ellipsoidal
+    geodesic by at most about 0.6%, well within phone GPS error. It stays
+    vectorized, where a per-row geodesic does not.
+
+    Parameters
+    ----------
+    lat_1, lon_1, lat_2, lon_2 : str | pl.Expr
+        Column names or expressions holding coordinates in decimal degrees.
+
+    Returns
+    -------
+    pl.Expr
+        Distance in metres; null where any coordinate is null.
+    """
+    lat_1, lon_1, lat_2, lon_2 = (
+        (pl.col(c) if isinstance(c, str) else c).radians()
+        for c in (lat_1, lon_1, lat_2, lon_2)
+    )
+    half_chord = ((lat_2 - lat_1) / 2).sin().pow(2) + lat_1.cos() * lat_2.cos() * (
+        (lon_2 - lon_1) / 2
+    ).sin().pow(2)
+    # Clip guards arcsin against rounding just above 1 for antipodal points.
+    return 2 * EARTH_RADIUS_METERS * half_chord.clip(0.0, 1.0).sqrt().arcsin()
+
+
+def valid_coordinates(lat: str | pl.Expr, lon: str | pl.Expr) -> pl.Expr:
+    """Whether a latitude is in [-90, 90] and a longitude in [-180, 180].
+
+    Parameters
+    ----------
+    lat, lon : str | pl.Expr
+        Column names or expressions holding coordinates in decimal degrees.
+
+    Returns
+    -------
+    pl.Expr
+        False for out-of-range or NaN values; null where a value is null, so
+        `DataFrame.filter` drops those rows too.
+    """
+    lat, lon = (pl.col(c) if isinstance(c, str) else c for c in (lat, lon))
+    return lat.is_between(-90, 90) & lon.is_between(-180, 180)
+
+
 def _has_parsed_coords(parsed_data: pl.DataFrame) -> bool:
     """Check whether a parsed GPS DataFrame contains latitude and longitude columns."""
     return "latitude" in parsed_data.columns and "longitude" in parsed_data.columns
+
+
+# Columns the detection functions add to their input.
+OUTLIER_REASON_COL = "outlier_reason"
+_CLUSTER_OUTPUT_COLUMNS = ("distance_from_centroid", "Outlier", OUTLIER_REASON_COL)
+
+
+def _cluster_reason(
+    distance: float,
+    lower: float,
+    upper: float,
+    clustering_col: str | None,
+    group: Any,
+) -> str:
+    """Explain why a point is a cluster outlier.
+
+    Parameters
+    ----------
+    distance : float
+        The point's distance from its group's center, in metres.
+    lower, upper : float
+        The group's IQR fences on that distance.
+    clustering_col : str | None
+        The clustering column, or None when all points form one group.
+    group : Any
+        The point's value in `clustering_col`; may be missing.
+    """
+    usual = "points in this group are usually"
+    if not clustering_col:
+        where, usual = "the center of all points", "points are usually"
+    elif pd.isna(group):
+        where = f"the center of points with no {clustering_col}"
+    else:
+        # A whole-number column with missing values arrives as floats: 1.0.
+        if isinstance(group, float) and group.is_integer():
+            group = int(group)
+        where = f"the {group} group center"
+    if distance > upper:
+        limit = f"within {upper:,.0f} m"
+    else:
+        limit = f"at least {lower:,.0f} m away"
+    return f"{distance:,.0f} m from {where}; {usual} {limit}"
 
 
 # detect outliers using a clustering column
@@ -372,73 +513,99 @@ def detect_outliers_with_clusters(df, gps_lat_col, gps_lon_col, clustering_col):
     Returns
     -------
     pd.DataFrame
-        The input dataframe with an additional column indicating outliers.
+        The rows with valid coordinates, ordered by group, with
+        ``distance_from_centroid``, ``Outlier`` and ``outlier_reason`` (None
+        for points that are not outliers) added. The clustering column is
+        kept with its source values, unless it has the name of one of those
+        output columns.
     """
     outlier_df = df.copy(deep=True)
-    if not clustering_col:
-        # If no clustering column is provided, treat the entire DataFrame
-        # as a single group
-        # create a dummy clustering column
-        outlier_df["dummy_cluster"] = "all"
-        clustering_col = "dummy_cluster"
 
-    # replace missing values in clustering column with a placeholder
-    outlier_df[clustering_col] = outlier_df[clustering_col].fillna("Unknown")
-
-    # Drop rows with missing latitude values or longitude values
+    # Drop rows with missing or out-of-range coordinates.
     outlier_df = outlier_df.dropna(subset=[gps_lat_col, gps_lon_col])
+    in_range = outlier_df[gps_lat_col].between(-90, 90) & outlier_df[
+        gps_lon_col
+    ].between(-180, 180)
+    outlier_df = outlier_df[in_range]
 
-    if outlier_df.empty:
-        # No points to measure: apply() on an empty frame returns a frame,
-        # not a Series, so return the output columns directly.
-        return outlier_df.assign(
-            distance_from_centroid=np.array([], dtype=float),
-            Outlier=np.array([], dtype=bool),
+    # No clustering column: the whole frame is one group.
+    groups = (
+        outlier_df[clustering_col].astype(object)
+        if clustering_col
+        else pd.Series("all", index=outlier_df.index, dtype=object)
+    )
+    # Missing values form their own group, ordered as "Unknown". The filled
+    # copy is only for grouping: the output keeps the source values, so a
+    # numeric column doesn't end up mixing numbers and text.
+    # sort=True numbers the groups in the order pandas groupby sorts them,
+    # whatever the column's type.
+    group_codes, _ = pd.factorize(groups.fillna("Unknown"), sort=True)
+
+    # Only the group code and coordinates go through Polars, so the other
+    # columns keep their pandas dtypes untouched.
+    points = pl.DataFrame(
+        {
+            "group": group_codes,
+            "lat": outlier_df[gps_lat_col].to_numpy(dtype=float),
+            "lon": outlier_df[gps_lon_col].to_numpy(dtype=float),
+        }
+    )
+    distance = pl.col("distance")
+    # Linear interpolation matches pandas' quantile; Polars defaults to nearest.
+    q1 = distance.quantile(0.25, interpolation="linear").over("group")
+    q3 = distance.quantile(0.75, interpolation="linear").over("group")
+    iqr = q3 - q1
+    flags = (
+        points.with_columns(
+            pl.col("lat").mean().over("group").alias("centroid_lat"),
+            pl.col("lon").mean().over("group").alias("centroid_lon"),
         )
-
-    grouped_df = outlier_df.groupby(clustering_col)
-
-    # Calculate centroids for each group
-    centroids = grouped_df[[gps_lat_col, gps_lon_col]].mean()
-
-    # Calculate distances from centroids using geopy
-    def calculate_distance(row):
-        centroid = centroids.loc[row[clustering_col]]
-        return geodesic(
-            (row[gps_lat_col], row[gps_lon_col]),
-            (centroid[gps_lat_col], centroid[gps_lon_col]),
-        ).meters
-
-    outlier_df["distance_from_centroid"] = outlier_df.apply(calculate_distance, axis=1)
-
-    # Flag outliers using IQR for each group
-    def flag_outliers(group):
-        # Skip outlier detection for groups with too few points
-        if len(group) < 4:
-            group["Outlier"] = False
-            return group
-
-        Q1 = group["distance_from_centroid"].quantile(0.25)
-        Q3 = group["distance_from_centroid"].quantile(0.75)
-        IQR = Q3 - Q1
-
-        # If IQR is 0 (all points at same distance), mark none as outliers
-        if IQR == 0:
-            group["Outlier"] = False
-            return group
-
-        lower_bound = Q1 - 1.5 * IQR
-        upper_bound = Q3 + 1.5 * IQR
-        group["Outlier"] = (group["distance_from_centroid"] < lower_bound) | (
-            group["distance_from_centroid"] > upper_bound
+        .with_columns(
+            haversine_meters("lat", "lon", "centroid_lat", "centroid_lon").alias(
+                "distance"
+            )
         )
-        return group
-
-    outlier_df = grouped_df.apply(flag_outliers, include_groups=False).reset_index(
-        drop=True
+        .with_columns(
+            # Groups with fewer than 4 points, or with every point the same
+            # distance from the centroid (IQR 0), have no outliers.
+            (q1 - 1.5 * iqr).alias("lower"),
+            (q3 + 1.5 * iqr).alias("upper"),
+            pl.when((pl.len().over("group") < 4) | (iqr == 0))
+            .then(False)
+            .otherwise((distance < q1 - 1.5 * iqr) | (distance > q3 + 1.5 * iqr))
+            .alias("Outlier"),
+        )
     )
 
-    return outlier_df
+    # Reasons are built only for the outliers, which are few.
+    is_outlier = flags["Outlier"].to_numpy().astype(bool)
+    reasons = np.full(len(flags), None, dtype=object)
+    group_values = groups.to_numpy()
+    distances, lowers, uppers = (
+        flags[c].to_numpy() for c in ("distance", "lower", "upper")
+    )
+    for i in np.flatnonzero(is_outlier):
+        reasons[i] = _cluster_reason(
+            distances[i],
+            lowers[i],
+            uppers[i],
+            clustering_col,
+            group_values[i],
+        )
+
+    # Keep the clustering column so the table and map can show each point's
+    # group. Drop it before adding the outputs if it is named like one, so it
+    # can't replace the results.
+    if clustering_col in _CLUSTER_OUTPUT_COLUMNS:
+        outlier_df = outlier_df.drop(columns=clustering_col)
+    outlier_df = outlier_df.assign(
+        distance_from_centroid=distances,
+        Outlier=is_outlier,
+        **{OUTLIER_REASON_COL: reasons},
+    )
+    # Rows ordered by group, then by original position.
+    order = np.argsort(group_codes, kind="stable")
+    return outlier_df.iloc[order].reset_index(drop=True)
 
 
 # automatically detect outliers using Local Outlier Factor (LOF)
@@ -463,7 +630,8 @@ def detect_outliers_with_lof(df, gps_lat_col, gps_lon_col, n_neighbors, contamin
     Returns
     -------
     pd.DataFrame
-        The input dataframe with an additional 'Outlier' column indicating GPS outliers.
+        The rows with both coordinates, with ``Outlier`` and ``outlier_reason``
+        (None for points that are not outliers) added.
     """
     # Drop rows with missing latitude or longitude values
     df = df.dropna(subset=[gps_lat_col, gps_lon_col])
@@ -473,6 +641,7 @@ def detect_outliers_with_lof(df, gps_lat_col, gps_lon_col, n_neighbors, contamin
     if n_samples < 2:
         # Not enough data for outlier detection
         df["Outlier"] = False
+        df[OUTLIER_REASON_COL] = None
         return df
 
     # Adjust n_neighbors if necessary
@@ -487,6 +656,17 @@ def detect_outliers_with_lof(df, gps_lat_col, gps_lon_col, n_neighbors, contamin
         n_neighbors=adjusted_n_neighbors, contamination=contamination
     )
     df["Outlier"] = lof.fit_predict(coords) == -1  # LOF assigns -1 to outliers
+
+    # LOF score: how much sparser a point's neighborhood is than its
+    # neighbors' (about 1 for typical points).
+    scores = -lof.negative_outlier_factor_
+    reasons = np.full(n_samples, None, dtype=object)
+    for i in np.flatnonzero(df["Outlier"].to_numpy()):
+        reasons[i] = (
+            f"More isolated than its {adjusted_n_neighbors} nearest neighbors "
+            f"(LOF score {scores[i]:.1f})"
+        )
+    df[OUTLIER_REASON_COL] = reasons
 
     return df
 

@@ -32,7 +32,6 @@ dependencies = [
     "seaborn>=0.13.2",
     "scikit-learn>=1.5.2",
     "scipy>=1.17.0",
-    "geopy>=2.4.1",
     "requests>=2.32.3",
     # Not imported directly, but required at runtime for streamlit/pandas/
     # polars interop; floor at the CVE-fixed release (see issue #186)

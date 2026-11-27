@@ -9,6 +9,21 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Why a GPS point is an outlier** (#487, `checks/gpschecks/compute.py`):
+  `detect_outliers_with_clusters` and `detect_outliers_with_lof` add an
+  `outlier_reason` column (None for points that are not outliers), shown in
+  the outliers table, its CSV download and the map tooltip. Cluster by
+  Column gives the distance from the group center and the group's usual
+  range ("2,950 m from the E01 group center; points in this group are
+  usually within 1,210 m"); LOF gives the neighbor count and LOF score.
+  The cluster method now keeps the clustering column, with its source
+  values (missing points are grouped together and their reason says `points
+  with no <column>`), so its value shows in the table and tooltip, as they already
+  intended; it was dropped by the former `groupby().apply()`. GPS map
+  tooltips wrap at 360px (`_build_tooltip_config`) so long values stay on
+  the map, and the map names its own `outlier_status` and `color` columns
+  so they never replace a source column
+
 - **SurveyCTO data dictionary** (#398, `processing/form_dictionary.py`):
   `build_form_dictionary(project_id, alias, raw, missing_codes)` builds an alias's
   variable dictionary, rule-based PII flags (trusting publishable fields; no
@@ -442,6 +457,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **GPS distances are vectorized** (#485, `checks/gpschecks/compute.py`):
+  `detect_outliers_with_clusters` and `_calculate_comparison_distances` use
+  the new `haversine_meters` Polars expression instead of geopy's per-row
+  `geodesic`, and the cluster IQR step runs as Polars group expressions
+  (linear quartiles, as pandas). At 100k rows, cluster outliers take 0.09s
+  (were 10.2s) and GPS comparison 0.01s (was 7.2s). Distances are spherical,
+  so they differ from the WGS-84 geodesic by up to about 0.6%; a point right
+  at a threshold or IQR fence can change flag status. Rows with an
+  out-of-range coordinate (`valid_coordinates`) are left out; in the cluster
+  check they used to raise. The output shape is unchanged
+
 - **Breaking, SurveyCTO column types** (#397): columns take the form's types
   instead of `DataProcessor`'s. Integers are `Int64` (were `Float64`), dates
   `Date` (were `Datetime`), numeric select_one codes `Int64` (on a `select1`
@@ -550,6 +576,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   prefill the name from the chosen source
 
 ### Removed
+
+- **`geopy` dependency** (#485): replaced by `haversine_meters`
 
 - **`DataProcessor`** and `SurveyCTOConfig.date_format`
   (`connectors/scto.py`): replaced by `surveycto.cast`, which also replaces

@@ -12,10 +12,13 @@ from datasure.checks.gpschecks.compute import (
     _get_mapbox_key,
     _has_parsed_coords,
     _parse_gps_data,
+    _stringify_temporal_columns,
     calculate_gps_accuracy_statistics,
     detect_outliers_with_clusters,
     detect_outliers_with_lof,
+    haversine_meters,
     load_default_gpschecks_settings,
+    valid_coordinates,
 )
 from datasure.models.enums import DelimiterType, GPSFormatType
 from datasure.models.schemas import GPSSettings
@@ -605,6 +608,13 @@ def test_build_tooltip_config():
     assert "<b>ID:</b>" in result["html"]
 
 
+def test_build_tooltip_config_wraps_long_values():
+    """Long values such as an outlier reason wrap instead of running off the map."""
+    style = _build_tooltip_config(["outlier_reason"])["style"]
+    assert style["maxWidth"] == "360px"
+    assert style["whiteSpace"] == "normal"
+
+
 def test_build_tooltip_config_empty():
     """Test tooltip config with empty fields."""
     result = _build_tooltip_config([])
@@ -718,6 +728,37 @@ def test_build_map_dataframe_all_fields():
     assert "color" in map_pd.columns
 
 
+def test_build_map_dataframe_color_by_column_is_in_tooltip_data():
+    """Every tooltip field must be a column, or the tooltip shows "{field}"."""
+    data = pl.DataFrame(
+        {
+            "latitude": [1.0, 2.0],
+            "longitude": [3.0, 4.0],
+            "enumerator": ["E1", "E2"],
+        }
+    )
+    map_pd, tooltip_fields = _build_map_dataframe(
+        data, None, None, "enumerator", None, "enumerator"
+    )
+    assert set(tooltip_fields) <= set(map_pd.columns)
+    assert map_pd["enumerator"].tolist() == ["E1", "E2"]
+
+
+def test_stringify_temporal_columns():
+    """Datetime values become text so the pydeck tooltip can show them."""
+    map_pd = pd.DataFrame(
+        {
+            "lat": [1.0, 2.0],
+            "Date": pd.to_datetime(["2025-01-01 10:30:00", None]),
+            "name": ["a", "b"],
+        }
+    )
+    result = _stringify_temporal_columns(map_pd)
+    assert result["Date"].tolist() == ["2025-01-01 10:30:00", ""]
+    assert result["lat"].tolist() == [1.0, 2.0]
+    assert pd.api.types.is_datetime64_any_dtype(map_pd["Date"])
+
+
 def test_build_map_dataframe_no_optional_fields():
     """Test building map dataframe with no optional fields."""
     data = pl.DataFrame({"latitude": [1.0], "longitude": [3.0]})
@@ -763,3 +804,285 @@ def test_detect_outliers_with_lof_single_point():
     result = detect_outliers_with_lof(data, "latitude", "longitude", 5, 0.1)
     assert "Outlier" in result.columns
     assert not result["Outlier"].iloc[0]
+
+
+# =============================================================================
+# Tests for vectorized distances (haversine_meters, valid_coordinates)
+# =============================================================================
+
+# Reference distances from geopy's WGS-84 ``geodesic``, which these replaced.
+# Haversine on a sphere stays within 1% of them.
+GEODESIC_REFERENCE = [
+    ((5.6037, -0.1870), (6.6885, -1.6244), 199255.178),
+    ((6.6018, -0.1870), (6.6019, -0.1871), 15.639),
+    ((0.0, 0.0), (0.0, 1.0), 111319.491),
+    ((60.0, 10.0), (60.5, 11.0), 78548.887),
+]
+
+
+@pytest.mark.parametrize(("start", "end", "expected"), GEODESIC_REFERENCE)
+def test_haversine_meters_within_one_percent_of_geodesic(start, end, expected):
+    """Haversine distances stay within 1% of the WGS-84 geodesic."""
+    points = pl.DataFrame(
+        {"lat_1": [start[0]], "lon_1": [start[1]], "lat_2": [end[0]], "lon_2": [end[1]]}
+    )
+
+    result = points.select(haversine_meters("lat_1", "lon_1", "lat_2", "lon_2"))
+
+    assert result.item() == pytest.approx(expected, rel=0.01)
+
+
+def test_haversine_meters_same_point_is_zero():
+    """A point is zero metres from itself."""
+    points = pl.DataFrame({"lat": [6.6018], "lon": [-0.1870]})
+
+    result = points.select(haversine_meters("lat", "lon", "lat", "lon"))
+
+    assert result.item() == 0.0
+
+
+def test_valid_coordinates_rejects_out_of_range_and_missing():
+    """Only latitudes in [-90, 90] and longitudes in [-180, 180] are valid."""
+    points = pl.DataFrame(
+        {
+            "lat": [6.6, 90.0, -90.0, 95.0, 6.6, None, float("nan")],
+            "lon": [-0.18, 180.0, -180.0, -0.18, 181.0, -0.18, -0.18],
+        }
+    )
+
+    result = points.select(valid_coordinates("lat", "lon").fill_null(False))
+
+    assert result.to_series().to_list() == [
+        True,
+        True,
+        True,
+        False,
+        False,
+        False,
+        False,
+    ]
+
+
+# =============================================================================
+# Tests for detect_outliers_with_clusters behaviour pinned before the Polars port
+# =============================================================================
+
+
+def test_detect_outliers_with_clusters_uses_linear_quartiles():
+    """Quartiles interpolate linearly, as pandas does.
+
+    On one meridian, distances from the centroid are proportional to the
+    latitude offsets. With these offsets, linear quartiles flag the third
+    point as a low outlier; nearest-rank quartiles would flag nothing.
+    """
+    offsets = [1, 3, 21, 30, 33, 34]
+    data = pd.DataFrame(
+        {
+            "latitude": [6.0 + x * 0.001 for x in offsets],
+            "longitude": [-0.18] * len(offsets),
+        }
+    )
+
+    result = detect_outliers_with_clusters(data, "latitude", "longitude", None)
+
+    assert result["Outlier"].tolist() == [False, False, True, False, False, False]
+
+
+def test_detect_outliers_with_clusters_output_shape():
+    """Rows are ordered by cluster, the cluster column is kept, index is reset.
+
+    Missing cluster values form their own group, ordered as "Unknown".
+    """
+    data = pd.DataFrame(
+        {
+            "id": [1, 2, 3, 4, 5],
+            "team": ["B", "A", None, "B", "A"],
+            "latitude": [6.60, 6.61, 6.62, 6.63, 6.64],
+            "longitude": [-0.1] * 5,
+        }
+    )
+
+    result = detect_outliers_with_clusters(data, "latitude", "longitude", "team")
+
+    assert result["id"].tolist() == [2, 5, 1, 4, 3]
+    assert list(result.columns) == [
+        "id",
+        "team",
+        "latitude",
+        "longitude",
+        "distance_from_centroid",
+        "Outlier",
+        "outlier_reason",
+    ]
+    # The clustering column keeps its source values; missing stays missing.
+    assert result["team"].tolist() == ["A", "A", "B", "B", None]
+    assert result.index.tolist() == [0, 1, 2, 3, 4]
+    # The lone "Unknown" point is its own centroid.
+    assert result["distance_from_centroid"].iloc[-1] == 0.0
+    assert result["Outlier"].dtype == bool
+
+
+def test_detect_outliers_with_clusters_distance_matches_geodesic():
+    """Distances from the centroid stay within 1% of the geodesic."""
+    data = pd.DataFrame(
+        {"latitude": [0.0, 0.0], "longitude": [0.0, 2.0]},
+    )
+
+    result = detect_outliers_with_clusters(data, "latitude", "longitude", None)
+
+    # The centroid is (0, 1): each point is one degree of longitude away.
+    assert result["distance_from_centroid"].tolist() == pytest.approx(
+        [111319.491, 111319.491], rel=0.01
+    )
+
+
+def test_detect_outliers_with_clusters_drops_out_of_range_coordinates():
+    """Out-of-range coordinates are left out instead of raising."""
+    data = pd.DataFrame(
+        {
+            "id": [1, 2, 3, 4],
+            "latitude": [6.60, 95.0, 6.61, 6.62],
+            "longitude": [-0.1, -0.1, 200.0, -0.1],
+        }
+    )
+
+    result = detect_outliers_with_clusters(data, "latitude", "longitude", None)
+
+    assert result["id"].tolist() == [1, 4]
+
+
+@pytest.mark.parametrize(
+    "clustering_col", ["Outlier", "distance_from_centroid", "outlier_reason"]
+)
+def test_detect_outliers_with_clusters_column_named_like_output(clustering_col):
+    """A clustering column named like an output column keeps the calculated output."""
+    data = pd.DataFrame(
+        {
+            clustering_col: ["A"] * 5,
+            "latitude": [6.0, 6.001, 6.002, 6.003, 6.5],
+            "longitude": [-0.1] * 5,
+        }
+    )
+
+    result = detect_outliers_with_clusters(
+        data, "latitude", "longitude", clustering_col
+    )
+
+    assert list(result.columns) == [
+        "latitude",
+        "longitude",
+        "distance_from_centroid",
+        "Outlier",
+        "outlier_reason",
+    ]
+    assert result["Outlier"].tolist() == [False, False, False, False, True]
+
+
+# =============================================================================
+# Tests for outlier reasons
+# =============================================================================
+
+
+def _fences(distances: pd.Series) -> tuple[float, float]:
+    """Return the IQR fences pandas computes for `distances`."""
+    q1, q3 = distances.quantile(0.25), distances.quantile(0.75)
+    return q1 - 1.5 * (q3 - q1), q3 + 1.5 * (q3 - q1)
+
+
+def test_detect_outliers_with_clusters_reason_far_point():
+    """A point beyond the upper fence says how far it is and the group's limit."""
+    data = pd.DataFrame(
+        {
+            "enumerator": ["E01"] * 6,
+            "latitude": [6.0, 6.001, 6.002, 6.003, 6.004, 6.5],
+            "longitude": [-0.1] * 6,
+        }
+    )
+
+    result = detect_outliers_with_clusters(data, "latitude", "longitude", "enumerator")
+
+    distance = result["distance_from_centroid"].iloc[-1]
+    _, upper = _fences(result["distance_from_centroid"])
+    assert result["outlier_reason"].iloc[-1] == (
+        f"{distance:,.0f} m from the E01 group center; "
+        f"points in this group are usually within {upper:,.0f} m"
+    )
+    assert result["outlier_reason"].iloc[:-1].isna().all()
+
+
+def test_detect_outliers_with_clusters_reason_close_point_without_group():
+    """A point inside the lower fence gives the usual minimum distance.
+
+    Without a clustering column, the reason refers to all points.
+    """
+    offsets = [1, 3, 21, 30, 33, 34]
+    data = pd.DataFrame(
+        {
+            "latitude": [6.0 + x * 0.001 for x in offsets],
+            "longitude": [-0.18] * len(offsets),
+        }
+    )
+
+    result = detect_outliers_with_clusters(data, "latitude", "longitude", None)
+
+    distance = result["distance_from_centroid"].iloc[2]
+    lower, _ = _fences(result["distance_from_centroid"])
+    assert result["outlier_reason"].iloc[2] == (
+        f"{distance:,.0f} m from the center of all points; "
+        f"points are usually at least {lower:,.0f} m away"
+    )
+
+
+def test_detect_outliers_with_lof_reason():
+    """LOF outliers name the neighbor count and their LOF score."""
+    data = pd.DataFrame(
+        {
+            "latitude": [6.6 + i * 0.001 for i in range(10)] + [7.5],
+            "longitude": [-0.18 + i * 0.001 for i in range(10)] + [-1.0],
+        }
+    )
+
+    result = detect_outliers_with_lof(data, "latitude", "longitude", 5, 0.1)
+
+    reasons = result.loc[result["Outlier"], "outlier_reason"]
+    assert len(reasons) > 0
+    assert reasons.str.fullmatch(
+        r"More isolated than its 5 nearest neighbors \(LOF score \d+\.\d\)"
+    ).all()
+    assert result.loc[~result["Outlier"], "outlier_reason"].isna().all()
+
+
+def test_detect_outliers_with_lof_reason_single_point():
+    """Too few points for LOF still give an empty reason column."""
+    data = pd.DataFrame({"latitude": [6.6], "longitude": [-0.18]})
+
+    result = detect_outliers_with_lof(data, "latitude", "longitude", 5, 0.1)
+
+    assert result["outlier_reason"].isna().all()
+
+
+def test_detect_outliers_with_clusters_numeric_group_with_missing():
+    """A whole-number clustering column with missing values stays typed.
+
+    Outliers in a numbered group and in the missing group still convert to
+    Polars (as the review table does), and the reasons name the group.
+    """
+    latitudes = [6.0, 6.001, 6.002, 6.003, 6.004, 6.5]
+    survey = pl.DataFrame(
+        {
+            "team": pl.Series([1] * 6 + [None] * 6, dtype=pl.Int64),
+            "latitude": latitudes * 2,
+            "longitude": [-0.1] * 12,
+        }
+    ).to_pandas()
+
+    result = detect_outliers_with_clusters(survey, "latitude", "longitude", "team")
+
+    outliers = result[result["Outlier"]]
+    pl.from_pandas(outliers)  # must not raise
+    assert outliers["team"].iloc[0] == 1
+    assert pd.isna(outliers["team"].iloc[1])
+    reasons = outliers["outlier_reason"].tolist()
+    assert reasons[0].split(";")[0].endswith("m from the 1 group center")
+    assert reasons[1].split(";")[0].endswith("m from the center of points with no team")
+    assert "points in this group are usually within" in reasons[1]

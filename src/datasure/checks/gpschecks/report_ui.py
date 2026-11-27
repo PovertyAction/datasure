@@ -7,13 +7,13 @@ from typing import TYPE_CHECKING, Any
 import polars as pl
 import pydeck
 import streamlit as st
-from geopy.distance import geodesic
 from pydantic import ValidationError
 
 if TYPE_CHECKING:
     import pandas as pd
 
 from datasure.checks.gpschecks.compute import (
+    OUTLIER_REASON_COL,
     _build_map_dataframe,
     _build_tooltip_config,
     _collect_optional_fields,
@@ -23,10 +23,13 @@ from datasure.checks.gpschecks.compute import (
     _identity_optional_fields,
     _parse_gps_data,
     _save_gps_column_settings,
+    _stringify_temporal_columns,
     detect_outliers_with_clusters,
     detect_outliers_with_lof,
     find_gps_columns,
     has_usable_gps_config,
+    haversine_meters,
+    valid_coordinates,
 )
 from datasure.checks.gpschecks.models import MAPBOX_STYLE
 from datasure.checks.gpschecks.review import (
@@ -516,6 +519,7 @@ def _render_scatterplot_map(
         Chart height in pixels.
     """
     tooltip_config = _build_tooltip_config(tooltip_fields)
+    map_pd = _stringify_temporal_columns(map_pd)
 
     center_lat = map_pd["lat"].mean()
     center_lon = map_pd["lon"].mean()
@@ -891,6 +895,11 @@ def _render_outliers_data_table(
                     ],
                 )
             )
+        display_cols.extend(
+            _identity_optional_fields(outliers_only, [OUTLIER_REASON_COL])
+        )
+        # The clustering column may also be the enumerator column: list it once.
+        display_cols = list(dict.fromkeys(display_cols))
 
         if review is None:
             _render_table_with_csv_download(
@@ -1722,31 +1731,25 @@ def _merge_parsed_gps_data(
 def _calculate_comparison_distances(
     comparison_data: pl.DataFrame,
 ) -> pd.DataFrame | None:
-    """Calculate geodesic distances and return a pandas DataFrame.
+    """Calculate haversine distances (metres) and return a pandas DataFrame.
 
     Returns
     -------
     pd.DataFrame | None
         DataFrame with ``distance_meters`` column, or None if calculation fails.
     """
-    comparison_df = comparison_data.to_pandas()
+    # Rows with a missing or out-of-range coordinate are left out.
+    comparison = comparison_data.filter(
+        valid_coordinates("lat_1", "lon_1") & valid_coordinates("lat_2", "lon_2")
+    ).with_columns(
+        haversine_meters("lat_1", "lon_1", "lat_2", "lon_2").alias("distance_meters")
+    )
 
-    def _row_distance(row):
-        try:
-            return geodesic(
-                (row["lat_1"], row["lon_1"]), (row["lat_2"], row["lon_2"])
-            ).meters
-        except Exception:
-            return None
-
-    comparison_df["distance_meters"] = comparison_df.apply(_row_distance, axis=1)
-    comparison_df = comparison_df.dropna(subset=["distance_meters"])
-
-    if comparison_df.empty:
+    if comparison.is_empty():
         st.warning("Unable to calculate distances between GPS coordinates.")
         return None
 
-    return comparison_df
+    return comparison.to_pandas()
 
 
 def _display_comparison_summary(
@@ -1985,6 +1988,13 @@ def plot_gps_coordinates(
 
 
 # plot clusters on map
+def _unused_column(df: pd.DataFrame, name: str) -> str:
+    """Return `name`, prefixed with underscores until no column of `df` has it."""
+    while name in df.columns:
+        name = f"_{name}"
+    return name
+
+
 def plot_clusters_on_map(
     df,
     gps_lat_col: str,
@@ -2030,22 +2040,33 @@ def plot_clusters_on_map(
     df = df.copy()
     df = df.rename(columns={gps_lat_col: "lat", gps_lon_col: "lon"})
 
+    # The map's own columns get names no source column has, so a clustering
+    # column named "outlier_status" or "color" keeps its values.
+    status_col = _unused_column(df, "outlier_status")
+    color_col = _unused_column(df, "color")
+
     # Create outlier status column for coloring
-    df["outlier_status"] = outlier_status(df, outlier_col, marked=marked)
+    df[status_col] = outlier_status(df, outlier_col, marked=marked)
 
     # Build tooltip fields
     tooltip_fields = _identity_optional_fields(
         df, [survey_id, submission_date, enumerator]
     )
-    tooltip_fields.extend(["lat", "lon", "outlier_status"])
+    tooltip_fields.extend(["lat", "lon", status_col])
     if clustering_col and clustering_col in df.columns:
         tooltip_fields.append(clustering_col)
+    if OUTLIER_REASON_COL in df.columns:
+        # Points that are not outliers have no reason: show blank, not "null".
+        df[OUTLIER_REASON_COL] = df[OUTLIER_REASON_COL].fillna("")
+        tooltip_fields.append(OUTLIER_REASON_COL)
+    # The clustering column may also be the enumerator column: list it once.
+    tooltip_fields = list(dict.fromkeys(tooltip_fields))
 
     # Color outliers red, accepted outliers green, normal points blue
     colors = {OUTLIER_STATUS: _OUTLIER_COLOR, ACCEPTED_STATUS: _ACCEPTED_COLOR}
-    df["color"] = df["outlier_status"].apply(lambda x: colors.get(x, _NORMAL_COLOR))
+    df[color_col] = df[status_col].apply(lambda x: colors.get(x, _NORMAL_COLOR))
 
-    _render_scatterplot_map(df, tooltip_fields, fill_color="color", zoom=7)
+    _render_scatterplot_map(df, tooltip_fields, fill_color=color_col, zoom=7)
 
 
 def gpschecks_settings_section(

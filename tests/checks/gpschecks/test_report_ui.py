@@ -3,6 +3,7 @@ from unittest.mock import MagicMock, patch
 import numpy as np
 import pandas as pd
 import polars as pl
+import pytest
 
 from datasure.checks.gpschecks.report_ui import (
     _add_gps_column,
@@ -467,6 +468,49 @@ def test_calculate_comparison_distances_success():
     assert (result["distance_meters"] > 0).all()
 
 
+def test_calculate_comparison_distances_matches_geodesic():
+    """Distances stay within 1% of geopy's WGS-84 geodesic."""
+    data = pl.DataFrame(
+        {"lat_1": [5.6037], "lon_1": [-0.1870], "lat_2": [6.6885], "lon_2": [-1.6244]}
+    )
+
+    result = _calculate_comparison_distances(data)
+
+    assert result is not None
+    assert result["distance_meters"].iloc[0] == pytest.approx(199255.178, rel=0.01)
+
+
+def test_calculate_comparison_distances_drops_invalid_coordinates():
+    """Rows with a missing or out-of-range coordinate are left out."""
+    data = pl.DataFrame(
+        {
+            "key": ["ok", "bad_lat", "bad_lon", "missing"],
+            "lat_1": [6.6018, 95.0, 6.6018, None],
+            "lon_1": [-0.1870, -0.1870, -0.1870, -0.1870],
+            "lat_2": [6.6019, 6.6019, 6.6019, 6.6019],
+            "lon_2": [-0.1871, -0.1871, 181.0, -0.1871],
+        }
+    )
+
+    result = _calculate_comparison_distances(data)
+
+    assert result is not None
+    assert result["key"].tolist() == ["ok"]
+
+
+@patch("datasure.checks.gpschecks.report_ui.st.warning")
+def test_calculate_comparison_distances_all_out_of_range(mock_warning):
+    """Only out-of-range coordinates gives None and a warning."""
+    data = pl.DataFrame(
+        {"lat_1": [95.0], "lon_1": [0.0], "lat_2": [0.0], "lon_2": [0.0]}
+    )
+
+    result = _calculate_comparison_distances(data)
+
+    assert result is None
+    mock_warning.assert_called_once()
+
+
 @patch("datasure.checks.gpschecks.report_ui.st.warning")
 def test_calculate_comparison_distances_empty(mock_warning):
     """Test distance calc with no valid coordinates."""
@@ -832,6 +876,146 @@ def test_render_outliers_data_table_cluster_method(mock_expander, mock_df, mock_
         "group",
     )
     mock_df.assert_called_once()
+
+
+@patch("datasure.checks.gpschecks.report_ui.st.download_button")
+@patch("datasure.checks.gpschecks.report_ui.st.dataframe")
+@patch("datasure.checks.gpschecks.report_ui.st.expander")
+def test_render_outliers_data_table_shows_group_and_reason(
+    mock_expander, mock_df, mock_dl
+):
+    """The cluster table shows the clustering column and the reason, once each.
+
+    Here the clustering column is also the enumerator column.
+    """
+    mock_expander.return_value.__enter__ = lambda s: s
+    mock_expander.return_value.__exit__ = MagicMock(return_value=False)
+    outlier_df = pd.DataFrame(
+        {
+            "survey_key": ["A"],
+            "enumerator": ["E01"],
+            "latitude": [1.0],
+            "longitude": [4.0],
+            "distance_from_centroid": [50.0],
+            "Outlier": [True],
+            "outlier_reason": ["50 m from the E01 group center"],
+        }
+    )
+
+    _render_outliers_data_table(
+        outlier_df,
+        "gps1",
+        "survey_key",
+        None,
+        "enumerator",
+        "Cluster by Column",
+        "enumerator",
+    )
+
+    shown = mock_df.call_args[0][0]
+    assert list(shown.columns) == [
+        "survey_key",
+        "enumerator",
+        "latitude",
+        "longitude",
+        "distance_from_centroid",
+        "outlier_reason",
+    ]
+
+
+@patch("datasure.checks.gpschecks.report_ui.st.download_button")
+@patch("datasure.checks.gpschecks.report_ui.st.dataframe")
+@patch("datasure.checks.gpschecks.report_ui.st.expander")
+def test_render_outliers_data_table_lof_shows_reason(mock_expander, mock_df, mock_dl):
+    """The LOF table shows the reason."""
+    mock_expander.return_value.__enter__ = lambda s: s
+    mock_expander.return_value.__exit__ = MagicMock(return_value=False)
+    outlier_df = pd.DataFrame(
+        {
+            "survey_key": ["A"],
+            "latitude": [1.0],
+            "longitude": [4.0],
+            "Outlier": [True],
+            "outlier_reason": ["More isolated than its 5 nearest neighbors"],
+        }
+    )
+
+    _render_outliers_data_table(
+        outlier_df, "gps1", "survey_key", None, None, "Auto-Clustering (LOF)", None
+    )
+
+    shown = mock_df.call_args[0][0]
+    assert list(shown.columns) == [
+        "survey_key",
+        "latitude",
+        "longitude",
+        "outlier_reason",
+    ]
+
+
+@patch("datasure.checks.gpschecks.report_ui._render_scatterplot_map")
+def test_plot_clusters_on_map_tooltip_shows_group_and_reason(mock_render):
+    """The tooltip lists the clustering column and the reason, once each."""
+    data = pd.DataFrame(
+        {
+            "key": ["A", "B"],
+            "enumerator": ["E01", "E01"],
+            "latitude": [6.6, 6.7],
+            "longitude": [-0.1, -0.2],
+            "Outlier": [False, True],
+            "outlier_reason": [None, "far"],
+        }
+    )
+
+    plot_clusters_on_map(
+        data,
+        "latitude",
+        "longitude",
+        "enumerator",
+        None,
+        "key",
+        "enumerator",
+        "Outlier",
+    )
+
+    map_df, fields = mock_render.call_args[0][:2]
+    assert fields.count("enumerator") == 1
+    assert fields[-1] == "outlier_reason"
+    # A missing reason shows blank in the tooltip, not "null".
+    assert map_df["outlier_reason"].tolist() == ["", "far"]
+
+
+@pytest.mark.parametrize("clustering_col", ["color", "outlier_status"])
+@patch("datasure.checks.gpschecks.report_ui._render_scatterplot_map")
+def test_plot_clusters_on_map_keeps_group_named_like_map_column(
+    mock_render, clustering_col
+):
+    """A clustering column named like a map helper column keeps its values."""
+    data = pd.DataFrame(
+        {
+            "key": ["A", "B"],
+            clustering_col: ["G1", "G2"],
+            "latitude": [6.6, 6.7],
+            "longitude": [-0.1, -0.2],
+            "Outlier": [False, True],
+        }
+    )
+
+    plot_clusters_on_map(
+        data, "latitude", "longitude", None, None, "key", clustering_col, "Outlier"
+    )
+
+    map_df, fields = mock_render.call_args[0][:2]
+    assert map_df[clustering_col].tolist() == ["G1", "G2"]
+    assert clustering_col in fields
+    # The outlier status still shows, under a name that doesn't clash.
+    status_field = next(
+        f for f in fields if f.endswith("outlier_status") and f != clustering_col
+    )
+    assert map_df[status_field].tolist() == ["Normal", "Outlier"]
+    color = mock_render.call_args.kwargs["fill_color"]
+    assert color != clustering_col
+    assert map_df[color].tolist()[1] == [255, 0, 0, 160]
 
 
 # =============================================================================
