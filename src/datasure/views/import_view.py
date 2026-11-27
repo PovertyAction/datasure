@@ -212,6 +212,18 @@ def _add_to_session_state(alias: str) -> None:
             demo_callout(ImportDemoInfo.get_info_message("add_to_session_info"))
 
 
+def _percent_missing(data: pl.DataFrame) -> float:
+    """Return the share of cells in `data` that are null, as a percentage.
+
+    A dataset with no rows or no columns has no cells, so it reports 0%
+    rather than dividing by zero.
+    """
+    total_cells = data.height * data.width
+    if total_cells == 0:
+        return 0.0
+    return data.null_count().sum_horizontal().item() / total_cells * 100
+
+
 # --- Update import log in the cache file --- #
 def update_import_log(import_log: pl.DataFrame) -> None:
     """Update the import log in the cache file."""
@@ -511,11 +523,7 @@ if not import_log.is_empty():
             border=True,
         )
 
-        num_missing = preview_data.null_count().sum()
-        num_missing = num_missing.with_columns(
-            pl.sum_horizontal(pl.all()).alias("row_total")
-        )
-        perc_missing = (num_missing["row_total"][0] / (num_rows * num_columns)) * 100
+        perc_missing = _percent_missing(preview_data)
 
         mb3.metric(
             label="Missing Data",
@@ -524,7 +532,13 @@ if not import_log.is_empty():
             border=True,
         )
 
-        st.dataframe(preview_data, width="stretch")
+        if preview_data.is_empty():
+            st.info(
+                f"**{selected_dataset}** has no rows yet. If it comes from "
+                "SurveyCTO, the form may have no submissions."
+            )
+        else:
+            st.dataframe(preview_data, width="stretch")
 
         # Demo next action
         if is_demo_project():

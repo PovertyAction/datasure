@@ -580,6 +580,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Import page crash on an empty dataset**: the preview's Missing Data
+  metric divided null cells by `rows * columns`, so a dataset with no rows
+  (for example a SurveyCTO form with no submissions) raised
+  `ZeroDivisionError` and the Import page failed on every rerun.
+  `_percent_missing` (`views/import_view.py`) now returns 0% when there are
+  no cells, and the preview shows a "no rows yet" note instead of an empty
+  table
 - **Outliers & Constraints crash on a blank bound** (#483):
   `compute_constraint_violations` (`checks/outliers/compute.py`) wrote each
   bound with an untyped `pl.lit`, so a blank bound became a `Null` column and
