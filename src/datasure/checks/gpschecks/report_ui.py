@@ -1988,6 +1988,13 @@ def plot_gps_coordinates(
 
 
 # plot clusters on map
+def _unused_column(df: pd.DataFrame, name: str) -> str:
+    """Return `name`, prefixed with underscores until no column of `df` has it."""
+    while name in df.columns:
+        name = f"_{name}"
+    return name
+
+
 def plot_clusters_on_map(
     df,
     gps_lat_col: str,
@@ -2033,14 +2040,19 @@ def plot_clusters_on_map(
     df = df.copy()
     df = df.rename(columns={gps_lat_col: "lat", gps_lon_col: "lon"})
 
+    # The map's own columns get names no source column has, so a clustering
+    # column named "outlier_status" or "color" keeps its values.
+    status_col = _unused_column(df, "outlier_status")
+    color_col = _unused_column(df, "color")
+
     # Create outlier status column for coloring
-    df["outlier_status"] = outlier_status(df, outlier_col, marked=marked)
+    df[status_col] = outlier_status(df, outlier_col, marked=marked)
 
     # Build tooltip fields
     tooltip_fields = _identity_optional_fields(
         df, [survey_id, submission_date, enumerator]
     )
-    tooltip_fields.extend(["lat", "lon", "outlier_status"])
+    tooltip_fields.extend(["lat", "lon", status_col])
     if clustering_col and clustering_col in df.columns:
         tooltip_fields.append(clustering_col)
     if OUTLIER_REASON_COL in df.columns:
@@ -2052,9 +2064,9 @@ def plot_clusters_on_map(
 
     # Color outliers red, accepted outliers green, normal points blue
     colors = {OUTLIER_STATUS: _OUTLIER_COLOR, ACCEPTED_STATUS: _ACCEPTED_COLOR}
-    df["color"] = df["outlier_status"].apply(lambda x: colors.get(x, _NORMAL_COLOR))
+    df[color_col] = df[status_col].apply(lambda x: colors.get(x, _NORMAL_COLOR))
 
-    _render_scatterplot_map(df, tooltip_fields, fill_color="color", zoom=7)
+    _render_scatterplot_map(df, tooltip_fields, fill_color=color_col, zoom=7)
 
 
 def gpschecks_settings_section(

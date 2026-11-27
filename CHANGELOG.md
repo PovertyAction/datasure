@@ -16,11 +16,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   Column gives the distance from the group center and the group's usual
   range ("2,950 m from the E01 group center; points in this group are
   usually within 1,210 m"); LOF gives the neighbor count and LOF score.
-  The cluster method now keeps the clustering column (missing values as
-  "Unknown"), so its value shows in the table and tooltip, as they already
+  The cluster method now keeps the clustering column, with its source
+  values (missing points are grouped together and their reason says `points
+  with no <column>`), so its value shows in the table and tooltip, as they already
   intended; it was dropped by the former `groupby().apply()`. GPS map
   tooltips wrap at 360px (`_build_tooltip_config`) so long values stay on
-  the map
+  the map, and the map names its own `outlier_status` and `color` columns
+  so they never replace a source column
 
 - **SurveyCTO data dictionary** (#398, `processing/form_dictionary.py`):
   `build_form_dictionary(project_id, alias, raw, missing_codes)` builds an alias's

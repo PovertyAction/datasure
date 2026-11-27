@@ -891,7 +891,7 @@ def test_detect_outliers_with_clusters_uses_linear_quartiles():
 def test_detect_outliers_with_clusters_output_shape():
     """Rows are ordered by cluster, the cluster column is kept, index is reset.
 
-    Missing cluster values form their own "Unknown" group.
+    Missing cluster values form their own group, ordered as "Unknown".
     """
     data = pd.DataFrame(
         {
@@ -914,7 +914,8 @@ def test_detect_outliers_with_clusters_output_shape():
         "Outlier",
         "outlier_reason",
     ]
-    assert result["team"].tolist() == ["A", "A", "B", "B", "Unknown"]
+    # The clustering column keeps its source values; missing stays missing.
+    assert result["team"].tolist() == ["A", "A", "B", "B", None]
     assert result.index.tolist() == [0, 1, 2, 3, 4]
     # The lone "Unknown" point is its own centroid.
     assert result["distance_from_centroid"].iloc[-1] == 0.0
@@ -1058,3 +1059,30 @@ def test_detect_outliers_with_lof_reason_single_point():
     result = detect_outliers_with_lof(data, "latitude", "longitude", 5, 0.1)
 
     assert result["outlier_reason"].isna().all()
+
+
+def test_detect_outliers_with_clusters_numeric_group_with_missing():
+    """A whole-number clustering column with missing values stays typed.
+
+    Outliers in a numbered group and in the missing group still convert to
+    Polars (as the review table does), and the reasons name the group.
+    """
+    latitudes = [6.0, 6.001, 6.002, 6.003, 6.004, 6.5]
+    survey = pl.DataFrame(
+        {
+            "team": pl.Series([1] * 6 + [None] * 6, dtype=pl.Int64),
+            "latitude": latitudes * 2,
+            "longitude": [-0.1] * 12,
+        }
+    ).to_pandas()
+
+    result = detect_outliers_with_clusters(survey, "latitude", "longitude", "team")
+
+    outliers = result[result["Outlier"]]
+    pl.from_pandas(outliers)  # must not raise
+    assert outliers["team"].iloc[0] == 1
+    assert pd.isna(outliers["team"].iloc[1])
+    reasons = outliers["outlier_reason"].tolist()
+    assert reasons[0].split(";")[0].endswith("m from the 1 group center")
+    assert reasons[1].split(";")[0].endswith("m from the center of points with no team")
+    assert "points in this group are usually within" in reasons[1]

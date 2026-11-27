@@ -985,6 +985,39 @@ def test_plot_clusters_on_map_tooltip_shows_group_and_reason(mock_render):
     assert map_df["outlier_reason"].tolist() == ["", "far"]
 
 
+@pytest.mark.parametrize("clustering_col", ["color", "outlier_status"])
+@patch("datasure.checks.gpschecks.report_ui._render_scatterplot_map")
+def test_plot_clusters_on_map_keeps_group_named_like_map_column(
+    mock_render, clustering_col
+):
+    """A clustering column named like a map helper column keeps its values."""
+    data = pd.DataFrame(
+        {
+            "key": ["A", "B"],
+            clustering_col: ["G1", "G2"],
+            "latitude": [6.6, 6.7],
+            "longitude": [-0.1, -0.2],
+            "Outlier": [False, True],
+        }
+    )
+
+    plot_clusters_on_map(
+        data, "latitude", "longitude", None, None, "key", clustering_col, "Outlier"
+    )
+
+    map_df, fields = mock_render.call_args[0][:2]
+    assert map_df[clustering_col].tolist() == ["G1", "G2"]
+    assert clustering_col in fields
+    # The outlier status still shows, under a name that doesn't clash.
+    status_field = next(
+        f for f in fields if f.endswith("outlier_status") and f != clustering_col
+    )
+    assert map_df[status_field].tolist() == ["Normal", "Outlier"]
+    color = mock_render.call_args.kwargs["fill_color"]
+    assert color != clustering_col
+    assert map_df[color].tolist()[1] == [255, 0, 0, 160]
+
+
 # =============================================================================
 # Tests for _render_gps_settings_table
 # =============================================================================

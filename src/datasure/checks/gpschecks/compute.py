@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import re
+from typing import Any
 
 import numpy as np
 import pandas as pd
@@ -456,7 +457,11 @@ _CLUSTER_OUTPUT_COLUMNS = ("distance_from_centroid", "Outlier", OUTLIER_REASON_C
 
 
 def _cluster_reason(
-    distance: float, lower: float, upper: float, group: str | None
+    distance: float,
+    lower: float,
+    upper: float,
+    clustering_col: str | None,
+    group: Any,
 ) -> str:
     """Explain why a point is a cluster outlier.
 
@@ -466,13 +471,21 @@ def _cluster_reason(
         The point's distance from its group's center, in metres.
     lower, upper : float
         The group's IQR fences on that distance.
-    group : str | None
-        The point's group, or None when all points form one group.
+    clustering_col : str | None
+        The clustering column, or None when all points form one group.
+    group : Any
+        The point's value in `clustering_col`; may be missing.
     """
-    if group is None:
+    usual = "points in this group are usually"
+    if not clustering_col:
         where, usual = "the center of all points", "points are usually"
+    elif pd.isna(group):
+        where = f"the center of points with no {clustering_col}"
     else:
-        where, usual = f"the {group} group center", "points in this group are usually"
+        # A whole-number column with missing values arrives as floats: 1.0.
+        if isinstance(group, float) and group.is_integer():
+            group = int(group)
+        where = f"the {group} group center"
     if distance > upper:
         limit = f"within {upper:,.0f} m"
     else:
@@ -503,17 +516,10 @@ def detect_outliers_with_clusters(df, gps_lat_col, gps_lon_col, clustering_col):
         The rows with valid coordinates, ordered by group, with
         ``distance_from_centroid``, ``Outlier`` and ``outlier_reason`` (None
         for points that are not outliers) added. The clustering column is
-        kept, with missing values shown as "Unknown", unless it has the name
-        of one of those output columns.
+        kept with its source values, unless it has the name of one of those
+        output columns.
     """
     outlier_df = df.copy(deep=True)
-    group_col = clustering_col or "dummy_cluster"
-    if not clustering_col:
-        # No clustering column: treat the whole frame as a single group.
-        outlier_df[group_col] = "all"
-
-    # Missing cluster values form their own group.
-    outlier_df[group_col] = outlier_df[group_col].fillna("Unknown")
 
     # Drop rows with missing or out-of-range coordinates.
     outlier_df = outlier_df.dropna(subset=[gps_lat_col, gps_lon_col])
@@ -522,9 +528,18 @@ def detect_outliers_with_clusters(df, gps_lat_col, gps_lon_col, clustering_col):
     ].between(-180, 180)
     outlier_df = outlier_df[in_range]
 
+    # No clustering column: the whole frame is one group.
+    groups = (
+        outlier_df[clustering_col].astype(object)
+        if clustering_col
+        else pd.Series("all", index=outlier_df.index, dtype=object)
+    )
+    # Missing values form their own group, ordered as "Unknown". The filled
+    # copy is only for grouping: the output keeps the source values, so a
+    # numeric column doesn't end up mixing numbers and text.
     # sort=True numbers the groups in the order pandas groupby sorts them,
-    # whatever the cluster column's type.
-    group_codes, _ = pd.factorize(outlier_df[group_col], sort=True)
+    # whatever the column's type.
+    group_codes, _ = pd.factorize(groups.fillna("Unknown"), sort=True)
 
     # Only the group code and coordinates go through Polars, so the other
     # columns keep their pandas dtypes untouched.
@@ -565,7 +580,7 @@ def detect_outliers_with_clusters(df, gps_lat_col, gps_lon_col, clustering_col):
     # Reasons are built only for the outliers, which are few.
     is_outlier = flags["Outlier"].to_numpy().astype(bool)
     reasons = np.full(len(flags), None, dtype=object)
-    groups = outlier_df[group_col].astype(str).to_numpy()
+    group_values = groups.to_numpy()
     distances, lowers, uppers = (
         flags[c].to_numpy() for c in ("distance", "lower", "upper")
     )
@@ -574,14 +589,15 @@ def detect_outliers_with_clusters(df, gps_lat_col, gps_lon_col, clustering_col):
             distances[i],
             lowers[i],
             uppers[i],
-            groups[i] if clustering_col else None,
+            clustering_col,
+            group_values[i],
         )
 
     # Keep the clustering column so the table and map can show each point's
-    # group. Drop it (and the stand-in group) before adding the outputs, so
-    # a clustering column named like an output can't replace the results.
-    if not clustering_col or clustering_col in _CLUSTER_OUTPUT_COLUMNS:
-        outlier_df = outlier_df.drop(columns=group_col)
+    # group. Drop it before adding the outputs if it is named like one, so it
+    # can't replace the results.
+    if clustering_col in _CLUSTER_OUTPUT_COLUMNS:
+        outlier_df = outlier_df.drop(columns=clustering_col)
     outlier_df = outlier_df.assign(
         distance_from_centroid=distances,
         Outlier=is_outlier,
