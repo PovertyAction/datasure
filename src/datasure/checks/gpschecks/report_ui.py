@@ -13,6 +13,7 @@ if TYPE_CHECKING:
     import pandas as pd
 
 from datasure.checks.gpschecks.compute import (
+    OUTLIER_REASON_COL,
     _build_map_dataframe,
     _build_tooltip_config,
     _collect_optional_fields,
@@ -894,6 +895,11 @@ def _render_outliers_data_table(
                     ],
                 )
             )
+        display_cols.extend(
+            _identity_optional_fields(outliers_only, [OUTLIER_REASON_COL])
+        )
+        # The clustering column may also be the enumerator column: list it once.
+        display_cols = list(dict.fromkeys(display_cols))
 
         if review is None:
             _render_table_with_csv_download(
@@ -2037,6 +2043,12 @@ def plot_clusters_on_map(
     tooltip_fields.extend(["lat", "lon", "outlier_status"])
     if clustering_col and clustering_col in df.columns:
         tooltip_fields.append(clustering_col)
+    if OUTLIER_REASON_COL in df.columns:
+        # Points that are not outliers have no reason: show blank, not "null".
+        df[OUTLIER_REASON_COL] = df[OUTLIER_REASON_COL].fillna("")
+        tooltip_fields.append(OUTLIER_REASON_COL)
+    # The clustering column may also be the enumerator column: list it once.
+    tooltip_fields = list(dict.fromkeys(tooltip_fields))
 
     # Color outliers red, accepted outliers green, normal points blue
     colors = {OUTLIER_STATUS: _OUTLIER_COLOR, ACCEPTED_STATUS: _ACCEPTED_COLOR}

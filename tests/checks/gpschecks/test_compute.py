@@ -608,6 +608,13 @@ def test_build_tooltip_config():
     assert "<b>ID:</b>" in result["html"]
 
 
+def test_build_tooltip_config_wraps_long_values():
+    """Long values such as an outlier reason wrap instead of running off the map."""
+    style = _build_tooltip_config(["outlier_reason"])["style"]
+    assert style["maxWidth"] == "360px"
+    assert style["whiteSpace"] == "normal"
+
+
 def test_build_tooltip_config_empty():
     """Test tooltip config with empty fields."""
     result = _build_tooltip_config([])
@@ -882,7 +889,7 @@ def test_detect_outliers_with_clusters_uses_linear_quartiles():
 
 
 def test_detect_outliers_with_clusters_output_shape():
-    """Rows are ordered by cluster, the cluster column is dropped, index is reset.
+    """Rows are ordered by cluster, the cluster column is kept, index is reset.
 
     Missing cluster values form their own "Unknown" group.
     """
@@ -900,11 +907,14 @@ def test_detect_outliers_with_clusters_output_shape():
     assert result["id"].tolist() == [2, 5, 1, 4, 3]
     assert list(result.columns) == [
         "id",
+        "team",
         "latitude",
         "longitude",
         "distance_from_centroid",
         "Outlier",
+        "outlier_reason",
     ]
+    assert result["team"].tolist() == ["A", "A", "B", "B", "Unknown"]
     assert result.index.tolist() == [0, 1, 2, 3, 4]
     # The lone "Unknown" point is its own centroid.
     assert result["distance_from_centroid"].iloc[-1] == 0.0
@@ -940,7 +950,9 @@ def test_detect_outliers_with_clusters_drops_out_of_range_coordinates():
     assert result["id"].tolist() == [1, 4]
 
 
-@pytest.mark.parametrize("clustering_col", ["Outlier", "distance_from_centroid"])
+@pytest.mark.parametrize(
+    "clustering_col", ["Outlier", "distance_from_centroid", "outlier_reason"]
+)
 def test_detect_outliers_with_clusters_column_named_like_output(clustering_col):
     """A clustering column named like an output column keeps the calculated output."""
     data = pd.DataFrame(
@@ -960,5 +972,89 @@ def test_detect_outliers_with_clusters_column_named_like_output(clustering_col):
         "longitude",
         "distance_from_centroid",
         "Outlier",
+        "outlier_reason",
     ]
     assert result["Outlier"].tolist() == [False, False, False, False, True]
+
+
+# =============================================================================
+# Tests for outlier reasons
+# =============================================================================
+
+
+def _fences(distances: pd.Series) -> tuple[float, float]:
+    """Return the IQR fences pandas computes for `distances`."""
+    q1, q3 = distances.quantile(0.25), distances.quantile(0.75)
+    return q1 - 1.5 * (q3 - q1), q3 + 1.5 * (q3 - q1)
+
+
+def test_detect_outliers_with_clusters_reason_far_point():
+    """A point beyond the upper fence says how far it is and the group's limit."""
+    data = pd.DataFrame(
+        {
+            "enumerator": ["E01"] * 6,
+            "latitude": [6.0, 6.001, 6.002, 6.003, 6.004, 6.5],
+            "longitude": [-0.1] * 6,
+        }
+    )
+
+    result = detect_outliers_with_clusters(data, "latitude", "longitude", "enumerator")
+
+    distance = result["distance_from_centroid"].iloc[-1]
+    _, upper = _fences(result["distance_from_centroid"])
+    assert result["outlier_reason"].iloc[-1] == (
+        f"{distance:,.0f} m from the E01 group center; "
+        f"points in this group are usually within {upper:,.0f} m"
+    )
+    assert result["outlier_reason"].iloc[:-1].isna().all()
+
+
+def test_detect_outliers_with_clusters_reason_close_point_without_group():
+    """A point inside the lower fence gives the usual minimum distance.
+
+    Without a clustering column, the reason refers to all points.
+    """
+    offsets = [1, 3, 21, 30, 33, 34]
+    data = pd.DataFrame(
+        {
+            "latitude": [6.0 + x * 0.001 for x in offsets],
+            "longitude": [-0.18] * len(offsets),
+        }
+    )
+
+    result = detect_outliers_with_clusters(data, "latitude", "longitude", None)
+
+    distance = result["distance_from_centroid"].iloc[2]
+    lower, _ = _fences(result["distance_from_centroid"])
+    assert result["outlier_reason"].iloc[2] == (
+        f"{distance:,.0f} m from the center of all points; "
+        f"points are usually at least {lower:,.0f} m away"
+    )
+
+
+def test_detect_outliers_with_lof_reason():
+    """LOF outliers name the neighbor count and their LOF score."""
+    data = pd.DataFrame(
+        {
+            "latitude": [6.6 + i * 0.001 for i in range(10)] + [7.5],
+            "longitude": [-0.18 + i * 0.001 for i in range(10)] + [-1.0],
+        }
+    )
+
+    result = detect_outliers_with_lof(data, "latitude", "longitude", 5, 0.1)
+
+    reasons = result.loc[result["Outlier"], "outlier_reason"]
+    assert len(reasons) > 0
+    assert reasons.str.fullmatch(
+        r"More isolated than its 5 nearest neighbors \(LOF score \d+\.\d\)"
+    ).all()
+    assert result.loc[~result["Outlier"], "outlier_reason"].isna().all()
+
+
+def test_detect_outliers_with_lof_reason_single_point():
+    """Too few points for LOF still give an empty reason column."""
+    data = pd.DataFrame({"latitude": [6.6], "longitude": [-0.18]})
+
+    result = detect_outliers_with_lof(data, "latitude", "longitude", 5, 0.1)
+
+    assert result["outlier_reason"].isna().all()

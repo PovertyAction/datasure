@@ -54,7 +54,13 @@ def _build_tooltip_config(fields: list[str]) -> dict:
     """
     return {
         "html": "<br>".join([f"<b>{field}:</b> {{{field}}}" for field in fields]),
-        "style": {"backgroundColor": "steelblue", "color": "white"},
+        # Wrap long values (such as an outlier reason) so they stay on the map.
+        "style": {
+            "backgroundColor": "steelblue",
+            "color": "white",
+            "maxWidth": "360px",
+            "whiteSpace": "normal",
+        },
     }
 
 
@@ -444,6 +450,36 @@ def _has_parsed_coords(parsed_data: pl.DataFrame) -> bool:
     return "latitude" in parsed_data.columns and "longitude" in parsed_data.columns
 
 
+# Columns the detection functions add to their input.
+OUTLIER_REASON_COL = "outlier_reason"
+_CLUSTER_OUTPUT_COLUMNS = ("distance_from_centroid", "Outlier", OUTLIER_REASON_COL)
+
+
+def _cluster_reason(
+    distance: float, lower: float, upper: float, group: str | None
+) -> str:
+    """Explain why a point is a cluster outlier.
+
+    Parameters
+    ----------
+    distance : float
+        The point's distance from its group's center, in metres.
+    lower, upper : float
+        The group's IQR fences on that distance.
+    group : str | None
+        The point's group, or None when all points form one group.
+    """
+    if group is None:
+        where, usual = "the center of all points", "points are usually"
+    else:
+        where, usual = f"the {group} group center", "points in this group are usually"
+    if distance > upper:
+        limit = f"within {upper:,.0f} m"
+    else:
+        limit = f"at least {lower:,.0f} m away"
+    return f"{distance:,.0f} m from {where}; {usual} {limit}"
+
+
 # detect outliers using a clustering column
 @st.cache_data
 def detect_outliers_with_clusters(df, gps_lat_col, gps_lon_col, clustering_col):
@@ -464,7 +500,11 @@ def detect_outliers_with_clusters(df, gps_lat_col, gps_lon_col, clustering_col):
     Returns
     -------
     pd.DataFrame
-        The input dataframe with an additional column indicating outliers.
+        The rows with valid coordinates, ordered by group, with
+        ``distance_from_centroid``, ``Outlier`` and ``outlier_reason`` (None
+        for points that are not outliers) added. The clustering column is
+        kept, with missing values shown as "Unknown", unless it has the name
+        of one of those output columns.
     """
     outlier_df = df.copy(deep=True)
     group_col = clustering_col or "dummy_cluster"
@@ -513,22 +553,42 @@ def detect_outliers_with_clusters(df, gps_lat_col, gps_lon_col, clustering_col):
         .with_columns(
             # Groups with fewer than 4 points, or with every point the same
             # distance from the centroid (IQR 0), have no outliers.
+            (q1 - 1.5 * iqr).alias("lower"),
+            (q3 + 1.5 * iqr).alias("upper"),
             pl.when((pl.len().over("group") < 4) | (iqr == 0))
             .then(False)
             .otherwise((distance < q1 - 1.5 * iqr) | (distance > q3 + 1.5 * iqr))
-            .alias("Outlier")
+            .alias("Outlier"),
         )
     )
 
-    # Drop the group column before adding the outputs, so a cluster column
-    # named "Outlier" or "distance_from_centroid" can't take the results
-    # with it. Rows are ordered by group, then by original position: the
-    # shape the former groupby().apply() returned.
-    order = np.argsort(group_codes, kind="stable")
-    outlier_df = outlier_df.drop(columns=group_col).assign(
-        distance_from_centroid=flags["distance"].to_numpy(),
-        Outlier=flags["Outlier"].to_numpy().astype(bool),
+    # Reasons are built only for the outliers, which are few.
+    is_outlier = flags["Outlier"].to_numpy().astype(bool)
+    reasons = np.full(len(flags), None, dtype=object)
+    groups = outlier_df[group_col].astype(str).to_numpy()
+    distances, lowers, uppers = (
+        flags[c].to_numpy() for c in ("distance", "lower", "upper")
     )
+    for i in np.flatnonzero(is_outlier):
+        reasons[i] = _cluster_reason(
+            distances[i],
+            lowers[i],
+            uppers[i],
+            groups[i] if clustering_col else None,
+        )
+
+    # Keep the clustering column so the table and map can show each point's
+    # group. Drop it (and the stand-in group) before adding the outputs, so
+    # a clustering column named like an output can't replace the results.
+    if not clustering_col or clustering_col in _CLUSTER_OUTPUT_COLUMNS:
+        outlier_df = outlier_df.drop(columns=group_col)
+    outlier_df = outlier_df.assign(
+        distance_from_centroid=distances,
+        Outlier=is_outlier,
+        **{OUTLIER_REASON_COL: reasons},
+    )
+    # Rows ordered by group, then by original position.
+    order = np.argsort(group_codes, kind="stable")
     return outlier_df.iloc[order].reset_index(drop=True)
 
 
@@ -554,7 +614,8 @@ def detect_outliers_with_lof(df, gps_lat_col, gps_lon_col, n_neighbors, contamin
     Returns
     -------
     pd.DataFrame
-        The input dataframe with an additional 'Outlier' column indicating GPS outliers.
+        The rows with both coordinates, with ``Outlier`` and ``outlier_reason``
+        (None for points that are not outliers) added.
     """
     # Drop rows with missing latitude or longitude values
     df = df.dropna(subset=[gps_lat_col, gps_lon_col])
@@ -564,6 +625,7 @@ def detect_outliers_with_lof(df, gps_lat_col, gps_lon_col, n_neighbors, contamin
     if n_samples < 2:
         # Not enough data for outlier detection
         df["Outlier"] = False
+        df[OUTLIER_REASON_COL] = None
         return df
 
     # Adjust n_neighbors if necessary
@@ -578,6 +640,17 @@ def detect_outliers_with_lof(df, gps_lat_col, gps_lon_col, n_neighbors, contamin
         n_neighbors=adjusted_n_neighbors, contamination=contamination
     )
     df["Outlier"] = lof.fit_predict(coords) == -1  # LOF assigns -1 to outliers
+
+    # LOF score: how much sparser a point's neighborhood is than its
+    # neighbors' (about 1 for typical points).
+    scores = -lof.negative_outlier_factor_
+    reasons = np.full(n_samples, None, dtype=object)
+    for i in np.flatnonzero(df["Outlier"].to_numpy()):
+        reasons[i] = (
+            f"More isolated than its {adjusted_n_neighbors} nearest neighbors "
+            f"(LOF score {scores[i]:.1f})"
+        )
+    df[OUTLIER_REASON_COL] = reasons
 
     return df
 
