@@ -9,6 +9,31 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Import page around a dataset list** (#461, `views/import_view.py`,
+  `utils/import_ui.py`): the import-log grid and the three popover sections
+  are replaced by a header with **Add dataset**, a **Connections** expander
+  (add and remove a connection, keyring diagnostics; open only while nothing
+  is connected), one bordered row per dataset with a source badge, details,
+  row count, last load and Refresh / Load / Media toggles (Media disabled
+  with a tooltip for local and demo datasets) and an Edit / Remove menu, an
+  All / SurveyCTO / Local filter above 8 datasets, **Load data** with a
+  summary, and a preview with Data | Dictionary tabs. Add and Edit share a
+  `st.dialog` with Source → Connection → Review steps and Back; nothing is
+  written before Review is confirmed. The local-file step checks the path
+  live (exists, supported type, `.xlsx` sheets). Adding still only
+  registers a dataset and Load data still imports.
+  `utils/dataset_list.build_dataset_list` (no Streamlit) turns the import
+  log and load information into the rows, the Load data summary, the filter
+  flag and the empty state. `utils/import_log.py` (no Streamlit) owns
+  writing the import log: `save_local_dataset`, `save_surveycto_dataset`
+  (an edit now also updates `username`), `set_dataset_flag` and
+  `remove_dataset`, plus `record_load` / `get_load_info` over a new
+  `dataset_loads` table in `logs.duckdb` (`duckdb_utils.save_dataset_load`,
+  `load_dataset_load_times`, `delete_dataset_load`, `duckdb_row_counts`);
+  removing a dataset deletes its load record too. Removing a connection now
+  asks first (`confirm_dialog`). The demo's SurveyCTO guidance names the new
+  labels
+
 - **Why a GPS point is an outlier** (#487, `checks/gpschecks/compute.py`):
   `detect_outliers_with_clusters` and `detect_outliers_with_lof` add an
   `outlier_reason` column (None for points that are not outliers), shown in

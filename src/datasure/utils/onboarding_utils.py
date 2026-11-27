@@ -292,19 +292,18 @@ class ImportDemoInfo:
         The sections below connect DataSure to real data sources. Your demo data is
         already imported, so you need no SurveyCTO server or credentials here. Read
         how a live project would import a SurveyCTO form, then scroll down to
-        **Preview Imported Data**.
+        **Preview**.
 
-        1. Under **Manage Credentials**, **Add Credentials** asks for your
+        1. Under **Connections**, **Add connection** asks for your
            **Server name**, **Email address** and **Password**.
            **Connect & Save Credentials** signs in and stores the password in your
            computer's secure keyring, never in the project.
-        2. Under **Import Data From Sources**, **Add Import Configuration** with
-           **Import Type** set to **SurveyCTO** asks you to
-           **Select Server Credentials**, **Select Form ID** and enter an
-           **Alias**, then **Add Form** adds the form to the import log.
+        2. **Add dataset** opens a dialog. Choose **SurveyCTO**, then pick the
+           **Server** and **Form** and enter an **Alias**. **Next: review** shows
+           a summary, and **Add dataset** puts the form on the list.
 
         You can open these forms to look around, but do not click
-        **Connect & Save Credentials** or **Add Form** in the demo.
+        **Connect & Save Credentials** or **Add dataset** in the demo.
     """
 
     @classmethod
@@ -360,7 +359,7 @@ class OnboardingSteps:
         duplicate household IDs, and inconsistent income reporting — exactly the kind
         of issues DataSure is designed to catch.
 
-        **:material/arrow_downward: What to do now:** Scroll down to **Preview Imported Data**,
+        **:material/arrow_downward: What to do now:** Scroll down to **Preview**,
         switch between the **demo_survey** and **demo_backcheck** datasets to explore the data,
         then click **Prepare Your Data** to continue.
         """,

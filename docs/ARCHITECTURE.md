@@ -73,11 +73,16 @@ src/datasure/
 │                           # credentials, SurveyCTO API, UI helpers, ...)
 │   ├── column_references.py #  Where check settings/corrections use columns (no Streamlit)
 │   ├── correction_form.py  #   Shared correction form used across pages
+│   ├── dataset_list.py     #   Import page dataset list view model (no Streamlit)
+│   ├── import_log.py       #   Import log and load records: add, edit, switches,
+│                           #   remove, last load (no Streamlit)
+│   ├── import_ui.py        #   Import page Connections, dataset rows, and the
+│                           #   add/edit/remove dialogs
 │   ├── navigation.py       #   Navigation resolver and status types (no Streamlit)
 │   └── nav_ui.py           #   Shared navigation controls and render wrapper
 └── views/                  # Streamlit pages (top-level page scripts)
     ├── start_view.py       # Project selection/creation
-    ├── import_view.py      # Credentials + data import
+    ├── import_view.py      # Dataset list, Load data and preview
     ├── prep_view.py        # Data preparation
     ├── config_view.py      # Check configuration
     ├── correction_view.py  # Data corrections
@@ -98,7 +103,13 @@ The `archived/` directory holds legacy code and is gitignored.
    holds the field metadata Polars drops; `processing/form_dictionary.py` casts
    raw back to it to build the data dictionary. An ID whose form XML cannot be
    downloaded or parsed, and that is on the server's dataset list, imports as
-   a server dataset CSV instead; any other error fails the import
+   a server dataset CSV instead; any other error fails the import.
+   The page lists one row per dataset in `import_log` (`logs.duckdb`), built by
+   `utils/dataset_list.build_dataset_list`. Adding or editing a dataset (the
+   Source → Connection → Review dialog in `utils/import_ui.py`) only writes its
+   row through `utils/import_log.py`; **Load data** imports the rows marked
+   Load, downloading those marked Refresh, and records each refreshed
+   dataset's load time in `dataset_loads`
 2. **Storage**: per-project DuckDB databases via `utils/duckdb_utils.py`
 3. **Preparation** (`views/prep_view.py` + `processing/prep.py`): Polars
    operations recorded in a prep log for reproducibility
@@ -510,7 +521,8 @@ Per project (UUID-keyed):
   codes `missing_codes_{project_id}`, the Stata names chosen on the
   Replication page `stata_names_{alias}`, and the SurveyCTO form XML
   `form_definitions`: XML and cast Arrow schema, one row per alias and form
-  version), JSON settings
+  version, and `dataset_loads`: each dataset's last load time, shown on the
+  import page), JSON settings
   (including
   each check page's, Prepare Data's and Corrections'
   [view state](#view-state)), and credential metadata
@@ -666,7 +678,7 @@ are never written to disk, logs, or session state.
 
 `keyring_backend_problem()` flags a backend that can't hold credentials safely:
 keyring's "fail" backend (a headless Linux machine with no Secret Service) and
-plaintext file backends. Keyring errors and **Keyring Diagnostics** append its
+plaintext file backends. Keyring errors and **Keyring diagnostics** append its
 explanation, which points to the README's "Running on a server" section for
 selecting an encrypted backend with `PYTHON_KEYRING_BACKEND`.
 

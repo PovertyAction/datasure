@@ -1,5 +1,6 @@
 import logging
 import re
+from datetime import datetime
 from pathlib import Path
 
 import duckdb  # type: ignore
@@ -611,3 +612,69 @@ def load_form_definition(
             [alias],
         ).fetchall()
     return rows[0] if rows else None
+
+
+DATASET_LOADS_TABLE = "dataset_loads"
+
+
+def _ensure_dataset_loads_table(conn: duckdb.DuckDBPyConnection) -> None:
+    conn.execute(
+        f"CREATE TABLE IF NOT EXISTS {DATASET_LOADS_TABLE} "
+        "(alias VARCHAR PRIMARY KEY, loaded_at TIMESTAMP)"
+    )
+
+
+def save_dataset_load(project_id: str, alias: str, loaded_at: datetime) -> None:
+    """Record when a dataset was last loaded, in ``logs`` (one row per alias)."""
+    with duckdb.connect(database_path(project_id, "logs")) as conn:
+        _ensure_dataset_loads_table(conn)
+        conn.execute(
+            f"INSERT OR REPLACE INTO {DATASET_LOADS_TABLE} (alias, loaded_at) "
+            "VALUES (?, ?)",
+            [alias, loaded_at],
+        )
+
+
+def load_dataset_load_times(project_id: str) -> dict[str, datetime]:
+    """Return each dataset's last load time by alias; empty before any load."""
+    if not duckdb_table_exists(project_id, DATASET_LOADS_TABLE, "logs"):
+        return {}
+    with duckdb.connect(database_path(project_id, "logs")) as conn:
+        rows = conn.execute(
+            f"SELECT alias, loaded_at FROM {DATASET_LOADS_TABLE}"
+        ).fetchall()
+    return dict(rows)
+
+
+def delete_dataset_load(project_id: str, alias: str) -> None:
+    """Delete a dataset's load record, if there is one."""
+    if duckdb_table_exists(project_id, DATASET_LOADS_TABLE, "logs"):
+        duckdb_delete_rows(
+            project_id=project_id,
+            alias=DATASET_LOADS_TABLE,
+            db_name="logs",
+            column="alias",
+            value=alias,
+        )
+
+
+def duckdb_row_counts(project_id: str, aliases: list[str], db_name: str) -> dict:
+    """Count the rows of each alias that has a table in ``db_name``.
+
+    Aliases without a table are left out.
+    """
+    with duckdb.connect(database_path(project_id, db_name)) as conn:
+        tables = {
+            name
+            for (name,) in conn.execute(
+                "SELECT table_name FROM information_schema.tables "
+                "WHERE table_schema = 'main'"
+            ).fetchall()
+        }
+        return {
+            alias: conn.execute(
+                f"SELECT COUNT(*) FROM {alias_table(alias)}"
+            ).fetchone()[0]
+            for alias in aliases
+            if alias_table(alias) in tables
+        }
