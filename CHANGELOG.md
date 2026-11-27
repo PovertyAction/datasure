@@ -442,6 +442,17 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Changed
 
+- **GPS distances are vectorized** (#485, `checks/gpschecks/compute.py`):
+  `detect_outliers_with_clusters` and `_calculate_comparison_distances` use
+  the new `haversine_meters` Polars expression instead of geopy's per-row
+  `geodesic`, and the cluster IQR step runs as Polars group expressions
+  (linear quartiles, as pandas). At 100k rows, cluster outliers take 0.09s
+  (were 10.2s) and GPS comparison 0.01s (was 7.2s). Distances are spherical,
+  so they differ from the WGS-84 geodesic by up to about 0.6%; a point right
+  at a threshold or IQR fence can change flag status. Rows with an
+  out-of-range coordinate (`valid_coordinates`) are left out; in the cluster
+  check they used to raise. The output shape is unchanged
+
 - **Breaking, SurveyCTO column types** (#397): columns take the form's types
   instead of `DataProcessor`'s. Integers are `Int64` (were `Float64`), dates
   `Date` (were `Datetime`), numeric select_one codes `Int64` (on a `select1`
@@ -550,6 +561,8 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   prefill the name from the chosen source
 
 ### Removed
+
+- **`geopy` dependency** (#485): replaced by `haversine_meters`
 
 - **`DataProcessor`** and `SurveyCTOConfig.date_format`
   (`connectors/scto.py`): replaced by `surveycto.cast`, which also replaces

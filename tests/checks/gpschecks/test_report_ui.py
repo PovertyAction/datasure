@@ -3,6 +3,7 @@ from unittest.mock import MagicMock, patch
 import numpy as np
 import pandas as pd
 import polars as pl
+import pytest
 
 from datasure.checks.gpschecks.report_ui import (
     _add_gps_column,
@@ -465,6 +466,49 @@ def test_calculate_comparison_distances_success():
     assert "distance_meters" in result.columns
     assert len(result) == 2
     assert (result["distance_meters"] > 0).all()
+
+
+def test_calculate_comparison_distances_matches_geodesic():
+    """Distances stay within 1% of geopy's WGS-84 geodesic."""
+    data = pl.DataFrame(
+        {"lat_1": [5.6037], "lon_1": [-0.1870], "lat_2": [6.6885], "lon_2": [-1.6244]}
+    )
+
+    result = _calculate_comparison_distances(data)
+
+    assert result is not None
+    assert result["distance_meters"].iloc[0] == pytest.approx(199255.178, rel=0.01)
+
+
+def test_calculate_comparison_distances_drops_invalid_coordinates():
+    """Rows with a missing or out-of-range coordinate are left out."""
+    data = pl.DataFrame(
+        {
+            "key": ["ok", "bad_lat", "bad_lon", "missing"],
+            "lat_1": [6.6018, 95.0, 6.6018, None],
+            "lon_1": [-0.1870, -0.1870, -0.1870, -0.1870],
+            "lat_2": [6.6019, 6.6019, 6.6019, 6.6019],
+            "lon_2": [-0.1871, -0.1871, 181.0, -0.1871],
+        }
+    )
+
+    result = _calculate_comparison_distances(data)
+
+    assert result is not None
+    assert result["key"].tolist() == ["ok"]
+
+
+@patch("datasure.checks.gpschecks.report_ui.st.warning")
+def test_calculate_comparison_distances_all_out_of_range(mock_warning):
+    """Only out-of-range coordinates gives None and a warning."""
+    data = pl.DataFrame(
+        {"lat_1": [95.0], "lon_1": [0.0], "lat_2": [0.0], "lon_2": [0.0]}
+    )
+
+    result = _calculate_comparison_distances(data)
+
+    assert result is None
+    mock_warning.assert_called_once()
 
 
 @patch("datasure.checks.gpschecks.report_ui.st.warning")

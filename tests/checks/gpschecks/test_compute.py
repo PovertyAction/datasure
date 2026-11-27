@@ -15,7 +15,9 @@ from datasure.checks.gpschecks.compute import (
     calculate_gps_accuracy_statistics,
     detect_outliers_with_clusters,
     detect_outliers_with_lof,
+    haversine_meters,
     load_default_gpschecks_settings,
+    valid_coordinates,
 )
 from datasure.models.enums import DelimiterType, GPSFormatType
 from datasure.models.schemas import GPSSettings
@@ -763,3 +765,144 @@ def test_detect_outliers_with_lof_single_point():
     result = detect_outliers_with_lof(data, "latitude", "longitude", 5, 0.1)
     assert "Outlier" in result.columns
     assert not result["Outlier"].iloc[0]
+
+
+# =============================================================================
+# Tests for vectorized distances (haversine_meters, valid_coordinates)
+# =============================================================================
+
+# Reference distances from geopy's WGS-84 ``geodesic``, which these replaced.
+# Haversine on a sphere stays within 1% of them.
+GEODESIC_REFERENCE = [
+    ((5.6037, -0.1870), (6.6885, -1.6244), 199255.178),
+    ((6.6018, -0.1870), (6.6019, -0.1871), 15.639),
+    ((0.0, 0.0), (0.0, 1.0), 111319.491),
+    ((60.0, 10.0), (60.5, 11.0), 78548.887),
+]
+
+
+@pytest.mark.parametrize(("start", "end", "expected"), GEODESIC_REFERENCE)
+def test_haversine_meters_within_one_percent_of_geodesic(start, end, expected):
+    """Haversine distances stay within 1% of the WGS-84 geodesic."""
+    points = pl.DataFrame(
+        {"lat_1": [start[0]], "lon_1": [start[1]], "lat_2": [end[0]], "lon_2": [end[1]]}
+    )
+
+    result = points.select(haversine_meters("lat_1", "lon_1", "lat_2", "lon_2"))
+
+    assert result.item() == pytest.approx(expected, rel=0.01)
+
+
+def test_haversine_meters_same_point_is_zero():
+    """A point is zero metres from itself."""
+    points = pl.DataFrame({"lat": [6.6018], "lon": [-0.1870]})
+
+    result = points.select(haversine_meters("lat", "lon", "lat", "lon"))
+
+    assert result.item() == 0.0
+
+
+def test_valid_coordinates_rejects_out_of_range_and_missing():
+    """Only latitudes in [-90, 90] and longitudes in [-180, 180] are valid."""
+    points = pl.DataFrame(
+        {
+            "lat": [6.6, 90.0, -90.0, 95.0, 6.6, None, float("nan")],
+            "lon": [-0.18, 180.0, -180.0, -0.18, 181.0, -0.18, -0.18],
+        }
+    )
+
+    result = points.select(valid_coordinates("lat", "lon").fill_null(False))
+
+    assert result.to_series().to_list() == [
+        True,
+        True,
+        True,
+        False,
+        False,
+        False,
+        False,
+    ]
+
+
+# =============================================================================
+# Tests for detect_outliers_with_clusters behaviour pinned before the Polars port
+# =============================================================================
+
+
+def test_detect_outliers_with_clusters_uses_linear_quartiles():
+    """Quartiles interpolate linearly, as pandas does.
+
+    On one meridian, distances from the centroid are proportional to the
+    latitude offsets. With these offsets, linear quartiles flag the third
+    point as a low outlier; nearest-rank quartiles would flag nothing.
+    """
+    offsets = [1, 3, 21, 30, 33, 34]
+    data = pd.DataFrame(
+        {
+            "latitude": [6.0 + x * 0.001 for x in offsets],
+            "longitude": [-0.18] * len(offsets),
+        }
+    )
+
+    result = detect_outliers_with_clusters(data, "latitude", "longitude", None)
+
+    assert result["Outlier"].tolist() == [False, False, True, False, False, False]
+
+
+def test_detect_outliers_with_clusters_output_shape():
+    """Rows are ordered by cluster, the cluster column is dropped, index is reset.
+
+    Missing cluster values form their own "Unknown" group.
+    """
+    data = pd.DataFrame(
+        {
+            "id": [1, 2, 3, 4, 5],
+            "team": ["B", "A", None, "B", "A"],
+            "latitude": [6.60, 6.61, 6.62, 6.63, 6.64],
+            "longitude": [-0.1] * 5,
+        }
+    )
+
+    result = detect_outliers_with_clusters(data, "latitude", "longitude", "team")
+
+    assert result["id"].tolist() == [2, 5, 1, 4, 3]
+    assert list(result.columns) == [
+        "id",
+        "latitude",
+        "longitude",
+        "distance_from_centroid",
+        "Outlier",
+    ]
+    assert result.index.tolist() == [0, 1, 2, 3, 4]
+    # The lone "Unknown" point is its own centroid.
+    assert result["distance_from_centroid"].iloc[-1] == 0.0
+    assert result["Outlier"].dtype == bool
+
+
+def test_detect_outliers_with_clusters_distance_matches_geodesic():
+    """Distances from the centroid stay within 1% of the geodesic."""
+    data = pd.DataFrame(
+        {"latitude": [0.0, 0.0], "longitude": [0.0, 2.0]},
+    )
+
+    result = detect_outliers_with_clusters(data, "latitude", "longitude", None)
+
+    # The centroid is (0, 1): each point is one degree of longitude away.
+    assert result["distance_from_centroid"].tolist() == pytest.approx(
+        [111319.491, 111319.491], rel=0.01
+    )
+
+
+def test_detect_outliers_with_clusters_drops_out_of_range_coordinates():
+    """Out-of-range coordinates are left out instead of raising."""
+    data = pd.DataFrame(
+        {
+            "id": [1, 2, 3, 4],
+            "latitude": [6.60, 95.0, 6.61, 6.62],
+            "longitude": [-0.1, -0.1, 200.0, -0.1],
+        }
+    )
+
+    result = detect_outliers_with_clusters(data, "latitude", "longitude", None)
+
+    assert result["id"].tolist() == [1, 4]

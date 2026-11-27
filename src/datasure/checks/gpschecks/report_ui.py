@@ -7,7 +7,6 @@ from typing import TYPE_CHECKING, Any
 import polars as pl
 import pydeck
 import streamlit as st
-from geopy.distance import geodesic
 from pydantic import ValidationError
 
 if TYPE_CHECKING:
@@ -27,6 +26,8 @@ from datasure.checks.gpschecks.compute import (
     detect_outliers_with_lof,
     find_gps_columns,
     has_usable_gps_config,
+    haversine_meters,
+    valid_coordinates,
 )
 from datasure.checks.gpschecks.models import MAPBOX_STYLE
 from datasure.checks.gpschecks.review import (
@@ -1722,31 +1723,25 @@ def _merge_parsed_gps_data(
 def _calculate_comparison_distances(
     comparison_data: pl.DataFrame,
 ) -> pd.DataFrame | None:
-    """Calculate geodesic distances and return a pandas DataFrame.
+    """Calculate haversine distances (metres) and return a pandas DataFrame.
 
     Returns
     -------
     pd.DataFrame | None
         DataFrame with ``distance_meters`` column, or None if calculation fails.
     """
-    comparison_df = comparison_data.to_pandas()
+    # Rows with a missing or out-of-range coordinate are left out.
+    comparison = comparison_data.filter(
+        valid_coordinates("lat_1", "lon_1") & valid_coordinates("lat_2", "lon_2")
+    ).with_columns(
+        haversine_meters("lat_1", "lon_1", "lat_2", "lon_2").alias("distance_meters")
+    )
 
-    def _row_distance(row):
-        try:
-            return geodesic(
-                (row["lat_1"], row["lon_1"]), (row["lat_2"], row["lon_2"])
-            ).meters
-        except Exception:
-            return None
-
-    comparison_df["distance_meters"] = comparison_df.apply(_row_distance, axis=1)
-    comparison_df = comparison_df.dropna(subset=["distance_meters"])
-
-    if comparison_df.empty:
+    if comparison.is_empty():
         st.warning("Unable to calculate distances between GPS coordinates.")
         return None
 
-    return comparison_df
+    return comparison.to_pandas()
 
 
 def _display_comparison_summary(
