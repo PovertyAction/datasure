@@ -280,6 +280,27 @@ The **⋮** menu on each row has:
   imported, prepared and corrected data, and any stored SurveyCTO form
   definitions. The source file or form isn't changed
 
+#### Loading Data
+
+**Load data** imports every dataset marked Load. A status box shows which
+dataset is loading and what it's doing, for example "Loading 2 of 4:
+household_survey · downloading from SurveyCTO", with a bar for the whole
+batch. Media files show their own bar while they download.
+
+As each dataset finishes, the box adds a line for it:
+
+- a SurveyCTO form shows its rows and how many are new, for example
+  "1,284 rows (38 new) · 12 s"
+- a local file shows its rows and says it was re-read from the file
+- a dataset with Refresh off keeps the copy already imported
+- a dataset that fails shows why, for example a sign-in or file problem.
+  The other datasets still load, and the failed one keeps its last
+  imported copy
+
+The box ends with a summary, such as "Loaded 3 of 4 datasets · 1 failed".
+It stays open when something failed and folds away when everything loaded.
+The rows above then show the new last-loaded times.
+
 #### Preview Imported Data
 
 Pick an imported dataset under **Dataset** to see:

@@ -55,7 +55,9 @@ def _module_patches(overrides: dict | None = None):
         return patch(target, **kwargs)
 
     return (
-        _p("datasure.connectors.local.load_local_data"),
+        _p("datasure.connectors.local.import_local_file", return_value=3),
+        _p("datasure.connectors.scto.SurveyCTOClient"),
+        _p("datasure.utils.duckdb_utils.duckdb_row_counts", return_value={}),
         _p("datasure.utils.duckdb_utils.duckdb_get_aliases", return_value=[]),
         _p("datasure.utils.duckdb_utils.duckdb_get_table", return_value=pl.DataFrame()),
         _p("datasure.utils.duckdb_utils.duckdb_get_imported_datasets", return_value=[]),
@@ -357,35 +359,97 @@ class TestLoadRawDatasets:
 
 
 class TestProcessImportLog:
-    """Test per-row processing with status updates."""
+    """Loading every dataset marked Load, with one status line each."""
 
-    def test_processes_each_row(self):
+    def _results(self, *aliases, failed=()):
+        from datasure.utils.dataset_list import LoadResult
+
+        return [
+            (
+                LoadResult(
+                    alias=a,
+                    source="local storage",
+                    refreshed=True,
+                    error="boom" if a in failed else None,
+                    rows=None if a in failed else 3,
+                ),
+                [],
+            )
+            for a in aliases
+        ]
+
+    def test_processes_each_row_and_returns_their_results(self):
         log = _import_log_df([{"alias": "a"}, {"alias": "b"}])
-        with patch.object(import_view, "_process_single_import") as mock_single:
+        with patch.object(
+            import_view,
+            "_process_single_import",
+            side_effect=self._results("a", "b"),
+        ) as mock_single:
+            results = import_view._process_import_log("test_project", log)
+
+        processed = [call.args[1]["alias"] for call in mock_single.call_args_list]
+        assert processed == ["a", "b"]
+        assert [r.alias for r in results] == ["a", "b"]
+
+    def test_status_ends_complete_when_every_dataset_loaded(self):
+        log = _import_log_df([{"alias": "a"}, {"alias": "b"}])
+        _st.status.reset_mock()
+        with patch.object(
+            import_view,
+            "_process_single_import",
+            side_effect=self._results("a", "b"),
+        ):
             import_view._process_import_log("test_project", log)
 
-        assert mock_single.call_count == 2
-        processed_aliases = [
-            call.args[1]["alias"] for call in mock_single.call_args_list
-        ]
-        assert processed_aliases == ["a", "b"]
+        status = _st.status.return_value.__enter__.return_value
+        final = status.update.call_args.kwargs
+        assert final == {
+            "label": "Loaded 2 datasets",
+            "state": "complete",
+            "expanded": False,
+        }
+
+    def test_status_ends_in_error_and_stays_open_when_one_failed(self):
+        log = _import_log_df([{"alias": "a"}, {"alias": "b"}])
+        _st.status.reset_mock()
+        with patch.object(
+            import_view,
+            "_process_single_import",
+            side_effect=self._results("a", "b", failed={"b"}),
+        ):
+            import_view._process_import_log("test_project", log)
+
+        status = _st.status.return_value.__enter__.return_value
+        final = status.update.call_args.kwargs
+        assert final == {
+            "label": "Loaded 1 of 2 datasets · 1 failed",
+            "state": "error",
+            "expanded": True,
+        }
 
 
 class TestProcessSingleImport:
-    """Test the refresh gate and session-state registration."""
+    """One dataset's load: the refresh gate, failures and its result."""
 
     def test_refresh_true_loads_dataset(self):
         row = {"refresh": True, "alias": "survey", "source": "local storage"}
         with (
-            patch.object(import_view, "_load_dataset_by_source") as mock_load,
-            patch.object(import_view, "_refresh_downstream_data") as mock_refresh,
+            patch.object(
+                import_view, "_load_dataset_by_source", return_value=3
+            ) as mock_load,
+            patch.object(
+                import_view, "_refresh_downstream_data", return_value=[]
+            ) as mock_refresh,
             patch.object(import_view, "_add_to_session_state") as mock_add,
+            patch.object(import_view, "duckdb_row_counts", return_value={"survey": 3}),
         ):
-            import_view._process_single_import("test_project", row)
+            result, failures = import_view._process_single_import("test_project", row)
 
         mock_load.assert_called_once_with("test_project", row)
         mock_refresh.assert_called_once_with("test_project", "survey")
         mock_add.assert_called_once_with("survey")
+        assert (result.ok, result.refreshed, result.rows) == (True, True, 3)
+        assert failures == []
 
     def test_refresh_false_skips_load_but_registers(self):
         row = {"refresh": False, "alias": "survey", "source": "local storage"}
@@ -394,11 +458,72 @@ class TestProcessSingleImport:
             patch.object(import_view, "_refresh_downstream_data") as mock_refresh,
             patch.object(import_view, "_add_to_session_state") as mock_add,
         ):
-            import_view._process_single_import("test_project", row)
+            result, _ = import_view._process_single_import("test_project", row)
 
         mock_load.assert_not_called()
         mock_refresh.assert_not_called()
         mock_add.assert_called_once_with("survey")
+        assert result.refreshed is False
+
+    def test_a_failed_load_is_reported_not_raised_and_skips_reapplying(self):
+        row = {"refresh": True, "alias": "survey", "source": "SurveyCTO"}
+        with (
+            patch.object(
+                import_view,
+                "_load_dataset_by_source",
+                side_effect=ConnectionError("couldn't sign in"),
+            ),
+            patch.object(import_view, "_refresh_downstream_data") as mock_refresh,
+            patch.object(import_view, "_record_load") as mock_record,
+            patch.object(import_view, "_add_to_session_state"),
+        ):
+            result, failures = import_view._process_single_import("test_project", row)
+
+        assert result.ok is False
+        assert result.error == "couldn't sign in"
+        mock_refresh.assert_not_called()
+        mock_record.assert_not_called()
+        assert failures == []
+
+    def test_surveycto_result_counts_new_rows(self):
+        row = {"refresh": True, "alias": "survey", "source": "SurveyCTO"}
+        with (
+            patch.object(import_view, "_load_dataset_by_source", return_value=38),
+            patch.object(import_view, "_refresh_downstream_data", return_value=[]),
+            patch.object(import_view, "_add_to_session_state"),
+            patch.object(
+                import_view, "duckdb_row_counts", return_value={"survey": 1284}
+            ),
+        ):
+            result, _ = import_view._process_single_import("test_project", row)
+
+        assert (result.rows, result.new_rows) == (1284, 38)
+
+    def test_reports_each_stage(self):
+        row = {"refresh": True, "alias": "survey", "source": "SurveyCTO"}
+        stages = []
+        with (
+            patch.object(import_view, "_load_dataset_by_source", return_value=1),
+            patch.object(import_view, "_refresh_downstream_data", return_value=[]),
+            patch.object(import_view, "_add_to_session_state"),
+        ):
+            import_view._process_single_import("test_project", row, stages.append)
+
+        assert stages == [
+            "downloading from SurveyCTO",
+            "reapplying prep and corrections",
+        ]
+
+    def test_demo_rows_are_not_refreshed(self):
+        row = {"refresh": True, "alias": "demo_survey", "source": "Demo Data"}
+        with (
+            patch.object(import_view, "_load_dataset_by_source") as mock_load,
+            patch.object(import_view, "_add_to_session_state"),
+        ):
+            result, _ = import_view._process_single_import("test_project", row)
+
+        mock_load.assert_not_called()
+        assert result.refreshed is False
 
 
 class TestRefreshDownstreamData:
@@ -451,42 +576,35 @@ class TestLoadDatasetBySource:
 
     def test_local_storage_dispatch(self):
         row = {"source": "local storage"}
-        with (
-            patch.object(import_view, "_load_from_local_storage") as mock_local,
-            patch.object(import_view, "_load_from_surveycto") as mock_scto,
-        ):
-            import_view._load_dataset_by_source("test_project", row)
+        local, scto = MagicMock(return_value=3), MagicMock()
+        loaders = {"local storage": local, "SurveyCTO": scto}
+        with patch.dict(import_view._LOADERS, loaders):
+            assert import_view._load_dataset_by_source("test_project", row) == 3
 
-        mock_local.assert_called_once_with("test_project", row)
-        mock_scto.assert_not_called()
+        local.assert_called_once_with("test_project", row)
+        scto.assert_not_called()
 
     def test_surveycto_dispatch(self):
         row = {"source": "SurveyCTO"}
-        with (
-            patch.object(import_view, "_load_from_local_storage") as mock_local,
-            patch.object(import_view, "_load_from_surveycto") as mock_scto,
-        ):
-            import_view._load_dataset_by_source("test_project", row)
+        local, scto = MagicMock(), MagicMock(return_value=38)
+        loaders = {"local storage": local, "SurveyCTO": scto}
+        with patch.dict(import_view._LOADERS, loaders):
+            assert import_view._load_dataset_by_source("test_project", row) == 38
 
-        mock_scto.assert_called_once_with("test_project", row)
-        mock_local.assert_not_called()
+        scto.assert_called_once_with("test_project", row)
+        local.assert_not_called()
 
     def test_unknown_source_is_noop(self):
-        row = {"source": "ftp"}
-        with (
-            patch.object(import_view, "_load_from_local_storage") as mock_local,
-            patch.object(import_view, "_load_from_surveycto") as mock_scto,
-        ):
-            import_view._load_dataset_by_source("test_project", row)
-
-        mock_local.assert_not_called()
-        mock_scto.assert_not_called()
+        assert (
+            import_view._load_dataset_by_source("test_project", {"source": "ftp"})
+            is None
+        )
 
 
 class TestLoadFromSurveycto:
     """Test SurveyCTO download invocation."""
 
-    def test_downloads_with_form_config(self):
+    def test_imports_with_form_config_and_returns_new_rows(self):
         row = {
             "alias": "svy",
             "form_id": "form_1",
@@ -497,16 +615,15 @@ class TestLoadFromSurveycto:
             "attachments": False,
             "refresh": True,
         }
-        with patch.object(import_view, "download_forms") as mock_download:
-            import_view._load_from_surveycto("test_project", row)
+        with patch.object(import_view, "SurveyCTOClient") as mock_client:
+            mock_client.return_value.import_data.return_value = 38
+            new_rows = import_view._load_from_surveycto("test_project", row)
 
-        mock_download.assert_called_once()
-        kwargs = mock_download.call_args.kwargs
-        assert kwargs["project_id"] == "test_project"
-        configs = kwargs["form_configs"]
-        assert len(configs) == 1
-        assert isinstance(configs[0], FormConfig)
-        assert configs[0].form_id == "form_1"
+        assert new_rows == 38
+        mock_client.assert_called_once_with("test_project")
+        (config,) = mock_client.return_value.import_data.call_args.args
+        assert isinstance(config, FormConfig)
+        assert config.form_id == "form_1"
 
 
 class TestLoadFromLocalStorage:
@@ -518,8 +635,10 @@ class TestLoadFromLocalStorage:
             "filename": "C:/data/survey.csv",
             "sheet_name": "Sheet1",
         }
-        with patch.object(import_view, "load_local_data") as mock_load:
-            import_view._load_from_local_storage("test_project", row)
+        with patch.object(
+            import_view, "import_local_file", return_value=3
+        ) as mock_load:
+            assert import_view._load_from_local_storage("test_project", row) == 3
 
         mock_load.assert_called_once_with(
             project_id="test_project",
@@ -530,7 +649,7 @@ class TestLoadFromLocalStorage:
 
     def test_blank_sheet_name_becomes_none(self):
         row = {"alias": "svy", "filename": "C:/data/survey.csv", "sheet_name": ""}
-        with patch.object(import_view, "load_local_data") as mock_load:
+        with patch.object(import_view, "import_local_file") as mock_load:
             import_view._load_from_local_storage("test_project", row)
 
         assert mock_load.call_args.kwargs["sheet_name"] is None

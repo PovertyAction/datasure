@@ -9,6 +9,22 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Load data progress** (`views/import_view.py`,
+  `utils/dataset_list.py`): one `st.status` for the whole load, whose label
+  names the dataset and stage ("Loading 2 of 4: household_survey ·
+  downloading from SurveyCTO"), with one progress bar for the batch and one
+  line per dataset (rows, new SurveyCTO rows, time, or the error).
+  `LoadResult`, `result_line` and `load_outcome` (no Streamlit) build the
+  lines and the final label; the status ends in the error state, and open,
+  when any dataset failed, instead of always saying "Data loaded
+  successfully!". A failed dataset no longer stops the batch or rebuilds
+  its prep and corrected data, and keeps its imported copy. The page calls
+  `SurveyCTOClient.import_data` and the new `connectors/local.import_local_file`
+  (which raises `LocalImportError` and returns the row count) instead of
+  `download_forms` and `load_local_data`, which keep their messages for the
+  project bundle import. `local.read_data_file` is the raising reader behind
+  `load_data_efficiently`. Media download bars clear when a field finishes
+
 - **Import page around a dataset list** (#461, `views/import_view.py`,
   `utils/import_ui.py`): the import-log grid and the three popover sections
   are replaced by a header with **Add dataset**, a **Connections** expander

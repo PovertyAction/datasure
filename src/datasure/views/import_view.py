@@ -1,24 +1,29 @@
+import logging
+import time
+from collections.abc import Callable
+
 import polars as pl
 import streamlit as st
 
-from datasure.connectors.local import load_local_data
-from datasure.connectors.scto import (
-    FormConfig,
-    download_forms,
-)
+from datasure.connectors.local import import_local_file
+from datasure.connectors.scto import FormConfig, SurveyCTOClient
 from datasure.processing.corrections import CorrectionProcessor
 from datasure.processing.prep import prep_apply_action
 from datasure.utils.dataset_list import (
     LOCAL_SOURCE,
     SOURCE_FILTERS,
     SURVEYCTO_SOURCE,
+    LoadResult,
     build_dataset_list,
     filter_rows,
+    load_outcome,
+    result_line,
 )
 from datasure.utils.duckdb_utils import (
     duckdb_get_aliases,
     duckdb_get_imported_datasets,
     duckdb_get_table,
+    duckdb_row_counts,
     duckdb_table_exists,
 )
 from datasure.utils.import_log import dataset_entry, get_load_info, record_load
@@ -51,6 +56,8 @@ from datasure.utils.ui_utils import (
     section_header,
     show_queued_notices,
 )
+
+logger = logging.getLogger(__name__)
 
 # --- CONFIGURE PAGE --- #
 # Page title and layout are set globally in app.py via st.set_page_config; the
@@ -88,25 +95,23 @@ if "st_prep_dataset_list" not in st.session_state:
     st.session_state.st_prep_dataset_list = None
 
 
+def _datasets_caption(count: int) -> str:
+    return f"{count} dataset" if count == 1 else f"{count} datasets"
+
+
 # --- Load raw dataset list from import configurations --- #
-def load_raw_datasets(project_id: str) -> None:
-    """Load raw dataset list from the cache file.
+def load_raw_datasets(project_id: str) -> list[LoadResult]:
+    """Load the datasets marked Load, refreshing those marked Refresh.
 
-    PARAMS:
-    -------
-    project_id: str : project ID
-
-    Returns
-    -------
-    None
+    Returns one result per dataset; empty when nothing is marked Load.
     """
     import_log = _get_filtered_import_log(project_id)
 
     if import_log.is_empty():
         st.error("No import configurations found. Please add import configurations.")
-        return
+        return []
 
-    _process_import_log(project_id, import_log)
+    return _process_import_log(project_id, import_log)
 
 
 def _get_filtered_import_log(project_id: str) -> pl.DataFrame:
@@ -119,31 +124,80 @@ def _get_filtered_import_log(project_id: str) -> pl.DataFrame:
     return import_log.filter(pl.col("load"))
 
 
-def _process_import_log(project_id: str, import_log: pl.DataFrame) -> None:
-    """Process all rows in import log with status updates."""
+def _process_import_log(project_id: str, import_log: pl.DataFrame) -> list[LoadResult]:
+    """Load each dataset, showing which one is loading and how each went."""
+    rows = list(import_log.iter_rows(named=True))
+    total = len(rows)
+    results: list[LoadResult] = []
     all_failures: list[ReapplyFailure] = []
-    with st.status("Loading datasets ...", expanded=True) as status:
-        for row in import_log.iter_rows(named=True):
-            all_failures.extend(_process_single_import(project_id, row))
-        status.update(
-            label="Data loaded successfully!", state="complete", expanded=True
-        )
+    with st.status(f"Loading {_datasets_caption(total)}...", expanded=True) as status:
+        progress = st.progress(0.0)
+        for index, row in enumerate(rows):
+            prefix = f"Loading {index + 1} of {total}: {row['alias']}"
+
+            def report(stage: str, prefix: str = prefix) -> None:
+                status.update(label=f"{prefix} · {stage}")
+
+            progress.progress(index / total, text=prefix)
+            result, failures = _process_single_import(project_id, row, report)
+            results.append(result)
+            all_failures.extend(failures)
+            st.markdown(result_line(result))
+        progress.empty()
+        label, state = load_outcome(results)
+        # Collapse when all went well; the rows above show the new loads.
+        status.update(label=label, state=state, expanded=state == "error")
     warn_reapply_failures(
         all_failures,
         "Some downstream data could not be fully reapplied after import",
     )
+    return results
 
 
-def _process_single_import(project_id: str, row: dict) -> list[ReapplyFailure]:
-    """Process a single import configuration row."""
+def _no_report(_stage: str) -> None:
+    """Default stage reporter: say nothing."""
+
+
+def _process_single_import(
+    project_id: str, row: dict, report: Callable[[str], None] = _no_report
+) -> tuple[LoadResult, list[ReapplyFailure]]:
+    """Load one dataset; return how it went and any steps not reapplied.
+
+    A dataset that fails to load is reported and skipped, so the others
+    still load, and its imported copy is left as it was.
+    """
+    alias = row["alias"]
+    refreshed = bool(row["refresh"]) and row["source"] in _LOADERS
     failures: list[ReapplyFailure] = []
-    if row["refresh"]:
-        _load_dataset_by_source(project_id, row)
-        _record_load(project_id, row["alias"])
-        failures = _refresh_downstream_data(project_id, row["alias"])
+    error = None
+    new_rows = None
+    started = time.monotonic()
+    if refreshed:
+        report(_STAGE_LABELS[row["source"]])
+        try:
+            new_rows = _load_dataset_by_source(project_id, row)
+        except Exception as e:
+            # UI boundary: one failed dataset must not stop the batch, but
+            # the traceback has to land in the logs.
+            logger.exception("Failed to load dataset %s", alias)
+            error = str(e) or type(e).__name__
+        else:
+            _record_load(project_id, alias)
+            report("reapplying prep and corrections")
+            failures = _refresh_downstream_data(project_id, alias)
 
-    _add_to_session_state(row["alias"])
-    return failures
+    _add_to_session_state(alias)
+    result = LoadResult(
+        alias=alias,
+        source=row["source"],
+        refreshed=refreshed,
+        error=error,
+        rows=duckdb_row_counts(project_id, [alias], "raw").get(alias),
+        new_rows=new_rows if row["source"] == SURVEYCTO_SOURCE else None,
+        seconds=time.monotonic() - started,
+        reapply_failures=len(failures),
+    )
+    return result, failures
 
 
 def _record_load(project_id: str, alias: str) -> None:
@@ -171,17 +225,19 @@ def _refresh_downstream_data(project_id: str, alias: str) -> list[ReapplyFailure
     return failures
 
 
-def _load_dataset_by_source(project_id: str, row: dict) -> None:
-    """Load dataset based on source type."""
-    if row["source"] == LOCAL_SOURCE:
-        _load_from_local_storage(project_id, row)
-    elif row["source"] == SURVEYCTO_SOURCE:
-        _load_from_surveycto(project_id, row)
+def _load_dataset_by_source(project_id: str, row: dict) -> int | None:
+    """Load a dataset from its source; return the rows it imported or added.
+
+    Raises when the dataset can't be loaded. Other sources (the demo
+    datasets) aren't loaded and return ``None``.
+    """
+    loader = _LOADERS.get(row["source"])
+    return loader(project_id, row) if loader else None
 
 
-def _load_from_local_storage(project_id: str, row: dict) -> None:
-    """Load dataset from local storage."""
-    load_local_data(
+def _load_from_local_storage(project_id: str, row: dict) -> int:
+    """Read a dataset's local file; return its row count."""
+    return import_local_file(
         project_id=project_id,
         alias=row["alias"],
         filename=row["filename"],
@@ -189,13 +245,19 @@ def _load_from_local_storage(project_id: str, row: dict) -> None:
     )
 
 
-def _load_from_surveycto(project_id: str, row: dict) -> None:
-    """Load dataset from SurveyCTO."""
-    form_configs = _create_form_config(row)
-    download_forms(
-        project_id=project_id,
-        form_configs=[form_configs],
-    )
+def _load_from_surveycto(project_id: str, row: dict) -> int:
+    """Download a dataset's SurveyCTO form; return how many rows it added."""
+    return SurveyCTOClient(project_id).import_data(_create_form_config(row))
+
+
+_LOADERS = {
+    LOCAL_SOURCE: _load_from_local_storage,
+    SURVEYCTO_SOURCE: _load_from_surveycto,
+}
+_STAGE_LABELS = {
+    LOCAL_SOURCE: "reading the file",
+    SURVEYCTO_SOURCE: "downloading from SurveyCTO",
+}
 
 
 def _create_form_config(row: dict) -> FormConfig:
@@ -236,10 +298,6 @@ def _percent_missing(data: pl.DataFrame) -> float:
     if total_cells == 0:
         return 0.0
     return data.null_count().sum_horizontal().item() / total_cells * 100
-
-
-def _datasets_caption(count: int) -> str:
-    return f"{count} dataset" if count == 1 else f"{count} datasets"
 
 
 def _edit_dataset(alias: str) -> None:
@@ -359,12 +417,13 @@ else:
         summary_slot = st.empty()
 
     if load_btn:
-        load_raw_datasets(project_id)
+        results = load_raw_datasets(project_id)
         st.session_state.st_prep_dataset_list = duckdb_get_imported_datasets(project_id)
-        st.success(
-            "Data loaded. Preview it below, then prepare it on the Prep page.",
-            icon=":material/check_circle:",
-        )
+        if results and all(result.ok for result in results):
+            st.success(
+                "Data loaded. Preview it below, then prepare it on the Prep page.",
+                icon=":material/check_circle:",
+            )
 
     aliases = import_log["alias"].to_list()
     dataset_list = build_dataset_list(import_log, get_load_info(project_id, aliases))

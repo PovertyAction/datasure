@@ -707,3 +707,42 @@ class TestGetFileInfo:
         info = get_file_info("some_path")
 
         assert info["exists"] is False
+
+
+class TestImportLocalFile:
+    """import_local_file: the Load data path, which raises instead of printing."""
+
+    @pytest.fixture(autouse=True)
+    def project_dirs(self, isolated_cache):
+        (isolated_cache / "proj" / "data").mkdir(parents=True)
+
+    def test_saves_the_file_to_raw_and_returns_its_rows(self, tmp_path):
+        from datasure.connectors.local import import_local_file
+        from datasure.utils.duckdb_utils import duckdb_get_table
+
+        path = tmp_path / "survey.csv"
+        path.write_text("a,b\n1,2\n3,4\n5,6\n")
+
+        rows = import_local_file("proj", "survey", str(path))
+
+        assert rows == 3
+        assert duckdb_get_table("proj", "survey", "raw").height == 3
+
+    def test_a_missing_file_raises(self, tmp_path):
+        from datasure.connectors.local import LocalImportError, import_local_file
+
+        with pytest.raises(LocalImportError, match=r"nope\.csv"):
+            import_local_file("proj", "survey", str(tmp_path / "nope.csv"))
+
+    def test_an_empty_file_raises_and_keeps_the_old_data(self, tmp_path):
+        from datasure.connectors.local import LocalImportError, import_local_file
+        from datasure.utils.duckdb_utils import duckdb_get_table
+
+        path = tmp_path / "survey.csv"
+        path.write_text("a\n1\n")
+        import_local_file("proj", "survey", str(path))
+        path.write_text("")
+
+        with pytest.raises(LocalImportError, match=r"survey\.csv"):
+            import_local_file("proj", "survey", str(path))
+        assert duckdb_get_table("proj", "survey", "raw").height == 1

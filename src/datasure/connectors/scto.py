@@ -367,6 +367,8 @@ class MediaDownloader:
                 )
             except (SurveyCTOAPIError, OSError):
                 self.logger.exception(f"Failed to download {col} for {row['KEY']}")
+        # The dataset's line in the load status says how it went.
+        progress_bar.empty()
 
     def _download_single_file(
         self,

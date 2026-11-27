@@ -121,8 +121,40 @@ def get_excel_sheet_names(file_path: str) -> list[str]:
         return []
 
 
+class LocalImportError(Exception):
+    """A local file couldn't be read into the project; the message says why."""
+
+
+def read_data_file(filename: str, sheet_name: str | None = None) -> pl.DataFrame:
+    """Read a local data file with Polars.
+
+    Raises
+    ------
+    OSError, ValueError, pl.exceptions.PolarsError
+        When the file can't be read or its type isn't supported.
+    """
+    file_ext = Path(filename).suffix.lower()
+    if file_ext == ".csv":
+        # Polars CSV reader is much faster than pandas
+        return pl.read_csv(
+            filename,
+            encoding="utf8-lossy",  # More robust encoding handling
+            ignore_errors=True,  # Continue reading despite minor errors
+            infer_schema_length=10000,  # Better type inference
+        )
+    if file_ext == ".xlsx":
+        return pl.read_excel(filename, sheet_name=sheet_name, engine="openpyxl")
+    if file_ext == ".json":
+        return pl.read_json(filename)
+    if file_ext == ".dta":
+        return scan_readstat(filename).collect()
+    if file_ext == ".parquet":
+        return pl.read_parquet(filename)
+    raise ValueError(f"Unsupported file format: {file_ext}")
+
+
 def load_data_efficiently(filename: str, sheet_name: str | None = None) -> pl.DataFrame:
-    """Load data efficiently using Polars.
+    """Load data efficiently using Polars, showing an error if it fails.
 
     Args:
         filename: Path to the file
@@ -130,41 +162,38 @@ def load_data_efficiently(filename: str, sheet_name: str | None = None) -> pl.Da
 
     Returns
     -------
-        Polars DataFrame with the loaded data
+        Polars DataFrame with the loaded data, empty when it couldn't be read
     """
-    file_path = Path(filename)
-    file_ext = file_path.suffix.lower()
-
     try:
-        if file_ext == ".csv":
-            # Polars CSV reader is much faster than pandas
-            return pl.read_csv(
-                filename,
-                encoding="utf8-lossy",  # More robust encoding handling
-                ignore_errors=True,  # Continue reading despite minor errors
-                infer_schema_length=10000,  # Better type inference
-            )
-
-        elif file_ext == ".xlsx":
-            return pl.read_excel(filename, sheet_name=sheet_name, engine="openpyxl")
-
-        elif file_ext == ".json":
-            # Polars has efficient JSON reading
-            return pl.read_json(filename)
-
-        elif file_ext == ".dta":
-            return scan_readstat(filename).collect()
-
-        elif file_ext == ".parquet":
-            return pl.read_parquet(filename)
-
-        else:
-            raise ValueError(f"Unsupported file format: {file_ext}")  # noqa: TRY301
-
+        return read_data_file(filename, sheet_name)
     except (OSError, ValueError, pl.exceptions.PolarsError) as e:
         logger.warning("Failed to load file %s: %s", filename, e)
         st.error(f"Error loading file {filename}: {e}")
         return pl.DataFrame()
+
+
+def import_local_file(
+    project_id: str, alias: str, filename: str, sheet_name: str | None = None
+) -> int:
+    """Read a local file into the project's raw data and return its row count.
+
+    A file that can't be read, or has no data, leaves the imported copy as it
+    was.
+
+    Raises
+    ------
+    LocalImportError
+        When the file can't be read or has no data.
+    """
+    try:
+        data = read_data_file(filename, sheet_name)
+    except (OSError, ValueError, pl.exceptions.PolarsError) as e:
+        logger.warning("Failed to load file %s: %s", filename, e)
+        raise LocalImportError(f"couldn't read {filename}: {e}") from e
+    if data.is_empty():
+        raise LocalImportError(f"{filename} has no data")
+    duckdb_save_table(project_id, data, alias=alias, db_name="raw")
+    return data.height
 
 
 # --- Streamlit Form with Enhanced Validation ---

@@ -185,3 +185,85 @@ def filter_rows(rows: list[DatasetRow], source_filter: str | None) -> list[Datas
     if source_filter == FILTER_LOCAL:
         return [row for row in rows if not row.is_surveycto]
     return list(rows)
+
+
+# --- Load data outcomes ---
+
+
+@dataclass(frozen=True)
+class LoadResult:
+    """What happened to one dataset when Load data ran.
+
+    ``error`` is ``None`` when the dataset loaded. ``rows`` is its imported
+    row count afterwards; ``new_rows`` is how many a SurveyCTO download added,
+    ``None`` for a file or a dataset that wasn't refreshed.
+    ``reapply_failures`` counts prep and correction steps that couldn't be
+    applied again to the new data.
+    """
+
+    alias: str
+    source: str
+    refreshed: bool
+    error: str | None = None
+    rows: int | None = None
+    new_rows: int | None = None
+    seconds: float = 0.0
+    reapply_failures: int = 0
+
+    @property
+    def ok(self) -> bool:
+        """Whether the dataset loaded."""
+        return self.error is None
+
+
+def _duration(seconds: float) -> str:
+    if seconds < 1:
+        return "under 1 s"
+    whole = round(seconds)
+    if whole < 60:
+        return f"{whole} s"
+    minutes, rest = divmod(whole, 60)
+    return f"{minutes} min {rest} s" if rest else f"{minutes} min"
+
+
+def _rows_text(result: LoadResult) -> str:
+    if result.rows is None:
+        return "no imported data"
+    rows = _plural(result.rows, "row").replace(str(result.rows), f"{result.rows:,}")
+    if not result.refreshed:
+        return f"{rows}, kept the imported copy (Refresh is off)"
+    if result.source == SURVEYCTO_SOURCE:
+        return (
+            f"{rows} ({result.new_rows:,} new)" if result.new_rows is not None else rows
+        )
+    return f"{rows}, re-read from file"
+
+
+def result_line(result: LoadResult) -> str:
+    """Describe one dataset's load as a line of Markdown for the status box."""
+    if not result.ok:
+        return f":red[:material/error:] **{result.alias}**: {result.error}"
+    parts = [_rows_text(result)]
+    if result.refreshed:
+        parts.append(_duration(result.seconds))
+    line = f":green[:material/check_circle:] **{result.alias}**: {' · '.join(parts)}"
+    if result.reapply_failures:
+        steps = _plural(result.reapply_failures, "prep or correction step")
+        line += f" · :orange[{steps} couldn't be reapplied]"
+    return line
+
+
+def load_outcome(results: list[LoadResult]) -> tuple[str, str]:
+    """Return the status label and state ("complete" or "error") after a load."""
+    loaded = sum(result.ok for result in results)
+    failed = len(results) - loaded
+    if failed:
+        return (
+            f"Loaded {loaded} of {len(results)} datasets · {failed} failed",
+            "error",
+        )
+    label = f"Loaded {_plural(loaded, 'dataset')}"
+    warned = sum(1 for result in results if result.reapply_failures)
+    if warned:
+        label += f" · {warned} with steps not reapplied"
+    return label, "complete"

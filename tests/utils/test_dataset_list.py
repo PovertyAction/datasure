@@ -160,3 +160,107 @@ def test_filter_rows_by_source():
     assert [r.alias for r in filter_rows(rows, "SurveyCTO")] == ["scto"]
     assert [r.alias for r in filter_rows(rows, "Local")] == ["file", "demo"]
     assert [r.alias for r in filter_rows(rows, None)] == ["scto", "file", "demo"]
+
+
+# --- Load data outcomes ---
+
+
+def _result(**overrides):
+    from datasure.utils.dataset_list import LoadResult
+
+    base = {
+        "alias": "household",
+        "source": "SurveyCTO",
+        "refreshed": True,
+        "error": None,
+        "rows": 1284,
+        "new_rows": 38,
+        "seconds": 12.4,
+        "reapply_failures": 0,
+    }
+    return LoadResult(**{**base, **overrides})
+
+
+def test_surveycto_line_gives_rows_new_rows_and_time():
+    from datasure.utils.dataset_list import result_line
+
+    line = result_line(_result())
+
+    assert "**household**" in line
+    assert "1,284 rows (38 new)" in line
+    assert "12 s" in line
+    assert ":material/check_circle:" in line
+
+
+def test_local_line_says_the_file_was_re_read():
+    from datasure.utils.dataset_list import result_line
+
+    line = result_line(
+        _result(
+            alias="roster", source="local storage", rows=52, new_rows=None, seconds=0.3
+        )
+    )
+
+    assert "52 rows, re-read from file" in line
+    assert "under 1 s" in line
+
+
+def test_line_for_a_dataset_not_refreshed_says_the_copy_was_kept():
+    from datasure.utils.dataset_list import result_line
+
+    line = result_line(_result(refreshed=False, new_rows=None, seconds=0.0))
+
+    assert "1,284 rows" in line
+    assert "Refresh is off" in line
+
+
+def test_failed_line_gives_the_error():
+    from datasure.utils.dataset_list import result_line
+
+    line = result_line(_result(error="couldn't sign in to ipa-training", rows=None))
+
+    assert ":material/error:" in line
+    assert "couldn't sign in to ipa-training" in line
+
+
+def test_line_warns_about_steps_that_could_not_be_reapplied():
+    from datasure.utils.dataset_list import result_line
+
+    line = result_line(_result(reapply_failures=2))
+
+    assert "2 prep or correction steps couldn't be reapplied" in line
+
+
+def test_long_load_time_is_in_minutes():
+    from datasure.utils.dataset_list import result_line
+
+    assert "2 min 5 s" in result_line(_result(seconds=125.2))
+
+
+def test_outcome_when_every_dataset_loaded():
+    from datasure.utils.dataset_list import load_outcome
+
+    assert load_outcome([_result(), _result(alias="b")]) == (
+        "Loaded 2 datasets",
+        "complete",
+    )
+    assert load_outcome([_result()]) == ("Loaded 1 dataset", "complete")
+
+
+def test_outcome_counts_failures_and_is_an_error():
+    from datasure.utils.dataset_list import load_outcome
+
+    results = [_result(), _result(alias="b"), _result(alias="c", error="boom")]
+
+    assert load_outcome(results) == ("Loaded 2 of 3 datasets · 1 failed", "error")
+
+
+def test_outcome_counts_reapply_problems_as_warnings_not_failures():
+    from datasure.utils.dataset_list import load_outcome
+
+    label, state = load_outcome([_result(reapply_failures=1)])
+
+    assert (label, state) == (
+        "Loaded 1 dataset · 1 with steps not reapplied",
+        "complete",
+    )
