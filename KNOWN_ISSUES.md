@@ -16,6 +16,30 @@ To check which version you have, run `datasure --version`. Versions with `a`, `b
 
 ## Open issues
 
+### KI-039: Outliers & Constraints tab crashes with `type Float64 is incompatible with expected type Null`
+
+- **Status:** 🔴 Open
+- **Affected versions:** 1.3.0a4 and earlier
+- **Symptom:** The **Outliers & Constraints** tab fails to load, and the terminal shows `SchemaError: type Float64 is incompatible with expected type Null` with `failed to vstack column 'soft_min'` (or another bound). It happens when one constraint leaves a bound blank and a constraint below it sets that bound.
+- **Workaround:** Fill in all four bounds (hard min, soft min, soft max, hard max) on the first constraint, or move a constraint with all four bounds set to the top.
+- **Issue:** [#483](https://github.com/PovertyAction/datasure/issues/483)
+
+### KI-038: The replication package stops with "type mismatch" at a correction
+
+- **Status:** 🔴 Open
+- **Affected versions:** 1.3.0a4 and earlier
+- **Symptom:** Running the replication package in Stata stops in `4_corrections.do` with `type mismatch`, at a line such as `replace age = 40 if KEY == "..."`. It happens when a correction sets a number in a column Stata holds as text, or removes a value from a column Stata holds as numbers.
+- **Workaround:** In `4_corrections.do`, put quotes around the number (`replace age = "40" ...`) for a text column, or replace `""` with `.` for a numeric one, then run the package again.
+- **Issue:** [#482](https://github.com/PovertyAction/datasure/issues/482)
+
+### KI-037: The replication package stops at a correction to a column that prep drops
+
+- **Status:** 🔴 Open
+- **Affected versions:** 1.3.0a4 and earlier
+- **Symptom:** Running the replication package in Stata stops in `4_corrections.do` with `variable <column> not found`, at a correction to a column that a Prep step removes. In DataSure, that correction shows as failed on the **Corrections** page and changed nothing. The package's README also counts it.
+- **Workaround:** On the **Corrections** page, remove the failed correction, then build the replication package again.
+- **Issue:** [#480](https://github.com/PovertyAction/datasure/issues/480)
+
 ### KI-036: Some SurveyCTO forms fail to import with a 403 error
 
 - **Status:** 🔴 Open

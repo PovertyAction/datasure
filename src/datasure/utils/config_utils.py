@@ -20,6 +20,13 @@ from datasure.models.schemas import (
 )
 from datasure.utils.dataframe_utils import get_df_columns
 from datasure.utils.duckdb_utils import duckdb_get_table, duckdb_save_table
+from datasure.utils.names import (
+    NAME_MAX_LENGTH,
+    NAME_RULE_HELP,
+    STORED_NAME,
+    name_clash,
+    name_problem,
+)
 
 # ============================================================================
 # CONSTANTS
@@ -87,10 +94,25 @@ class ConfigurationService:
             return []
         return config_df["page_name"].to_list()
 
-    def page_name_exists(self, page_name: str) -> bool:
-        """Check if a page name already exists."""
-        existing_pages = self.get_page_names()
-        return page_name in existing_pages
+    def page_name_clash(
+        self, page_name: str, original_page_name: str | None = None
+    ) -> str | None:
+        """Return a message if ``page_name`` shares another page's storage ID.
+
+        ``original_page_name`` is the page's current name when renaming it.
+        """
+        return name_clash(
+            page_name.strip(),
+            self.get_page_names(),
+            kind="page name",
+            own=original_page_name,
+        )
+
+    def page_name_problem(self, page_name: str) -> str | None:
+        """Return why ``page_name`` can't be used for a new page, if it can't."""
+        return name_problem(page_name.strip(), "Page name") or self.page_name_clash(
+            page_name
+        )
 
     def validate_configuration(
         self, config_data: dict
@@ -105,13 +127,9 @@ class ConfigurationService:
         try:
             config = CheckConfiguration(**config_data)
 
-            # Check for duplicate page name
-            if self.page_name_exists(config.page_name):
-                return (
-                    False,
-                    f"Page name '{config.page_name}' already exists. Please choose a different name.",
-                    None,
-                )
+            clash = self.page_name_clash(config.page_name)
+            if clash:
+                return False, clash, None
             else:
                 return True, None, config
 
@@ -127,7 +145,7 @@ class ConfigurationService:
 
         first_error = errors[0]
         field = first_error.get("loc", ["unknown"])[0]
-        msg = first_error.get("msg", "Invalid value")
+        msg = first_error.get("msg", "Invalid value").removeprefix("Value error, ")
 
         return f"{field}: {msg}"
 
@@ -310,16 +328,19 @@ class ConfigurationService:
             tuple: (is_valid, error_message, validated_config)
         """
         try:
-            config = CheckConfiguration(**config_data)
+            # An unchanged name is kept even if it predates the name rule.
+            unchanged = (config_data.get("page_name") or "").strip() == (
+                original_page_name
+            )
+            if unchanged:
+                config_data = {**config_data, "page_name": original_page_name}
+            config = CheckConfiguration.model_validate(
+                config_data, context=STORED_NAME if unchanged else None
+            )
 
-            if config.page_name != original_page_name and self.page_name_exists(
-                config.page_name
-            ):
-                return (
-                    False,
-                    f"Page name '{config.page_name}' already exists. Please choose a different name.",
-                    None,
-                )
+            clash = self.page_name_clash(config.page_name, original_page_name)
+            if clash:
+                return False, clash, None
 
         except ValidationError as e:
             error_msg = self._format_validation_error(e)
@@ -469,8 +490,9 @@ def render_page_name_input() -> str | None:
     return st.text_input(
         PAGE_NAME_STR,
         placeholder="eg. Household HFC, Individual HFC, etc.",
-        help="This name will be used to create a new page for the checks.",
-        max_chars=20,
+        help=f"This name will be used to create a new page for the checks. "
+        f"{NAME_RULE_HELP}",
+        max_chars=NAME_MAX_LENGTH,
         key="check_config_page_name_input",
     )
 
@@ -808,14 +830,9 @@ def add_check_configuration_form(
         st.info("Enter a page name to continue")
         return
 
-    # Check if page name is valid
-    config_data = {"page_name": page_name}
-    is_valid, error_msg, _ = config_service.validate_configuration(
-        {**config_data, "survey_data_name": "temp", "survey_key": "temp"}
-    )
-
-    if not is_valid and "already exists" in (error_msg or ""):
-        st.error(error_msg)
+    page_name_error = config_service.page_name_problem(page_name)
+    if page_name_error:
+        st.error(page_name_error)
         return
 
     # Step 2: Survey dataset selection
@@ -1063,8 +1080,8 @@ def edit_check_configuration_form(
         PAGE_NAME_STR,
         value=current_config.get("page_name", ""),
         placeholder="eg. Household HFC, Individual HFC, etc.",
-        help="This name will be used to identify the check page.",
-        max_chars=20,
+        help=f"This name will be used to identify the check page. {NAME_RULE_HELP}",
+        max_chars=NAME_MAX_LENGTH,
         key="edit_check_config_page_name_input",
     )
 

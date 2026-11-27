@@ -388,6 +388,33 @@ class TestComputeConstraintViolations:
             "no violation",
         ]
 
+    def test_blank_bound_before_set_bound_combines(self, outlier_settings):
+        """A blank bound on an early row doesn't block a set one later (#483)."""
+        data = pl.DataFrame(
+            {"survey_key": ["K1", "K2"], "age": [150, 10], "income": [5, 500]}
+        )
+        config = pl.DataFrame(
+            {
+                "column_name": [["age"], ["income"]],
+                "hard_min": [0.0, None],
+                "soft_min": [None, 10.0],
+                "soft_max": [None, None],
+                "hard_max": [100.0, 1000.0],
+            }
+        )
+
+        result = compute_constraint_violations(data, outlier_settings, config)
+
+        assert result.height == 4
+        assert result["soft_min"].dtype == pl.Float64
+        assert result["soft_min"].to_list() == [None, None, 10.0, 10.0]
+        assert result["violation reason"].to_list() == [
+            "Value is above hard maximum 100.0",
+            "no violation",
+            "Value is below soft minimum 10.0",
+            "no violation",
+        ]
+
 
 class TestComputeColumnOutlierSummary:
     """Test compute_column_outlier_summary function."""

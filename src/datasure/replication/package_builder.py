@@ -38,6 +38,7 @@ from datasure.replication.scto_import_generator import (
 )
 from datasure.replication.stata_names import package_name_map
 from datasure.utils.duckdb_utils import duckdb_get_table, load_missing_codes_from_db
+from datasure.utils.names import name_id
 
 logger = logging.getLogger(__name__)
 
@@ -110,10 +111,17 @@ def _load_correction_log(project_id: str, alias: str) -> pl.DataFrame:
 
 
 def _applied_corrections(correction_log: pl.DataFrame) -> pl.DataFrame:
-    """Return the log rows that change data, dropping "accept" review records."""
+    """Return the log rows that change data.
+
+    Drops "accept" review records and corrections that failed the last time
+    DataSure reapplied them, which ``4_corrections.do`` skips too.
+    """
     if "action" not in correction_log.columns:
         return correction_log
-    return correction_log.filter(pl.col("action") != Action.ACCEPT)
+    applied = correction_log.filter(pl.col("action") != Action.ACCEPT)
+    if "status" in applied.columns:
+        applied = applied.filter(pl.col("status").fill_null("") != "Failed")
+    return applied
 
 
 def _blank_reviewer_names(correction_log: pl.DataFrame) -> pl.DataFrame:
@@ -299,7 +307,7 @@ def build_replication_package(
 
     datasure_version = _get_version()
     safe_project = project_name.lower().replace(" ", "_")
-    safe_survey = survey_name.lower().replace(" ", "_")
+    safe_survey = name_id(survey_name)
     root = f"replication_{safe_project}_{safe_survey}"
 
     logger.info(

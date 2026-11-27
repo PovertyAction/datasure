@@ -514,6 +514,26 @@ class TestLoadFromLocalStorage:
         assert mock_load.call_args.kwargs["sheet_name"] is None
 
 
+class TestPercentMissing:
+    """Test the Missing Data percentage on the import preview."""
+
+    def test_counts_null_cells(self):
+        data = pl.DataFrame({"a": [1, None], "b": [None, None]})
+
+        assert import_view._percent_missing(data) == 75.0
+
+    def test_no_nulls_is_zero(self):
+        assert import_view._percent_missing(pl.DataFrame({"a": [1, 2]})) == 0.0
+
+    def test_no_rows_is_zero_not_division_error(self):
+        data = pl.DataFrame(schema={"a": pl.Int64, "b": pl.String})
+
+        assert import_view._percent_missing(data) == 0.0
+
+    def test_no_columns_is_zero(self):
+        assert import_view._percent_missing(pl.DataFrame()) == 0.0
+
+
 class TestAddToSessionState:
     """Test session-state dataset registration."""
 

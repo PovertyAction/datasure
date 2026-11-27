@@ -493,6 +493,20 @@ class TestStataTransformColumn:
         assert "    drop consent" in lines
         assert "    rename `n' consent" in lines
 
+    @pytest.mark.parametrize(
+        ("method", "tmp"), [("to string", "`s'"), ("to number", "`n'")]
+    )
+    def test_rebuilt_column_keeps_its_label(self, method, tmp):
+        # A mapped column's label is its DataSure name; gen + rename drops it.
+        lines = _stata_transform_column(
+            {"source_columns": ["visit_date"], "method": method}, ""
+        )
+        saved = lines.index("    local ds_label : variable label visit_date")
+        dropped = lines.index("    drop visit_date")
+        renamed = lines.index(f"    rename {tmp} visit_date")
+        restored = lines.index("    label variable visit_date `\"`macval(ds_label)'\"'")
+        assert saved < dropped < renamed < restored
+
     def test_floor(self):
         lines = _stata_transform_column(
             {"source_columns": ["col"], "method": "floor"}, ""

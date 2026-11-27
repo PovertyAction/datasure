@@ -17,6 +17,7 @@ from datasure.replication.script_generators import (
     _rename_imported_columns,
     _stata_names,
 )
+from datasure.utils.names import name_id
 
 _HTML_TAG_RE = re.compile(r"<[^>]+>")
 
@@ -328,6 +329,7 @@ def _emit_format_date_fields() -> list[str]:
         "\t\t\t\tif _rc==0 {",
         "\t\t\t\t\tforeach dtvar in `dtvarlist' {",
         "\t\t\t\t\t\ttempvar tempdtvar",
+        "\t\t\t\t\t\tlocal ds_label : variable label `dtvar'",
         "\t\t\t\t\t\trename `dtvar' `tempdtvar'",
         "\t\t\t\t\t\tgen double `dtvar'=.",
         "\t\t\t\t\t\tcap replace `dtvar'=clock(`tempdtvar',\"MDYhms\",`maxyr')",
@@ -335,6 +337,7 @@ def _emit_format_date_fields() -> list[str]:
         "\t\t\t\t\t\tcap replace `dtvar'=clock(`tempdtvar',\"MDYhm\",`maxyr') if `dtvar'==. & `tempdtvar'!=\"\"",
         "\t\t\t\t\t\tformat %tc `dtvar'",
         "\t\t\t\t\t\tdrop `tempdtvar'",
+        "\t\t\t\t\t\tlabel variable `dtvar' `\"`macval(ds_label)'\"'",
         "\t\t\t\t\t}",
         "\t\t\t\t}",
         "\t\t\t}",
@@ -345,11 +348,13 @@ def _emit_format_date_fields() -> list[str]:
         "\t\t\t\tif _rc==0 {",
         "\t\t\t\t\tforeach dtvar in `dtvarlist' {",
         "\t\t\t\t\t\ttempvar tempdtvar",
+        "\t\t\t\t\t\tlocal ds_label : variable label `dtvar'",
         "\t\t\t\t\t\trename `dtvar' `tempdtvar'",
         "\t\t\t\t\t\tgen double `dtvar'=.",
         "\t\t\t\t\t\tcap replace `dtvar'=date(`tempdtvar',\"MDY\",`maxyr')",
         "\t\t\t\t\t\tformat %td `dtvar'",
         "\t\t\t\t\t\tdrop `tempdtvar'",
+        "\t\t\t\t\t\tlabel variable `dtvar' `\"`macval(ds_label)'\"'",
         "\t\t\t\t\t}",
         "\t\t\t\t}",
         "\t\t\t}",
@@ -530,7 +535,7 @@ def generate_scto_import_script(
     str
         Stata do-file content as a string.
     """
-    safe_s = survey_name.lower().replace(" ", "_")
+    safe_s = name_id(survey_name)
     csv_file = f"{safe_s}_raw.csv"
     dta_file = f"{safe_s}_raw.dta"
 

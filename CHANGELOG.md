@@ -580,6 +580,97 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Fixed
 
+- **Import page crash on an empty dataset**: the preview's Missing Data
+  metric divided null cells by `rows * columns`, so a dataset with no rows
+  (for example a SurveyCTO form with no submissions) raised
+  `ZeroDivisionError` and the Import page failed on every rerun.
+  `_percent_missing` (`views/import_view.py`) now returns 0% when there are
+  no cells, and the preview shows a "no rows yet" note instead of an empty
+  table
+- **Outliers & Constraints crash on a blank bound** (#483):
+  `compute_constraint_violations` (`checks/outliers/compute.py`) wrote each
+  bound with an untyped `pl.lit`, so a blank bound became a `Null` column and
+  `vstack` failed with `type Float64 is incompatible with expected type Null`
+  when an earlier constraint row left a bound blank and a later row set it.
+  Bound literals are now typed `Float64`
+- **`4_corrections.do` type mismatch** (#482): `_emit_stata`
+  (`replication/script_generators.py`) chose the Stata literal from the new
+  value, so `replace age = 40` failed on a string `age` (the generic import
+  reads every column as text with `stringcols(_all)`), and "remove value"
+  always wrote `= ""`, which failed on a numeric variable. A numeric-looking
+  "modify value" and every "remove value" now check the variable's type at
+  run time (`capture confirm string variable`, via `_by_variable_type`) and
+  write the quoted or unquoted form to match, as DataSure stores a number
+  in a text column as text. A non-numeric value is still written quoted
+  with no check
+- **Replication package replaying corrections DataSure skipped** (#480):
+  `generate_corrections_script` (`replication/script_generators.py`)
+  dropped only "accept" rows, so a correction whose log `status` is
+  `Failed` (say, a "modify value" on a column a prep step now drops) was
+  written as a `replace` and stopped `4_corrections.do` with `variable ...
+  not found`. Such a row now gets its comment and a "Skipped" note, as
+  `prepare_data.do` already did for failed prep steps.
+  `package_builder._applied_corrections` leaves failed rows out too, so the
+  README's correction count and per-action summary match the do-file
+- **Progress consent and outcome settings not restored** (#450): the old
+  pickers saved both columns under one `chart` key and never preselected
+  the saved values, so both were empty when the check reopened. The #408
+  completion condition (`checks/progress.py`, `_render_condition_part`) saves them under
+  `consent` / `consent_vals` and `outcome` / `outcome_vals` and restores
+  both; a regression test covers the round trip. A project saved before
+  this has only `chart`, which is ignored, so its consent and outcome
+  columns must be chosen once more
+- **Stata name mapping edge cases** (#463)
+  - A valid column could keep Stata's `v#` name after import: Stata imports
+    `visit date` as `visitdate`, so a later real `visitdate` column became
+    `v3`. `script_generators._rename_imported_columns` now writes every
+    column's package name in order (`local ds_names`), and the do-file
+    renames each CSV position whose imported name differs, valid names
+    included, in one group `rename`. It stops with an error (`exit 459`)
+    when Stata imported a different number of columns than the CSV has
+  - Variables rebuilt with `gen` + `drop` + `rename` lost their label, so a
+    mapped SurveyCTO date or datetime field, or a mapped column after a
+    Prep "to string" / "to number" step, had none.
+    `scto_import_generator._emit_format_date_fields`,
+    `prep_script_generator._stata_to_string` and `_stata_to_number` now save
+    the label in `ds_label` and restore it with `macval`
+- **Aliases and check page names sharing storage or breaking file names**
+  (#350): `baseline-1`, `baseline_1` and `Baseline 1` were all accepted but
+  mapped to one DuckDB table, so importing one replaced the other; page
+  names such as `HH HFC` and `hh-hfc` shared a settings file and check
+  tables; `HH/HFC`, `HH?` and `Round 1: HH` crashed the check page or wrote
+  settings to an NTFS alternate data stream; and aliases with `-`, `.`, a
+  leading digit or a SQL keyword were missing from the Import preview list
+  - Root cause: duplicates were checked on raw names while storage used the
+    cleaned ID, and callers built IDs in different ways
+  - Solution: new `utils/names.py` holds the one name rule. `name_problem`
+    allows a leading letter then letters, digits, spaces, `_` and `-`, up to
+    `NAME_MAX_LENGTH` (20, now shared by local and SurveyCTO aliases).
+    `name_id` (moved from `duckdb_utils`, unchanged formula, so no
+    migration) gives the storage ID, and `name_clash` compares IDs and names
+    the clashing entry. `FileConfig`, `FormConfig` and `CheckConfiguration`
+    enforce the rule through `validate_name`; validating with the
+    `STORED_NAME` context skips it and returns the name exactly as saved, so
+    names saved before the rule still load and refresh into their own table,
+    and unchanged names can still be edited. Aliases are compared with
+    `duckdb_utils.alias_clash`, which uses the final DuckDB table name
+    (`alias_table`), so `select` and `select_table`, or a saved `baseline.1`
+    and a new `baseline_1`, are caught; bundle import compares the trimmed
+    alias the importer saves. `ConfigurationService`
+    (`page_name_exists`, new `page_name_problem`, add and edit validation),
+    the local import form and `SurveyCTOUI._add_form_to_project` reject
+    clashes by ID; a case-only rename of a page's own name is allowed.
+    `apply_project_config` skips a bundled dataset or page that clashes by
+    ID with an existing one, naming it, keeps bundled SurveyCTO aliases over
+    20 characters, and writes page settings and check tables under the
+    trimmed page name. `ConfigurationService.page_name_exists` is replaced
+    by `page_name_clash`, which returns the message. `validation_message`
+    turns a model's validation errors into plain text.
+    `duckdb_get_imported_datasets` matches aliases with the same
+    `_validate_table_name(name_id(...))` used to create tables. The
+    SurveyCTO alias suggested from the form title uses `suggest_name`, empty
+    when no valid name results. Replication package file names use `name_id`
+    for the page part
 - **SurveyCTO imports and replication questionnaires failing with HTTP
   430** (#469): SurveyCTO refuses the form design endpoint with 430, "your
   Excel form cannot be loaded until it is optimized", for some forms, and

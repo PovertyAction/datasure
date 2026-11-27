@@ -9,6 +9,7 @@ from datetime import date
 import polars as pl
 
 from datasure.processing.correction_log import Action
+from datasure.utils.names import name_id
 
 SCRIPT_EXT = "do"
 _C = "*"  # Stata comment character
@@ -73,25 +74,48 @@ def _stata_names(names: Iterable[str], name_map: Mapping[str, str]) -> list[str]
 def _rename_imported_columns(
     columns: Iterable[str], name_map: Mapping[str, str]
 ) -> list[str]:
-    """Rename the imported columns that have a Stata name, by position.
+    """Rename imported columns to their package names, by position.
 
     Stata changes a name it can't use while importing (to ``v#``, or with
     characters removed), and how depends on the name and Stata version, so
-    the columns are found by their position in the CSV instead. One group
-    ``rename`` applies every change at once, so a name Stata made up can't
-    clash with a new one. Empty when no imported column is mapped.
+    the columns are found by their position in the CSV instead. A valid name
+    can change too: Stata imports ``visit date`` as ``visitdate``, so a later
+    real ``visitdate`` column becomes ``v#``. The do-file therefore compares
+    every position's imported name with its package name and renames each
+    one that differs. One group ``rename`` applies every change at once, so
+    a name Stata made up can't clash with a new one. Empty when no imported
+    column is mapped.
     """
-    mapped = [(i, col) for i, col in enumerate(columns, 1) if col in name_map]
+    columns = list(columns)
+    mapped = [col for col in columns if col in name_map]
     if not mapped:
         return []
-    old = " ".join(f"`:word {i} of `ds_vars''" for i, _ in mapped)
-    new = " ".join(name_map[col] for _, col in mapped)
     return [
-        f"{_C} Rename columns whose names Stata can't use, by their position in",
-        f"{_C} the CSV. Each keeps its DataSure name as its label.",
+        f"{_C} Rename each column whose imported name differs from its package",
+        f"{_C} name, by its position in the CSV. Stata changes names it can't",
+        f"{_C} use, and a valid name it then sees twice. A column whose name",
+        f"{_C} Stata can't use keeps its DataSure name as its label.",
         "unab ds_vars : _all",
-        f"rename ({old}) ({new})",
-        *_mapped_name_labels([col for _, col in mapped], name_map),
+        f"local ds_names {' '.join(_stata_names(columns, name_map))}",
+        "if `: word count `ds_vars'' != `: word count `ds_names'' {",
+        (
+            '    display as error "Stata imported a different number of columns '
+            'than the CSV has, so they cannot be renamed by position."'
+        ),
+        "    exit 459",
+        "}",
+        "local ds_old",
+        "local ds_new",
+        "forvalues ds_i = 1/`: word count `ds_names'' {",
+        "    local ds_have : word `ds_i' of `ds_vars'",
+        "    local ds_want : word `ds_i' of `ds_names'",
+        '    if "`ds_have\'" != "`ds_want\'" {',
+        "        local ds_old `ds_old' `ds_have'",
+        "        local ds_new `ds_new' `ds_want'",
+        "    }",
+        "}",
+        'if "`ds_old\'" != "" rename (`ds_old\') (`ds_new\')',
+        *_mapped_name_labels(mapped, name_map),
         "",
     ]
 
@@ -113,6 +137,18 @@ def _is_numeric(value: str | None) -> bool:
         return True
 
 
+def _correction_comment(
+    action: str, key_col: str, key_val: str, col: str | None, reason: str
+) -> str:
+    """Return the comment line that describes one correction."""
+    comment = f"{_C} {action}: {key_col}=={key_val!r}"
+    if col:
+        comment += f" | {col}"
+    if reason:
+        comment += f" | {reason}"
+    return comment
+
+
 def _emit_stata(
     action: str,
     key_col: str,
@@ -121,31 +157,42 @@ def _emit_stata(
     new_val: str | None,
     reason: str,
 ) -> list[str]:
-    comment = f"{_C} {action}: {key_col}=={key_val!r}"
-    if col:
-        comment += f" | {col}"
-    if reason:
-        comment += f" | {reason}"
-
-    escaped_key = _escape(key_val)
-    escaped_val = _escape(new_val) if new_val is not None else None
+    comment = _correction_comment(action, key_col, key_val, col, reason)
+    where = f'if {key_col} == "{_escape(key_val)}"'
 
     if action == Action.MODIFY_VALUE and col and new_val is not None:
-        if _is_numeric(new_val):
-            stmt = f'replace {col} = {new_val} if {key_col} == "{escaped_key}"'
-        else:
-            stmt = f'replace {col} = "{escaped_val}" if {key_col} == "{escaped_key}"'
+        text = f'replace {col} = "{_escape(new_val)}" {where}'
+        if not _is_numeric(new_val):
+            return [comment, text, ""]
+        stmts = _by_variable_type(col, text, f"replace {col} = {new_val} {where}")
     elif action == Action.REMOVE_VALUE and col:
-        if _is_numeric(new_val):
-            stmt = f'replace {col} = . if {key_col} == "{escaped_key}"'
-        else:
-            stmt = f'replace {col} = "" if {key_col} == "{escaped_key}"'
+        stmts = _by_variable_type(
+            col, f'replace {col} = "" {where}', f"replace {col} = . {where}"
+        )
     elif action == Action.REMOVE_ROW:
-        stmt = f'drop if {key_col} == "{escaped_key}"'
+        stmts = [f"drop {where}"]
     else:
         return []
 
-    return [comment, stmt, ""]
+    return [comment, *stmts, ""]
+
+
+def _by_variable_type(col: str, text_stmt: str, number_stmt: str) -> list[str]:
+    """Run `text_stmt` if `col` is a string variable in Stata, else `number_stmt`.
+
+    The variable's type depends on the import: the generic import reads
+    every column as text, the SurveyCTO import types them, and prep steps
+    can convert them. DataSure stores a number in a text column as text.
+    """
+    return [
+        f"capture confirm string variable {col}",
+        "if !_rc {",
+        f"    {text_stmt}",
+        "}",
+        "else {",
+        f"    {number_stmt}",
+        "}",
+    ]
 
 
 # ── Public API (in execution order: master → install → import → corrections) ──
@@ -178,7 +225,7 @@ def generate_master_script(
         survey_name,
         datasure_version,
     )
-    safe_survey = survey_name.lower().replace(" ", "_")
+    safe_survey = name_id(survey_name)
     safe_project = project_name.lower().replace(" ", "_")
 
     lines = [
@@ -334,7 +381,7 @@ def generate_import_script(
         Stata script content as a string.
     """
     header = _header("Import Script", project_name, survey_name, datasure_version)
-    safe_survey = survey_name.lower().replace(" ", "_")
+    safe_survey = name_id(survey_name)
 
     lines = [
         header,
@@ -426,6 +473,17 @@ def generate_corrections_script(
         col = name_map.get(col, col) if col else col
         new_val = row.get("new_value")
         reason = str(row.get("reason") or "")
+        # DataSure skipped this correction the last time it reapplied the
+        # log, say because a prep step now drops its column: running it here
+        # would differ from the data, and can stop the do-file
+        if row.get("status") == "Failed":
+            lines += [
+                _correction_comment(action, key_col, key_val, col, reason),
+                f"{_C} Skipped: this correction failed the last time DataSure "
+                "applied it, so it changed nothing.",
+                "",
+            ]
+            continue
         lines += _emit_stata(action, key_col, key_val, col, new_val, reason)
 
     lines.append(_LOG_CLOSE)

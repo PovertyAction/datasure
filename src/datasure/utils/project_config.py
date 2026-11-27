@@ -43,12 +43,18 @@ from datasure.utils.duckdb_utils import (
     DESCRIPTIVE_COLUMNS_TABLE,
     LEGACY_DESCRIPTIVE_SELECTION_TABLE,
     OUTLIERS_TABLE,
+    alias_clash,
     check_table_name,
     duckdb_get_table,
     duckdb_save_table,
     duckdb_table_exists,
     missing_codes_table_name,
+)
+from datasure.utils.names import (
+    NAME_MAX_LENGTH,
+    STORED_NAME,
     name_id,
+    validation_message,
 )
 from datasure.utils.onboarding_utils import DEMO_DATA_SOURCE, build_demo_datasets
 from datasure.utils.reapply_utils import ReapplyFailure, warn_reapply_failures
@@ -504,14 +510,15 @@ def _write_page_settings(project_id: str, page_name: str, settings: dict) -> Non
         write_settings(settings_file, settings)
 
 
-def _write_check_tables(project_id: str, page: ProjectPageBundle) -> None:
+def _write_check_tables(
+    project_id: str, page_name: str, page: ProjectPageBundle
+) -> None:
     """Write a newly created page's bundled check tables to ``logs``.
 
     Only registered prefixes are written; empty tables are skipped. A page
     bundled without a descriptive column selection gets an empty one, so it
     does not start from this project's old project-wide selection.
     """
-    page_name = page.config.get("page_name", "")
     for prefix, rows in page.check_tables.items():
         if prefix not in CHECK_TABLE_PREFIXES or not rows:
             continue
@@ -561,7 +568,7 @@ def _import_local_dataset(
             alias=ds.alias, filename=path, sheet_name=ds.sheet_name
         )
     except ValidationError as e:
-        return False, str(e)
+        return False, validation_message(e)
     _append_import_log_row(
         project_id,
         {
@@ -592,13 +599,20 @@ def _import_surveycto_dataset(
     username = _stored_username_for_server(project_id, ds.server or "") or ds.username
     if not ds.server or not username:
         return False, "No SurveyCTO credentials were provided for this server"
-    form_config = FormConfig(
-        alias=ds.alias,
-        form_id=ds.form_id or "",
-        server=ds.server,
-        username=username,
-        attachments=ds.attachments,
-    )
+    try:
+        form_config = FormConfig.model_validate(
+            {
+                "alias": ds.alias.strip(),
+                "form_id": ds.form_id or "",
+                "server": ds.server,
+                "username": username,
+                "attachments": ds.attachments,
+            },
+            # SurveyCTO aliases were once allowed up to 64 characters
+            context=STORED_NAME if len(ds.alias.strip()) > NAME_MAX_LENGTH else None,
+        )
+    except ValidationError as e:
+        return False, validation_message(e)
     _append_import_log_row(
         project_id,
         {
@@ -705,10 +719,20 @@ def apply_project_config(
     """
     result = ConfigApplyResult()
     imported_aliases: set[str] = set()
+    import_log = duckdb_get_table(project_id, alias="import_log", db_name="logs")
+    existing_aliases = (
+        import_log["alias"].to_list() if "alias" in import_log.columns else []
+    )
 
     for ds in bundle.datasets:
+        # The importers trim the alias; ds.alias stays the bundle's lookup key
+        clash = alias_clash(ds.alias.strip(), existing_aliases)
+        if clash:
+            result.datasets_skipped.append(ReapplyFailure(ds.alias, clash))
+            continue
         ok, reason = _import_dataset(project_id, ds, local_file_paths)
         if ok:
+            existing_aliases.append(ds.alias.strip())
             imported_aliases.add(ds.alias)
             result.datasets_imported.append(ds.alias)
         else:
@@ -727,10 +751,9 @@ def apply_project_config(
     config_service = ConfigurationService(project_id)
     for page in bundle.pages:
         page_name = page.config.get("page_name", "")
-        if config_service.page_name_exists(page_name):
-            result.pages_skipped.append(
-                ReapplyFailure(page_name, "A page with this name already exists")
-            )
+        clash = config_service.page_name_clash(page_name)
+        if clash:
+            result.pages_skipped.append(ReapplyFailure(page_name, clash))
             continue
         survey_data_name = page.config.get("survey_data_name")
         if survey_data_name not in imported_aliases:
@@ -743,11 +766,15 @@ def apply_project_config(
         try:
             check_config = CheckConfiguration(**page.config)
         except ValidationError as e:
-            result.pages_skipped.append(ReapplyFailure(page_name, str(e)))
+            result.pages_skipped.append(
+                ReapplyFailure(page_name, validation_message(e))
+            )
             continue
+        # Write settings under the trimmed name the page is saved with
+        page_name = check_config.page_name
         config_service.add_configuration(check_config, rerun=False)
         _write_page_settings(project_id, page_name, page.settings)
-        _write_check_tables(project_id, page)
+        _write_check_tables(project_id, page_name, page)
         result.pages_created.append(page_name)
 
     _merge_missing_codes(project_id, bundle.missing_codes)

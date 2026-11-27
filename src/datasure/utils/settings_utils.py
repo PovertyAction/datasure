@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field, field_validator
 
 from datasure.utils.cache_utils import get_cache_path
 from datasure.utils.config_utils import ConfigurationService
-from datasure.utils.duckdb_utils import name_id
+from datasure.utils.names import name_id
 
 
 class ProjectID(BaseModel):

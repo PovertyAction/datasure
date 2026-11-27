@@ -10,6 +10,7 @@ from datasure.utils.duckdb_utils import (
     CHECK_TABLE_PREFIXES,
     _validate_column_name,
     _validate_table_name,
+    alias_clash,
     check_table_name,
     duckdb_delete_rows,
     duckdb_get_aliases,
@@ -348,6 +349,62 @@ class TestDuckdbGetAliases:
         result = duckdb_get_aliases("test_project")
 
         assert result == []
+
+
+class TestImportedDatasetsPreviewList:
+    """Every imported dataset appears in the preview list, whatever its alias."""
+
+    @pytest.fixture
+    def project(self, tmp_path):
+        def fake_cache_path(*parts):
+            path = tmp_path.joinpath(*map(str, parts))
+            path.parent.mkdir(parents=True, exist_ok=True)
+            return path
+
+        with patch("datasure.utils.duckdb_utils.get_cache_path", fake_cache_path):
+            yield "proj"
+
+    def test_aliases_whose_table_names_are_cleaned_appear(self, project):
+        aliases = ["baseline-1", "Household Survey", "select", "2024 HH"]
+        log = pl.DataFrame(
+            {"refresh": [True] * 4, "load": [True] * 4, "alias": aliases}
+        )
+        duckdb_save_table(project, log, "import_log", "logs")
+        for alias in aliases:
+            duckdb_save_table(project, pl.DataFrame({"x": [1]}), alias, "raw")
+
+        assert sorted(duckdb_get_imported_datasets(project)) == sorted(aliases)
+
+    def test_alias_without_a_table_is_left_out(self, project):
+        log = pl.DataFrame(
+            {"refresh": [True, True], "load": [True, True], "alias": ["a-1", "b"]}
+        )
+        duckdb_save_table(project, log, "import_log", "logs")
+        duckdb_save_table(project, pl.DataFrame({"x": [1]}), "a-1", "raw")
+
+        assert duckdb_get_imported_datasets(project) == ["a-1"]
+
+
+class TestAliasClash:
+    """Aliases clash when they would be stored in the same DuckDB table."""
+
+    @pytest.mark.parametrize(
+        ("new", "existing"),
+        [
+            ("select_table", "select"),
+            ("select", "select_table"),
+            ("baseline_1", "baseline.1"),
+            ("baseline-1", "baseline_1"),
+        ],
+    )
+    def test_aliases_sharing_a_table_clash(self, new, existing):
+        assert alias_clash(new, [existing]) == (
+            f"'{new}' is too similar to existing alias '{existing}'. "
+            "Please choose a different name."
+        )
+
+    def test_aliases_with_their_own_tables_do_not_clash(self):
+        assert alias_clash("baseline_2", ["baseline_1", "select"]) is None
 
 
 class TestDuckdbGetImportedDatasets:

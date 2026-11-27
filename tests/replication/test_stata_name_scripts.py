@@ -39,19 +39,50 @@ class TestImportScriptRenamesByPosition:
         imported = next(i for i, ln in enumerate(lines) if "import delimited" in ln)
         unab = lines.index("unab ds_vars : _all")
         assert unab > imported
-        rename = lines[unab + 1]
-        assert rename == (
-            "rename (`:word 2 of `ds_vars'' `:word 3 of `ds_vars'' "
-            "`:word 4 of `ds_vars'' `:word 5 of `ds_vars'') "
-            "(visit_date _2nd_visit age in_)"
+        assert lines[unab + 1] == (
+            "local ds_names KEY visit_date _2nd_visit age in_ village"
         )
-        assert lines[unab + 2 : unab + 6] == [
+        rename = lines.index('if "`ds_old\'" != "" rename (`ds_old\') (`ds_new\')')
+        assert lines[rename + 1 : rename + 5] == [
             'label variable visit_date "visit date"',
             'label variable _2nd_visit "2nd_visit"',
             'label variable age "âge"',
             'label variable in_ "in"',
         ]
-        assert lines.index(next(ln for ln in lines if ln.startswith("save"))) > unab
+        assert lines.index(next(ln for ln in lines if ln.startswith("save"))) > rename
+
+    def test_every_position_whose_imported_name_differs_is_renamed(self):
+        # Stata imports "visit date" as visitdate, so the real visitdate
+        # column after it imports as v3 and must be renamed back too.
+        columns = ["KEY", "visit date", "visitdate"]
+        lines = _lines(
+            generate_import_script(
+                "P", "S", "1.0", columns=columns, name_map=stata_name_map(columns)
+            )
+        )
+        unab = lines.index("unab ds_vars : _all")
+        assert lines[unab + 1 : unab + 17] == [
+            "local ds_names KEY visit_date visitdate",
+            # Positions only line up if Stata imported every CSV column.
+            "if `: word count `ds_vars'' != `: word count `ds_names'' {",
+            (
+                'display as error "Stata imported a different number of columns '
+                'than the CSV has, so they cannot be renamed by position."'
+            ),
+            "exit 459",
+            "}",
+            "local ds_old",
+            "local ds_new",
+            "forvalues ds_i = 1/`: word count `ds_names'' {",
+            "local ds_have : word `ds_i' of `ds_vars'",
+            "local ds_want : word `ds_i' of `ds_names'",
+            'if "`ds_have\'" != "`ds_want\'" {',
+            "local ds_old `ds_old' `ds_have'",
+            "local ds_new `ds_new' `ds_want'",
+            "}",
+            "}",
+            'if "`ds_old\'" != "" rename (`ds_old\') (`ds_new\')',
+        ]
 
 
 _FORM = {
@@ -90,7 +121,10 @@ class TestSurveyCTOImportScript:
         insheet = next(i for i, ln in enumerate(lines) if ln.startswith("insheet"))
         unab = lines.index("unab ds_vars : _all")
         assert insheet < unab < lines.index("gen long _ds_row = _n")
-        assert "(visit_date _2nd_visit age in_)" in lines[unab + 1]
+        assert (
+            lines[unab + 1]
+            == "local ds_names KEY visit_date _2nd_visit age in_ village"
+        )
 
     def test_field_lists_and_labels_use_the_stata_name(self):
         script = self._script(_RAW_COLUMNS, _NAME_MAP)
@@ -100,6 +134,26 @@ class TestSurveyCTOImportScript:
         # The DataSure name stays the variable label.
         assert "cap label variable visit_date" not in script
         assert 'label variable visit_date "visit date"' in script
+
+    def test_date_and_datetime_blocks_keep_the_label(self):
+        # The blocks rebuild each field with gen + drop, which drops the
+        # DataSure-name label a mapped field gets at import.
+        lines = _lines(self._script(_RAW_COLUMNS, _NAME_MAP))
+        saved = [
+            i
+            for i, ln in enumerate(lines)
+            if ln == "local ds_label : variable label `dtvar'"
+        ]
+        restored = [
+            i
+            for i, ln in enumerate(lines)
+            if ln == "label variable `dtvar' `\"`macval(ds_label)'\"'"
+        ]
+        drops = [i for i, ln in enumerate(lines) if ln == "drop `tempdtvar'"]
+        assert len(saved) == len(restored) == len(drops) == 2
+        for save, drop, restore in zip(saved, drops, restored, strict=True):
+            assert save < drop < restore
+            assert lines[save + 1] == "rename `dtvar' `tempdtvar'"
 
 
 class TestCorrectionsScriptUsesStataNames:

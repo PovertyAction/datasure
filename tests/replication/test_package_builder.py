@@ -167,6 +167,16 @@ class TestActionSummary:
         assert result["modify value"] == 2
         assert result["remove row"] == 1
 
+    def test_corrections_that_failed_in_datasure_are_not_counted(self):
+        """The README counts only corrections the package applies (#480)."""
+        log = pl.DataFrame(
+            {
+                "action": ["modify value", "modify value", "accept"],
+                "status": ["Failed", "Successful", "Successful"],
+            }
+        )
+        assert _action_summary(log) == {"modify value": 1}
+
 
 class TestSerializePrepArgs:
     def test_none_returns_none(self):
@@ -636,7 +646,10 @@ class TestPackageUsesStataNames:
 
     def test_every_script_and_the_codebook_use_the_stata_names(self):
         files = self._build()
-        assert "(visit_date _2nd_visit age in_)" in files["2_import_data.do"]
+        assert (
+            "local ds_names key visit_date _2nd_visit age in_"
+            in files["2_import_data.do"]
+        )
         assert 'label variable age "âge"' in files["2_import_data.do"]
         assert "clonevar age_copy = age" in files["3_prepare_data.do"]
         assert 'label variable age_copy "age copy"' in files["3_prepare_data.do"]
@@ -647,7 +660,9 @@ class TestPackageUsesStataNames:
 
     def test_saved_edits_are_used(self):
         files = self._build(edits={"visit date": "vdate"})
-        assert "(vdate _2nd_visit age in_)" in files["2_import_data.do"]
+        assert (
+            "local ds_names key vdate _2nd_visit age in_" in files["2_import_data.do"]
+        )
         assert "replace vdate =" in files["4_corrections.do"]
 
 
