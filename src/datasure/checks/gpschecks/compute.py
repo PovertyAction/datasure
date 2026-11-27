@@ -483,14 +483,16 @@ def detect_outliers_with_clusters(df, gps_lat_col, gps_lon_col, clustering_col):
         )
     )
 
-    outlier_df = outlier_df.assign(
+    # Drop the group column before adding the outputs, so a cluster column
+    # named "Outlier" or "distance_from_centroid" can't take the results
+    # with it. Rows are ordered by group, then by original position: the
+    # shape the former groupby().apply() returned.
+    order = np.argsort(group_codes, kind="stable")
+    outlier_df = outlier_df.drop(columns=group_col).assign(
         distance_from_centroid=flags["distance"].to_numpy(),
         Outlier=flags["Outlier"].to_numpy().astype(bool),
     )
-    # Rows ordered by group, then by original position, without the group
-    # column: the shape the former groupby().apply() returned.
-    order = np.argsort(group_codes, kind="stable")
-    return outlier_df.iloc[order].drop(columns=group_col).reset_index(drop=True)
+    return outlier_df.iloc[order].reset_index(drop=True)
 
 
 # automatically detect outliers using Local Outlier Factor (LOF)

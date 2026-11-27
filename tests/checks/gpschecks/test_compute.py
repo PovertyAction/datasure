@@ -906,3 +906,27 @@ def test_detect_outliers_with_clusters_drops_out_of_range_coordinates():
     result = detect_outliers_with_clusters(data, "latitude", "longitude", None)
 
     assert result["id"].tolist() == [1, 4]
+
+
+@pytest.mark.parametrize("clustering_col", ["Outlier", "distance_from_centroid"])
+def test_detect_outliers_with_clusters_column_named_like_output(clustering_col):
+    """A clustering column named like an output column keeps the calculated output."""
+    data = pd.DataFrame(
+        {
+            clustering_col: ["A"] * 5,
+            "latitude": [6.0, 6.001, 6.002, 6.003, 6.5],
+            "longitude": [-0.1] * 5,
+        }
+    )
+
+    result = detect_outliers_with_clusters(
+        data, "latitude", "longitude", clustering_col
+    )
+
+    assert list(result.columns) == [
+        "latitude",
+        "longitude",
+        "distance_from_centroid",
+        "Outlier",
+    ]
+    assert result["Outlier"].tolist() == [False, False, False, False, True]
