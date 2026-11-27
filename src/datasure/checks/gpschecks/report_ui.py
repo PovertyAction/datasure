@@ -22,6 +22,7 @@ from datasure.checks.gpschecks.compute import (
     _identity_optional_fields,
     _parse_gps_data,
     _save_gps_column_settings,
+    _stringify_temporal_columns,
     detect_outliers_with_clusters,
     detect_outliers_with_lof,
     find_gps_columns,
@@ -517,6 +518,7 @@ def _render_scatterplot_map(
         Chart height in pixels.
     """
     tooltip_config = _build_tooltip_config(tooltip_fields)
+    map_pd = _stringify_temporal_columns(map_pd)
 
     center_lat = map_pd["lat"].mean()
     center_lon = map_pd["lon"].mean()

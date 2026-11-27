@@ -12,6 +12,7 @@ from datasure.checks.gpschecks.compute import (
     _get_mapbox_key,
     _has_parsed_coords,
     _parse_gps_data,
+    _stringify_temporal_columns,
     calculate_gps_accuracy_statistics,
     detect_outliers_with_clusters,
     detect_outliers_with_lof,
@@ -718,6 +719,37 @@ def test_build_map_dataframe_all_fields():
     assert "region" in tooltip_fields
     assert "color_group" in map_pd.columns
     assert "color" in map_pd.columns
+
+
+def test_build_map_dataframe_color_by_column_is_in_tooltip_data():
+    """Every tooltip field must be a column, or the tooltip shows "{field}"."""
+    data = pl.DataFrame(
+        {
+            "latitude": [1.0, 2.0],
+            "longitude": [3.0, 4.0],
+            "enumerator": ["E1", "E2"],
+        }
+    )
+    map_pd, tooltip_fields = _build_map_dataframe(
+        data, None, None, "enumerator", None, "enumerator"
+    )
+    assert set(tooltip_fields) <= set(map_pd.columns)
+    assert map_pd["enumerator"].tolist() == ["E1", "E2"]
+
+
+def test_stringify_temporal_columns():
+    """Datetime values become text so the pydeck tooltip can show them."""
+    map_pd = pd.DataFrame(
+        {
+            "lat": [1.0, 2.0],
+            "Date": pd.to_datetime(["2025-01-01 10:30:00", None]),
+            "name": ["a", "b"],
+        }
+    )
+    result = _stringify_temporal_columns(map_pd)
+    assert result["Date"].tolist() == ["2025-01-01 10:30:00", ""]
+    assert result["lat"].tolist() == [1.0, 2.0]
+    assert pd.api.types.is_datetime64_any_dtype(map_pd["Date"])
 
 
 def test_build_map_dataframe_no_optional_fields():

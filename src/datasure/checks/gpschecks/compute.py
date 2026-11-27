@@ -58,6 +58,39 @@ def _build_tooltip_config(fields: list[str]) -> dict:
     }
 
 
+def _stringify_temporal_columns(map_pd):
+    """Return a copy of map_pd with datetime and timedelta columns as text.
+
+    pydeck serializes pandas Timestamps as JSON objects, which the deck.gl
+    tooltip renders as "[object Object]". Formatting them as strings first
+    makes the tooltip show the actual value.
+
+    Parameters
+    ----------
+    map_pd : pd.DataFrame
+        Data passed to the pydeck layer.
+
+    Returns
+    -------
+    pd.DataFrame
+        The same data with temporal columns converted to strings (missing
+        values become empty strings). Other columns are unchanged.
+    """
+    temporal_cols = [
+        col
+        for col in map_pd.columns
+        if pd.api.types.is_datetime64_any_dtype(map_pd[col])
+        or pd.api.types.is_timedelta64_dtype(map_pd[col])
+    ]
+    if not temporal_cols:
+        return map_pd
+    map_pd = map_pd.copy()
+    for col in temporal_cols:
+        series = map_pd[col]
+        map_pd[col] = series.astype(str).where(series.notna(), "")
+    return map_pd
+
+
 def load_default_gpschecks_settings(
     settings_file: str, config: GPSSettings
 ) -> GPSSettings:
@@ -332,6 +365,10 @@ def _build_map_dataframe(
 
     if color_by:
         map_df = map_df.with_columns(data[color_by].alias("color_group"))
+        # The tooltip reads {field} from the layer data, so the color column
+        # must exist under the name it is listed by.
+        if color_by not in map_df.columns:
+            map_df = map_df.with_columns(data[color_by].alias(color_by))
         tooltip_fields.append(color_by)
 
     map_pd = map_df.to_pandas()
