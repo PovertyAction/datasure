@@ -264,3 +264,23 @@ def test_outcome_counts_reapply_problems_as_warnings_not_failures():
         "Loaded 1 dataset · 1 with steps not reapplied",
         "complete",
     )
+
+
+def test_line_names_a_problem_after_the_raw_import():
+    from datasure.utils.dataset_list import result_line
+
+    line = result_line(_result(problems=("prep and corrections not rebuilt: x",)))
+
+    assert line.startswith(":green[")
+    assert "prep and corrections not rebuilt: x" in line
+
+
+def test_outcome_keeps_the_box_open_when_a_loaded_dataset_needs_attention():
+    from datasure.utils.dataset_list import load_outcome
+
+    results = [_result(problems=("definition not saved",)), _result(alias="b")]
+
+    assert load_outcome(results) == (
+        "Loaded 2 datasets · 1 needs attention",
+        "error",
+    )

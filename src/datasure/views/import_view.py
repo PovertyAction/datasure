@@ -6,7 +6,11 @@ import polars as pl
 import streamlit as st
 
 from datasure.connectors.local import import_local_file
-from datasure.connectors.scto import FormConfig, SurveyCTOClient
+from datasure.connectors.scto import (
+    FormConfig,
+    FormDefinitionNotSavedError,
+    SurveyCTOClient,
+)
 from datasure.processing.corrections import CorrectionProcessor
 from datasure.processing.prep import prep_apply_action
 from datasure.utils.dataset_list import (
@@ -164,11 +168,14 @@ def _process_single_import(
     """Load one dataset; return how it went and any steps not reapplied.
 
     A dataset that fails to load is reported and skipped, so the others
-    still load, and its imported copy is left as it was.
+    still load, and its imported copy is left as it was. A failure after the
+    raw import (bookkeeping, rebuilding prep and corrections) is reported as
+    a problem on a loaded dataset, and doesn't stop the batch either.
     """
     alias = row["alias"]
     refreshed = bool(row["refresh"]) and row["source"] in _LOADERS
     failures: list[ReapplyFailure] = []
+    problems: list[str] = []
     error = None
     new_rows = None
     started = time.monotonic()
@@ -176,15 +183,23 @@ def _process_single_import(
         report(_STAGE_LABELS[row["source"]])
         try:
             new_rows = _load_dataset_by_source(project_id, row)
+        except FormDefinitionNotSavedError as e:
+            # Raw already holds the new data: carry on so downstream data
+            # is rebuilt from it, and say what wasn't saved.
+            logger.exception("Form definition not saved for dataset %s", alias)
+            new_rows = e.new_rows
+            problems.append(str(e))
         except Exception as e:
             # UI boundary: one failed dataset must not stop the batch, but
             # the traceback has to land in the logs.
             logger.exception("Failed to load dataset %s", alias)
             error = str(e) or type(e).__name__
-        else:
-            _record_load(project_id, alias)
+        if error is None:
             report("reapplying prep and corrections")
-            failures = _refresh_downstream_data(project_id, alias)
+            rebuild_failures, rebuild_problem = _after_raw_import(project_id, alias)
+            failures = rebuild_failures
+            if rebuild_problem:
+                problems.append(rebuild_problem)
 
     _add_to_session_state(alias)
     result = LoadResult(
@@ -192,12 +207,42 @@ def _process_single_import(
         source=row["source"],
         refreshed=refreshed,
         error=error,
-        rows=duckdb_row_counts(project_id, [alias], "raw").get(alias),
+        rows=_raw_row_count(project_id, alias),
         new_rows=new_rows if row["source"] == SURVEYCTO_SOURCE else None,
         seconds=time.monotonic() - started,
         reapply_failures=len(failures),
+        problems=tuple(problems),
     )
     return result, failures
+
+
+def _after_raw_import(
+    project_id: str, alias: str
+) -> tuple[list[ReapplyFailure], str | None]:
+    """Record the load and rebuild downstream data after a raw import.
+
+    Returns the steps not reapplied, and a description of the failure when
+    this work couldn't finish.
+    """
+    try:
+        _record_load(project_id, alias)
+        return _refresh_downstream_data(project_id, alias), None
+    except Exception as e:
+        # UI boundary: raw has loaded, so report the rest as a problem on
+        # this dataset instead of stopping the batch.
+        logger.exception("Failed to rebuild prep and corrections for %s", alias)
+        detail = str(e) or type(e).__name__
+        return [], f"prep and corrections not rebuilt: {detail}"
+
+
+def _raw_row_count(project_id: str, alias: str) -> int | None:
+    """Return a dataset's imported row count, or ``None`` if it can't be read."""
+    try:
+        return duckdb_row_counts(project_id, [alias], "raw").get(alias)
+    except Exception:
+        # UI boundary: a count is only shown, never worth stopping the batch.
+        logger.exception("Could not count the rows of %s", alias)
+        return None
 
 
 def _record_load(project_id: str, alias: str) -> None:

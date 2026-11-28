@@ -1,12 +1,14 @@
 import logging
 import os
 import re
+from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from enum import StrEnum
 from pathlib import Path
 from xml.etree.ElementTree import ParseError
 
+import duckdb
 import polars as pl
 import polars.selectors as cs
 import pyarrow as pa
@@ -155,6 +157,35 @@ class ValidationError(SurveyCTOError):
     """Exception for validation errors."""
 
     pass
+
+
+class FormDefinitionNotSavedError(SurveyCTOError):
+    """Raw data was saved, but its form definitions could not be updated.
+
+    Unlike other import errors, raw already holds the new data, so the
+    caller should treat the dataset as loaded. ``new_rows`` is how many rows
+    the import added.
+    """
+
+    def __init__(self, message: str, new_rows: int) -> None:
+        super().__init__(message)
+        self.new_rows = new_rows
+
+
+def _update_definitions_after_raw(update: Callable[[], None], new_rows: int) -> None:
+    """Run a form-definition write that follows a raw save.
+
+    Raw and the definitions live in separate databases, so the two writes
+    can't share a transaction. A failure here is raised as
+    ``FormDefinitionNotSavedError`` so the caller knows raw already changed.
+    """
+    try:
+        update()
+    except (duckdb.Error, OSError) as err:
+        raise FormDefinitionNotSavedError(
+            f"Data saved, but its form definition could not be updated: {err}",
+            new_rows,
+        ) from err
 
 
 # --- SurveyCTO Server Connect Button Click Action --- #
@@ -671,7 +702,10 @@ class SurveyCTOClient:
         # Save to DuckDB
         duckdb_save_table(self.project_id, data, alias=form_config.alias, db_name="raw")
         # Raw is no longer the form's cast, so its definitions no longer apply.
-        delete_form_definitions(self.project_id, form_config.alias)
+        _update_definitions_after_raw(
+            lambda: delete_form_definitions(self.project_id, form_config.alias),
+            len(data),
+        )
 
         return len(data)
 
@@ -749,13 +783,16 @@ class SurveyCTOClient:
             self.project_id, combined_data, alias=form_config.alias, db_name="raw"
         )
         # After raw, so a definition always describes data raw holds.
-        save_form_definition(
-            self.project_id,
-            form_config.alias,
-            form_config.form_id,
-            contract.formdef_version,
-            xml,
-            schema.serialize().to_pybytes(),
+        _update_definitions_after_raw(
+            lambda: save_form_definition(
+                self.project_id,
+                form_config.alias,
+                form_config.form_id,
+                contract.formdef_version,
+                xml,
+                schema.serialize().to_pybytes(),
+            ),
+            new_count,
         )
 
         return new_count

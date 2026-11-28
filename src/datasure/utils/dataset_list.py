@@ -198,7 +198,9 @@ class LoadResult:
     row count afterwards; ``new_rows`` is how many a SurveyCTO download added,
     ``None`` for a file or a dataset that wasn't refreshed.
     ``reapply_failures`` counts prep and correction steps that couldn't be
-    applied again to the new data.
+    applied again to the new data. ``problems`` describes steps after the
+    raw import that failed outright (a form definition not saved, prep and
+    corrections not rebuilt): the dataset loaded, but needs attention.
     """
 
     alias: str
@@ -209,6 +211,7 @@ class LoadResult:
     new_rows: int | None = None
     seconds: float = 0.0
     reapply_failures: int = 0
+    problems: tuple[str, ...] = ()
 
     @property
     def ok(self) -> bool:
@@ -250,6 +253,8 @@ def result_line(result: LoadResult) -> str:
     if result.reapply_failures:
         steps = _plural(result.reapply_failures, "prep or correction step")
         line += f" · :orange[{steps} couldn't be reapplied]"
+    for problem in result.problems:
+        line += f" · :orange[:material/warning: {problem}]"
     return line
 
 
@@ -266,4 +271,9 @@ def load_outcome(results: list[LoadResult]) -> tuple[str, str]:
     warned = sum(1 for result in results if result.reapply_failures)
     if warned:
         label += f" · {warned} with steps not reapplied"
+    # Stays open, like a failure: downstream data may not match raw.
+    flagged = sum(1 for result in results if result.problems)
+    if flagged:
+        verb = "needs" if flagged == 1 else "need"
+        return f"{label} · {flagged} {verb} attention", "error"
     return label, "complete"

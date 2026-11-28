@@ -434,20 +434,46 @@ def _render_stepper(step: str) -> None:
     st.progress((current + 1) / len(STEPS))
 
 
-def _render_back() -> None:
+def _drafted(fields: dict[str, str]) -> dict:
+    """Return the answers typed so far, by field, for widgets on screen.
+
+    ``fields`` maps a field in ``state["values"]`` to its widget's name.
+    Nothing is validated: a draft keeps incomplete answers too.
+    """
+    return {
+        field: st.session_state[_key(name)]
+        for field, name in fields.items()
+        if _key(name) in st.session_state
+    }
+
+
+def _back(previous: str, draft: Callable[[], dict] | None) -> None:
+    """Go back a step, keeping the current step's answers if it has a draft.
+
+    Streamlit drops the state of widgets that aren't rendered, so without
+    this the answers would be lost by the time the step is shown again.
+    """
+    state = _state()
+    if draft:
+        state["values"] = {**state["values"], **draft()}
+    _go(previous)
+
+
+def _render_back(draft: Callable[[], dict] | None = None) -> None:
     previous = STEPS[STEPS.index(_state()["step"]) - 1]
     st.button(
         "Back",
         icon=":material/arrow_back:",
         key=_key("back"),
-        on_click=_go,
-        args=(previous,),
+        on_click=_back,
+        args=(previous, draft),
     )
 
 
 def _render_nav(
     project_id: str,
     collect: Callable[[str], dict],
+    draft: Callable[[], dict],
     *,
     disabled: bool = False,
 ) -> None:
@@ -455,7 +481,7 @@ def _render_nav(
     if _state().get("error"):
         st.error(_state()["error"], icon=":material/error:")
     with st.container(horizontal=True, horizontal_alignment="distribute"):
-        _render_back()
+        _render_back(draft)
         st.button(
             REVIEW_LABEL,
             type="primary",
@@ -600,6 +626,16 @@ def _collect_local(project_id: str) -> dict:
     }
 
 
+def _draft_local() -> dict:
+    return _drafted(
+        {
+            "alias": "local_alias",
+            "filename": "local_path",
+            "sheet_name": "local_sheet",
+        }
+    )
+
+
 def _render_local_step(project_id: str) -> None:
     values = _state()["values"]
     _alias_input(values.get("alias", ""), "local_alias")
@@ -612,7 +648,7 @@ def _render_local_step(project_id: str) -> None:
     )
     st.caption(f":material/sync: {LOCAL_REFRESH_HINT}")
     ready = _render_file_checks(path, values.get("sheet_name"))
-    _render_nav(project_id, _collect_local, disabled=not ready)
+    _render_nav(project_id, _collect_local, _draft_local, disabled=not ready)
 
 
 # SurveyCTO connection step
@@ -737,6 +773,25 @@ def _collect_surveycto(project_id: str) -> dict:
     return {**config.model_dump(), "form_title": title}
 
 
+def _draft_surveycto(project_id: str) -> dict:
+    draft = {}
+    connection = _surveycto_connections(project_id).get(_widget("scto_server"))
+    if connection:
+        draft["server"] = connection["server"]
+    form_id = _widget("scto_form")
+    if form_id:
+        draft["form_id"] = form_id
+        draft |= _drafted(
+            {
+                "alias": _scto_alias_name(form_id),
+                "private_key": "scto_key",
+                "save_to": "scto_save_to",
+                "attachments": "scto_media",
+            }
+        )
+    return draft
+
+
 def _render_form_choice(project_id: str, connection: dict, values: dict):
     """Render the form picker; return the chosen form or ``None``."""
     forms = _server_forms(project_id, connection)
@@ -762,7 +817,7 @@ def _render_surveycto_step(project_id: str) -> None:
             "under **Connections**.",
             icon=":material/key_off:",
         )
-        _render_nav(project_id, _collect_surveycto, disabled=True)
+        _render_nav(project_id, _collect_surveycto, dict, disabled=True)
         return
 
     names = list(connections)
@@ -777,7 +832,12 @@ def _render_surveycto_step(project_id: str) -> None:
     name = st.selectbox("Server", options=names, index=default, key=_key("scto_server"))
     form = _render_form_choice(project_id, connections[name], values) if name else None
     ready = _render_form_fields(form, values) if form else False
-    _render_nav(project_id, _collect_surveycto, disabled=not ready)
+    _render_nav(
+        project_id,
+        _collect_surveycto,
+        lambda: _draft_surveycto(project_id),
+        disabled=not ready,
+    )
 
 
 # Review step

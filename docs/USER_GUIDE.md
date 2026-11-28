@@ -296,9 +296,14 @@ As each dataset finishes, the box adds a line for it:
 - a dataset that fails shows why, for example a sign-in or file problem.
   The other datasets still load, and the failed one keeps its last
   imported copy
+- a dataset that loaded but needs attention shows a warning, for example
+  when its prep and corrections couldn't be rebuilt from the new data. Its
+  Prep and Correction pages may still show the previous import until you
+  load it again
 
 The box ends with a summary, such as "Loaded 3 of 4 datasets · 1 failed".
-It stays open when something failed and folds away when everything loaded.
+It stays open when something failed or needs attention, and folds away when
+everything loaded.
 The rows above then show the new last-loaded times.
 
 #### Preview Imported Data

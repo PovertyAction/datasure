@@ -188,6 +188,64 @@ class TestAddDialog:
         assert _step(at) == "source"
         assert at.get("radio")[0].value == "local storage"
 
+    def test_back_before_review_keeps_unfinished_answers(self, tmp_path):
+        missing = str(tmp_path / "not_there_yet.csv")
+        at = _open(_add_app)
+        at.get("radio")[0].set_value("local storage").run()
+        _click(at, "Next")
+        _text_input(at, "Alias").input("survey").run()
+        # Not a usable path, so Next: review can't capture it.
+        _text_input(at, "File path").input(missing).run()
+
+        _click(at, "Back")
+        _click(at, "Next")
+
+        assert _step(at) == "connection"
+        assert _text_input(at, "Alias").value == "survey"
+        assert _text_input(at, "File path").value == missing
+
+    def test_changes_after_returning_from_review_survive_back(self, csv_file):
+        at = _open(_add_app)
+        at.get("radio")[0].set_value("local storage").run()
+        _click(at, "Next")
+        _text_input(at, "Alias").input("survey").run()
+        _text_input(at, "File path").input(csv_file).run()
+        _click(at, "Next: review")
+        _click(at, "Back")
+
+        _text_input(at, "Alias").input("survey_r2").run()
+        _click(at, "Back")
+        _click(at, "Next")
+
+        assert _text_input(at, "Alias").value == "survey_r2"
+
+    def test_changing_source_after_back_still_starts_fresh(self, connected):
+        at = _open(_add_app)
+        at.get("radio")[0].set_value("local storage").run()
+        _click(at, "Next")
+        _text_input(at, "Alias").input("survey").run()
+        _click(at, "Back")
+
+        at.get("radio")[0].set_value("SurveyCTO").run()
+        _click(at, "Next")
+
+        assert at.session_state["import_dataset_dialog"]["values"] == {}
+
+    def test_surveycto_back_keeps_the_form_and_its_settings(self, connected):
+        at = _open(_add_app)
+        at.get("radio")[0].set_value("SurveyCTO").run()
+        _click(at, "Next")
+        _selectbox(at, "Form").set_value("hh_bc").run()
+        _text_input(at, "Alias").input("backcheck").run()
+        _text_input(at, "Also save a copy to (optional)").input("C:/x.csv").run()
+
+        _click(at, "Back")
+        _click(at, "Next")
+
+        assert _selectbox(at, "Form").value == "hh_bc"
+        assert _text_input(at, "Alias").value == "backcheck"
+        assert _text_input(at, "Also save a copy to (optional)").value == "C:/x.csv"
+
     def test_clashing_alias_is_refused_at_connection(self, csv_file):
         save_local_dataset(PROJECT, FileConfig(alias="survey", filename=csv_file))
         at = _open(_add_app)

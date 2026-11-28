@@ -8,7 +8,7 @@ from unittest.mock import MagicMock, patch
 import polars as pl
 import pytest
 
-from datasure.connectors.scto import FormConfig
+from datasure.connectors.scto import FormConfig, FormDefinitionNotSavedError
 from datasure.utils.reapply_utils import ReapplyFailure
 
 # --- Module import setup ---
@@ -484,6 +484,59 @@ class TestProcessSingleImport:
         mock_refresh.assert_not_called()
         mock_record.assert_not_called()
         assert failures == []
+
+    def test_a_definition_not_saved_still_rebuilds_and_is_flagged(self):
+        row = {"refresh": True, "alias": "survey", "source": "SurveyCTO"}
+        with (
+            patch.object(
+                import_view,
+                "_load_dataset_by_source",
+                side_effect=FormDefinitionNotSavedError("definition not saved", 7),
+            ),
+            patch.object(
+                import_view, "_refresh_downstream_data", return_value=[]
+            ) as mock_refresh,
+            patch.object(import_view, "_record_load") as mock_record,
+            patch.object(import_view, "_add_to_session_state"),
+            patch.object(import_view, "duckdb_row_counts", return_value={"survey": 9}),
+        ):
+            result, _ = import_view._process_single_import("test_project", row)
+
+        # Raw holds the new data, so it counts as loaded and downstream follows.
+        assert result.ok is True
+        assert (result.rows, result.new_rows) == (9, 7)
+        assert result.problems == ("definition not saved",)
+        mock_record.assert_called_once_with("test_project", "survey")
+        mock_refresh.assert_called_once_with("test_project", "survey")
+
+    @pytest.mark.parametrize("failing", ["_record_load", "_refresh_downstream_data"])
+    def test_a_failure_after_the_raw_import_is_flagged_not_raised(self, failing):
+        row = {"refresh": True, "alias": "survey", "source": "local storage"}
+        with (
+            patch.object(import_view, "_load_dataset_by_source", return_value=3),
+            patch.object(import_view, "_record_load"),
+            patch.object(import_view, "_refresh_downstream_data", return_value=[]),
+            patch.object(import_view, failing, side_effect=OSError("disk full")),
+            patch.object(import_view, "_add_to_session_state"),
+            patch.object(import_view, "duckdb_row_counts", return_value={"survey": 3}),
+        ):
+            result, failures = import_view._process_single_import("test_project", row)
+
+        assert result.ok is True
+        assert result.problems == ("prep and corrections not rebuilt: disk full",)
+        assert failures == []
+
+    def test_an_unreadable_row_count_is_left_blank(self):
+        row = {"refresh": False, "alias": "survey", "source": "local storage"}
+        with (
+            patch.object(import_view, "_add_to_session_state"),
+            patch.object(
+                import_view, "duckdb_row_counts", side_effect=OSError("locked")
+            ),
+        ):
+            result, _ = import_view._process_single_import("test_project", row)
+
+        assert result.rows is None
 
     def test_surveycto_result_counts_new_rows(self):
         row = {"refresh": True, "alias": "survey", "source": "SurveyCTO"}
