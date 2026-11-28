@@ -625,6 +625,14 @@ travel.
 on every rerun and guard on `st_project_id`, calling `st.stop()` when no
 project is selected. If cross-page state looks corrupted, check `app.py` first.
 
+`st_import_running` is True while the Import page's **Load data** runs. Any
+click starts a new script run, which would stop the load partway through a
+dataset, so the button only sets the flag (in its `on_click` callback). While
+it is set, `app.py` builds the menu with `position="hidden"` and skips the
+sidebar's reviewer widget, and the Import page renders only the load
+progress. The load clears the flag in a `finally` block, keeps its outcome in
+session state, and calls `st.rerun()` to bring the full page back.
+
 The demo project (`demoproject`) is started, restarted and exited through
 `utils/demo_lifecycle.py`. `reset_demo_project()` deletes everything under
 `cache/demoproject/` and reloads the bundled demo data; both Restart actions

@@ -40,6 +40,14 @@ _st.status = MagicMock()
 _st.tabs = MagicMock(return_value=[MagicMock(), MagicMock()])
 
 
+class _Rerun(BaseException):
+    """Raised by the mocked ``st.rerun()``: the real one ends the run."""
+
+
+_LOAD_RUNNING_KEY = "st_import_running"
+_LOAD_OUTCOME_KEY = "import_load_outcome"
+
+
 def _module_patches(overrides: dict | None = None):
     """Patches required for import_view's module-level code to execute.
 
@@ -102,7 +110,11 @@ def _reload_cleanly():
 
 @contextmanager
 def _reloaded_with(
-    overrides=None, button_labels=(), selectbox_map=None, project_id="test_project"
+    overrides=None,
+    button_labels=(),
+    selectbox_map=None,
+    project_id="test_project",
+    loading=False,
 ):
     """Reload import_view with baseline patches plus per-test overrides.
 
@@ -115,6 +127,12 @@ def _reloaded_with(
     `import_view.open_add_dialog`. Assertions must happen inside the
     block: on exit, the module is reloaded back to its default bindings, so
     anything read afterwards would see fresh, uncalled mocks.
+
+    With `loading`, the page runs as if Load data was just clicked: the load
+    runs under the lock and ends in ``st.rerun()``, which here raises
+    `_Rerun` and is swallowed, so the ``with`` body is skipped. Read the
+    outcome from session state, or from mocks passed in `overrides`, after
+    the block.
     """
     selectbox_map = selectbox_map or {}
     _st.session_state["st_project_id"] = project_id
@@ -141,13 +159,32 @@ def _reloaded_with(
     _st.status = MagicMock()
     _st.tabs = MagicMock(return_value=[MagicMock(), MagicMock()])
 
+    orig_rerun = _st.rerun
+    _st.rerun = MagicMock(side_effect=_Rerun)
+    _st.session_state[_LOAD_RUNNING_KEY] = loading
+    _st.session_state.pop(_LOAD_OUTCOME_KEY, None)
+
     patches = _module_patches(overrides)
     for p in patches:
         p.start()
     try:
-        importlib.reload(import_view)
-        yield import_view
+        try:
+            importlib.reload(import_view)
+        except _Rerun:
+            if not loading:
+                raise
+            reran = True
+        else:
+            reran = False
+        if reran:
+            yield None
+        else:
+            if loading:
+                pytest.fail("a locked load must end in st.rerun()")
+            yield import_view
     finally:
+        _st.rerun = orig_rerun
+        _st.session_state[_LOAD_RUNNING_KEY] = False
         for p in patches:
             p.stop()
         # Restore button/selectbox *before* the cleanup reload so it takes a
@@ -333,7 +370,7 @@ class TestGetFilteredImportLog:
 class TestLoadRawDatasets:
     """Test the load_raw_datasets orchestration."""
 
-    def test_empty_log_shows_error(self):
+    def test_empty_log_loads_nothing(self):
         with (
             patch.object(
                 import_view,
@@ -342,9 +379,9 @@ class TestLoadRawDatasets:
             ),
             patch.object(import_view, "_process_import_log") as mock_process,
         ):
-            import_view.load_raw_datasets("test_project")
+            outcome = import_view.load_raw_datasets("test_project")
 
-        _st.error.assert_called()
+        assert outcome == ([], [])
         mock_process.assert_not_called()
 
     def test_nonempty_log_is_processed(self):
@@ -385,7 +422,7 @@ class TestProcessImportLog:
             "_process_single_import",
             side_effect=self._results("a", "b"),
         ) as mock_single:
-            results = import_view._process_import_log("test_project", log)
+            results, _failures = import_view._process_import_log("test_project", log)
 
         processed = [call.args[1]["alias"] for call in mock_single.call_args_list]
         assert processed == ["a", "b"]
@@ -809,6 +846,126 @@ class TestDatasetList:
             iv.render_connections.assert_called_once_with("test_project")
 
 
+def _load_result(alias, error=None):
+    from datasure.utils.dataset_list import LoadResult
+
+    return LoadResult(
+        alias=alias,
+        source="local storage",
+        refreshed=True,
+        error=error,
+        rows=None if error else 3,
+    )
+
+
+class TestLoadLock:
+    """Load data keeps the app on this page until the load ends."""
+
+    def test_load_data_button_only_locks_the_page(self):
+        _st.session_state[_LOAD_RUNNING_KEY] = False
+        import_view._start_load()
+        assert _st.session_state[_LOAD_RUNNING_KEY] is True
+        _st.session_state[_LOAD_RUNNING_KEY] = False
+
+    def test_locked_run_renders_only_the_load(self):
+        log = _import_log_df()
+        connections, rows, nav, sidebar_help = (MagicMock() for _ in range(4))
+        with _reloaded_with(
+            overrides={
+                "datasure.utils.duckdb_utils.duckdb_get_table": {"return_value": log},
+                "datasure.utils.import_ui.render_connections": {"new": connections},
+                "datasure.utils.import_ui.render_dataset_row": {"new": rows},
+                "datasure.utils.navigations_utils.page_navigation": {"new": nav},
+                "datasure.utils.navigations_utils.demo_sidebar_help": {
+                    "new": sidebar_help
+                },
+            },
+            loading=True,
+        ):
+            pass
+
+        for rendered in (connections, rows, nav, sidebar_help):
+            rendered.assert_not_called()
+        outcome = _st.session_state.pop(_LOAD_OUTCOME_KEY)
+        assert [r.alias for r in outcome.results] == ["survey"]
+        assert _st.session_state[_LOAD_RUNNING_KEY] is False
+
+    def _locked_load(self, **load_kwargs):
+        """Run _run_locked_load with load_raw_datasets mocked; return the outcome."""
+        _st.session_state[_LOAD_RUNNING_KEY] = True
+        with (
+            patch.object(import_view, "load_raw_datasets", **load_kwargs),
+            patch.object(import_view, "duckdb_get_imported_datasets"),
+            patch.object(import_view.st, "rerun", side_effect=_Rerun),
+            pytest.raises(_Rerun),
+        ):
+            import_view._run_locked_load("test_project")
+        assert _st.session_state[_LOAD_RUNNING_KEY] is False
+        return _st.session_state.pop(_LOAD_OUTCOME_KEY)
+
+    def test_unlocks_after_a_successful_load(self):
+        outcome = self._locked_load(return_value=([_load_result("a")], []))
+        assert outcome.error is None
+        assert [r.alias for r in outcome.results] == ["a"]
+
+    def test_unlocks_after_a_partial_failure(self):
+        results = [_load_result("a"), _load_result("b", error="boom")]
+        outcome = self._locked_load(return_value=(results, []))
+        assert [r.ok for r in outcome.results] == [True, False]
+
+    def test_unlocks_and_reports_an_unexpected_error(self):
+        outcome = self._locked_load(side_effect=RuntimeError("disk full"))
+        assert outcome.error == "disk full"
+        assert outcome.results == []
+
+    def test_unlocks_when_the_run_is_interrupted(self):
+        """A rerun started elsewhere (e.g. the URL) still releases the lock."""
+        _st.session_state[_LOAD_RUNNING_KEY] = True
+        with (
+            patch.object(import_view, "load_raw_datasets", side_effect=_Rerun),
+            pytest.raises(_Rerun),
+        ):
+            import_view._run_locked_load("test_project")
+        assert _st.session_state[_LOAD_RUNNING_KEY] is False
+
+
+class TestShowLoadOutcome:
+    """The outcome of the last load shows once the full page is back."""
+
+    def _show(self, outcome):
+        _st.session_state[_LOAD_OUTCOME_KEY] = outcome
+        _st.error.reset_mock()
+        _st.success.reset_mock()
+        with patch.object(import_view, "warn_reapply_failures") as warn:
+            import_view._show_load_outcome()
+        assert _LOAD_OUTCOME_KEY not in _st.session_state
+        return warn
+
+    def test_nothing_to_show(self):
+        _st.session_state.pop(_LOAD_OUTCOME_KEY, None)
+        _st.success.reset_mock()
+        import_view._show_load_outcome()
+        _st.success.assert_not_called()
+
+    def test_all_loaded_shows_success(self):
+        warn = self._show(import_view._LoadOutcome(results=[_load_result("a")]))
+        _st.success.assert_called_once()
+        warn.assert_called_once()
+
+    def test_a_failure_shows_no_success(self):
+        result = _load_result("a", error="boom")
+        self._show(import_view._LoadOutcome(results=[result]))
+        _st.success.assert_not_called()
+
+    def test_unexpected_error_is_shown(self):
+        self._show(import_view._LoadOutcome(error="disk full"))
+        assert "disk full" in str(_st.error.call_args)
+
+    def test_no_datasets_marked_load_is_an_error(self):
+        self._show(import_view._LoadOutcome())
+        assert "No import configurations" in str(_st.error.call_args)
+
+
 def _fake_get_table_for(
     log: pl.DataFrame, preview_df: pl.DataFrame, preview_alias: str
 ):
@@ -847,20 +1004,19 @@ class TestLoadAndPreviewFlow:
                     "return_value": True
                 },
             },
-            button_labels={"Load data"},
             selectbox_map={"Dataset": "survey"},
             project_id=import_view.DEMO_PROJECT_ID,
+            loading=True,
         ):
-            # Demo datasets are folded into the raw dataset list on first
-            # load, alongside the alias the (mocked) import just loaded.
-            raw_list = _st.session_state.st_raw_dataset_list
-            assert "demo_survey" in raw_list
-            assert "demo_backcheck" in raw_list
-            assert "survey" in raw_list
-            # Load data -> preview options are stashed for the Prep page.
-            assert _st.session_state.st_prep_dataset_list == ["survey"]
-            # The preview section rendered metrics from the fetched raw data.
-            assert _st.dataframe.called
+            pass
+        # Demo datasets are folded into the raw dataset list on first
+        # load, alongside the alias the (mocked) import just loaded.
+        raw_list = _st.session_state.st_raw_dataset_list
+        assert "demo_survey" in raw_list
+        assert "demo_backcheck" in raw_list
+        assert "survey" in raw_list
+        # Load data -> preview options are stashed for the Prep page.
+        assert _st.session_state.st_prep_dataset_list == ["survey"]
 
     def test_full_flow_in_non_demo_project(self):
         """Same flow outside the demo project, to cover the non-demo branches
@@ -879,10 +1035,28 @@ class TestLoadAndPreviewFlow:
                     "return_value": ["survey"]
                 },
             },
-            button_labels={"Load data"},
+            selectbox_map={"Dataset": "survey"},
+            loading=True,
+        ):
+            pass
+        assert _st.session_state.st_prep_dataset_list == ["survey"]
+
+    def test_preview_renders_the_imported_data(self):
+        log = _import_log_df()
+        preview_df = pl.DataFrame({"a": [1, 2, None], "b": [4, None, 6]})
+        _st.dataframe.reset_mock()
+
+        with _reloaded_with(
+            overrides={
+                "datasure.utils.duckdb_utils.duckdb_get_table": {
+                    "side_effect": _fake_get_table_for(log, preview_df, "survey")
+                },
+                "datasure.utils.duckdb_utils.duckdb_get_imported_datasets": {
+                    "return_value": ["survey"]
+                },
+            },
             selectbox_map={"Dataset": "survey"},
         ):
-            assert _st.session_state.st_prep_dataset_list == ["survey"]
             assert _st.dataframe.called
 
 

@@ -84,12 +84,18 @@ config_checks_page = st.Page(
 
 st.session_state.st_config_checks_page = config_checks_page
 
+# While Load data runs, hide the page menu. Opening another page starts a
+# new script run, which stops the load partway through a dataset.
+_import_running = st.session_state.st_import_running
+_nav_position = "hidden" if _import_running else "sidebar"
+
 if not st.session_state.st_project_id:
     # --- NAVIGATION MENU WITH START PAGE ONLY #
     nav_menu = st.navigation(
         {
             "": [start_page],
         },
+        position=_nav_position,
     )
 else:
     # get list of current config page_names
@@ -134,6 +140,7 @@ else:
                 "DQA Reports": st.session_state.st_output_pages,
                 "---": [corr_page, replication_page],
             },
+            position=_nav_position,
         )
     else:
         # --- NAVIGATION MENU WITHOUT CHECK OUTPUTS AND CORRECTION PAGES--- #
@@ -141,6 +148,7 @@ else:
             {
                 "": [start_page, import_data_page, prep_data_page, config_checks_page],
             },
+            position=_nav_position,
         )
 
 
@@ -163,7 +171,9 @@ except PackageNotFoundError:
 
 with st.sidebar:
     st.divider()
-    render_reviewer_setting()
+    # A widget here would also start a new run and stop a load in progress.
+    if not _import_running:
+        render_reviewer_setting()
     _horizontal_logo = _assets_dir / "datasure-horizontal.svg"
     if _horizontal_logo.exists():
         st.image(str(_horizontal_logo), width="stretch")

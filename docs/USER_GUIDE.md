@@ -287,6 +287,11 @@ dataset is loading and what it's doing, for example "Loading 2 of 4:
 household_survey · downloading from SurveyCTO", with a bar for the whole
 batch. Media files show their own bar while they download.
 
+While data loads, the app stays on the Import page: the page menu and the
+page's other buttons are hidden until the load finishes, so nothing can stop
+it partway through a dataset. Don't refresh or close the browser tab during a
+load, as that still stops it.
+
 As each dataset finishes, the box adds a line for it:
 
 - a SurveyCTO form shows its rows and how many are new, for example

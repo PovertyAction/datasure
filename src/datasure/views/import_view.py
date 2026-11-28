@@ -1,6 +1,7 @@
 import logging
 import time
 from collections.abc import Callable
+from dataclasses import dataclass, field
 
 import polars as pl
 import streamlit as st
@@ -67,9 +68,8 @@ logger = logging.getLogger(__name__)
 # Page title and layout are set globally in app.py via st.set_page_config; the
 # per-page title is supplied by st.Page(title=...) in the navigation menu.
 
-# Add demo navigation and guidance
+# Add demo navigation; its sidebar help is added below, once no load is running.
 add_demo_navigation("import_view.py", step=2)
-demo_sidebar_help()
 
 # --- define project ID --- #
 project_id = st.session_state.st_project_id
@@ -104,16 +104,18 @@ def _datasets_caption(count: int) -> str:
 
 
 # --- Load raw dataset list from import configurations --- #
-def load_raw_datasets(project_id: str) -> list[LoadResult]:
+def load_raw_datasets(
+    project_id: str,
+) -> tuple[list[LoadResult], list[ReapplyFailure]]:
     """Load the datasets marked Load, refreshing those marked Refresh.
 
-    Returns one result per dataset; empty when nothing is marked Load.
+    Returns one result per dataset, empty when nothing is marked Load, and
+    the downstream steps that could not be reapplied.
     """
     import_log = _get_filtered_import_log(project_id)
 
     if import_log.is_empty():
-        st.error("No import configurations found. Please add import configurations.")
-        return []
+        return [], []
 
     return _process_import_log(project_id, import_log)
 
@@ -128,7 +130,9 @@ def _get_filtered_import_log(project_id: str) -> pl.DataFrame:
     return import_log.filter(pl.col("load"))
 
 
-def _process_import_log(project_id: str, import_log: pl.DataFrame) -> list[LoadResult]:
+def _process_import_log(
+    project_id: str, import_log: pl.DataFrame
+) -> tuple[list[LoadResult], list[ReapplyFailure]]:
     """Load each dataset, showing which one is loading and how each went."""
     rows = list(import_log.iter_rows(named=True))
     total = len(rows)
@@ -151,11 +155,85 @@ def _process_import_log(project_id: str, import_log: pl.DataFrame) -> list[LoadR
         label, state = load_outcome(results)
         # Collapse when all went well; the rows above show the new loads.
         status.update(label=label, state=state, expanded=state == "error")
+    return results, all_failures
+
+
+# --- Load data lock --- #
+# Load data runs in a script run of its own. Clicking anything (a page in the
+# menu, a widget) starts a new run, which stops the load partway through a
+# dataset. So the button only sets this flag; while it is set, app.py hides
+# the page menu and this page shows only the load progress. The outcome is
+# kept in session state across the rerun that brings the full page back.
+_LOAD_RUNNING_KEY = "st_import_running"
+_LOAD_OUTCOME_KEY = "import_load_outcome"
+
+
+@dataclass
+class _LoadOutcome:
+    """How the last Load data went, shown once after the page comes back."""
+
+    results: list[LoadResult] = field(default_factory=list)
+    failures: list[ReapplyFailure] = field(default_factory=list)
+    error: str | None = None
+
+
+def _start_load() -> None:
+    """Load data callback: lock the app on this page for the next run."""
+    st.session_state[_LOAD_RUNNING_KEY] = True
+
+
+def _load_running() -> bool:
+    return bool(st.session_state.get(_LOAD_RUNNING_KEY, False))
+
+
+def _run_locked_load(project_id: str) -> None:
+    """Run Load data, then always unlock and rerun to bring the page back.
+
+    An unexpected error is logged and reported after the rerun rather than
+    raised, so the app is never left on a page without its menu.
+    """
+    try:
+        results, failures = load_raw_datasets(project_id)
+        st.session_state.st_prep_dataset_list = duckdb_get_imported_datasets(project_id)
+        outcome = _LoadOutcome(results=results, failures=failures)
+    except Exception as e:
+        # UI boundary: report the failure on the page and keep the traceback.
+        logger.exception("Load data failed")
+        outcome = _LoadOutcome(error=str(e) or type(e).__name__)
+    finally:
+        st.session_state[_LOAD_RUNNING_KEY] = False
+    st.session_state[_LOAD_OUTCOME_KEY] = outcome
+    st.rerun()
+
+
+def _show_load_outcome() -> None:
+    """Show, once, how the last Load data went."""
+    outcome = st.session_state.pop(_LOAD_OUTCOME_KEY, None)
+    if outcome is None:
+        return
+    if outcome.error:
+        st.error(
+            f"Load data stopped: {outcome.error}. Datasets loaded before the "
+            "error are kept. Click **Load data** to try again.",
+            icon=":material/error:",
+        )
+        return
+    if not outcome.results:
+        st.error("No import configurations found. Please add import configurations.")
+        return
+    label, state = load_outcome(outcome.results)
+    with st.status(label, state=state, expanded=state == "error"):
+        for result in outcome.results:
+            st.markdown(result_line(result))
     warn_reapply_failures(
-        all_failures,
+        outcome.failures,
         "Some downstream data could not be fully reapplied after import",
     )
-    return results
+    if all(result.ok for result in outcome.results):
+        st.success(
+            "Data loaded. Preview it below, then prepare it on the Prep page.",
+            icon=":material/check_circle:",
+        )
 
 
 def _no_report(_stage: str) -> None:
@@ -407,6 +485,18 @@ def _render_preview(preview_options: list[str]) -> None:
         st.info("No dictionary yet.", icon=":material/menu_book:")
 
 
+# --- Load data in progress --- #
+# Only the progress renders: any other widget could start a new run.
+if _load_running():
+    page_header("Import Data", project_name(project_id), divider=False)
+    st.info(
+        "Loading data. Stay on this page: the menu comes back when the load finishes.",
+        icon=":material/hourglass_top:",
+    )
+    _run_locked_load(project_id)
+
+demo_sidebar_help()
+
 # --- Header --- #
 import_log = duckdb_get_table(project_id, alias="import_log", db_name="logs")
 dataset_count = 0 if import_log.is_empty() else import_log.height
@@ -451,24 +541,18 @@ else:
             "**Load data**. Scroll down to **Preview** to continue."
         )
     with st.container(horizontal=True, vertical_alignment="center"):
-        load_btn = st.button(
+        st.button(
             "Load data",
             type="primary",
             icon=":material/download:",
             key="load_data_key",
+            on_click=_start_load,
             # With nothing marked Load, the summary beside it says so.
             disabled=not import_log["load"].any(),
         )
         summary_slot = st.empty()
 
-    if load_btn:
-        results = load_raw_datasets(project_id)
-        st.session_state.st_prep_dataset_list = duckdb_get_imported_datasets(project_id)
-        if results and all(result.ok for result in results):
-            st.success(
-                "Data loaded. Preview it below, then prepare it on the Prep page.",
-                icon=":material/check_circle:",
-            )
+    _show_load_outcome()
 
     aliases = import_log["alias"].to_list()
     dataset_list = build_dataset_list(import_log, get_load_info(project_id, aliases))
