@@ -165,9 +165,23 @@ When you import a configuration file:
 - Preview imported data
 - Verify data structure
 
-#### Import Options
+#### The Import Page
 
-Import sources are added via the **"Add Import Configuration"** popover. Click it and select the import type from the **Import Type** dropdown.
+The page lists every dataset in the project. From top to bottom it has:
+
+- **Add dataset**: the button next to the page title. It opens a step-by-step
+  dialog
+- **Connections**: your saved SurveyCTO servers. This section is open while
+  nothing is connected, and folded away with a one-line summary once a
+  server is saved
+- **Datasets**: one row per dataset, showing its source, where it comes from,
+  how many rows it has and when it was last loaded
+- **Load data**: imports the datasets, with a line saying what it will do,
+  for example "Loads 3 datasets · refreshes 2 from source"
+- **Preview**: a look at one imported dataset
+
+A new project shows a short message telling you to add a connection or a
+dataset first.
 
 **Naming rules.** Dataset aliases and check page names follow the same rules:
 
@@ -179,11 +193,11 @@ Import sources are added via the **"Add Import Configuration"** popover. Click i
   name, so DataSure rejects the second one and names the existing one it
   clashes with
 
-##### Option A: SurveyCTO Integration
+#### Connections
 
-First save your SurveyCTO sign-in, once per server:
+Save your SurveyCTO sign-in once per server:
 
-1. Under **Manage Credentials**, click **Add Credentials**
+1. Open **Connections** and click **Add connection**
 2. Enter:
    - **Server name**: The name of your SurveyCTO server, for example
      `myserver` for `myserver.surveycto.com`
@@ -192,56 +206,114 @@ First save your SurveyCTO sign-in, once per server:
      keyring, never written to disk)
 3. Click **Connect & Save Credentials**
 
-**Remove Credentials** deletes a saved sign-in, including the password in
-your OS keyring.
+**Remove connection** deletes a saved sign-in, including the password in your
+OS keyring. **Keyring diagnostics** checks that DataSure can store passwords
+on this computer, with tips if it can't.
 
-Then add each form:
+Local files need no connection.
 
-1. Under **Import Data From Sources**, click **Add Import Configuration**
-2. Select **"SurveyCTO"** from the Import Type dropdown
-3. Choose the saved sign-in under **Select Server Credentials**
-4. Choose the form under **Select Form ID**
-5. Configure import settings:
-   - **Alias**: A short name for the dataset (see **Naming rules** above)
-   - **Download attachments** (optional)
-   - **File path for Private Key** (encrypted forms only)
-   - **File path to save data** (optional)
-6. Click **Add Form**
-7. Click **Load Data** to download the data
+#### Adding a Dataset
+
+Click **Add dataset**. The dialog has three steps, and **Back** returns to the
+previous step without losing your answers. Nothing is saved until you
+confirm the last step.
+
+1. **Source**: choose **SurveyCTO** or **Local file**
+2. **Connection**: say where the data is (see below)
+3. **Review**: check the summary, then click **Add dataset**
+
+Adding a dataset only puts it on the list. Click **Load data** to import it,
+so you can add several datasets and load them together.
+
+**SurveyCTO forms.** Choose the saved server and the form, then set:
+
+- **Alias**: A short name for the dataset (see **Naming rules** above).
+  DataSure suggests one from the form title
+- **Private key file** (encrypted forms only): the path to the form's `.pem`
+  key. Without it, only published fields are downloaded
+- **Also save a copy to** (optional): a file path for a copy of the data
+- **Download media** (optional): download images, audio and other files
+
+If no server is saved yet, the step asks you to add one under
+**Connections** first.
 
 > **Note**: Each refresh downloads every submission again, so refreshing a
 > large or encrypted form takes about as long as the first import. Your data
 > is complete either way. See [KNOWN_ISSUES.md](../KNOWN_ISSUES.md)
 > (KI-015).
 
-##### Option B: Local File
+**Local files.** DataSure reads the file from where it is on your computer,
+so you enter its path rather than uploading it. Enter:
 
-DataSure reads the file from where it is on your computer, so you enter its
-path rather than uploading it. **Load Data** reads the file again, so a file
-you update in place is picked up on the next load.
+- **Alias**: A short name for the dataset (see **Naming rules** above)
+- **File path**: The file's full path, for example `C:/data/survey.dta`.
+  Supported formats: .csv, .xlsx, .json, .dta (Stata), .parquet. Save legacy
+  Excel (.xls) files as .xlsx first
 
-1. Click **Add Import Configuration**
-2. Select **"local storage"** from the Import Type dropdown
-3. Enter:
-   - **Alias**: A short name for the dataset (see **Naming rules** above)
-   - **File Path**: The file's full path, for example `C:/data/survey.dta`.
-     Supported formats: .csv, .xlsx, .json, .dta (Stata), .parquet. Save
-     legacy Excel (.xls) files as .xlsx first
-   - **Sheet Name** (Excel files only)
-4. Click **Add File**
-5. Click **Load Data**
+DataSure checks the path as you type: it says whether the file exists and
+whether its type is supported, and lists the sheets of an Excel file so you
+can pick one. The file is read again from that path each time the dataset is
+refreshed, so keep it in place; a synced folder works well.
 
-Use **Edit Import Configuration** to change a source, and **Remove Import
-Configuration** to delete it with its imported, prepared and corrected data.
+#### Working with the Dataset List
+
+Each row has three switches:
+
+- **Refresh**: download or re-read the dataset from its source on the next
+  **Load data**. Turn it off to keep the copy already imported
+- **Load**: include the dataset when you click **Load data**
+- **Media**: download media files with a SurveyCTO form. It's switched off
+  and greyed out for local files, which have no media
+
+Switches are saved as soon as you change them and take effect on the next
+**Load data**. Refresh only matters for datasets marked Load.
+
+When a project has more than 8 datasets, a **All / SurveyCTO / Local** filter
+appears above the list.
+
+The **⋮** menu on each row has:
+
+- **Edit**: opens the same dialog, filled in with the dataset's settings. The
+  alias and source can't be changed. Saving a SurveyCTO dataset turns its
+  Refresh and Load back on
+- **Remove**: asks first, then deletes the dataset's settings and its
+  imported, prepared and corrected data, and any stored SurveyCTO form
+  definitions. The source file or form isn't changed
+
+#### Loading Data
+
+**Load data** imports every dataset marked Load. A status box shows which
+dataset is loading and what it's doing, for example "Loading 2 of 4:
+household_survey · downloading from SurveyCTO", with a bar for the whole
+batch. Media files show their own bar while they download.
+
+As each dataset finishes, the box adds a line for it:
+
+- a SurveyCTO form shows its rows and how many are new, for example
+  "1,284 rows (38 new) · 12 s"
+- a local file shows its rows and says it was re-read from the file
+- a dataset with Refresh off keeps the copy already imported
+- a dataset that fails shows why, for example a sign-in or file problem.
+  The other datasets still load, and the failed one keeps its last
+  imported copy
+- a dataset that loaded but needs attention shows a warning, for example
+  when its prep and corrections couldn't be rebuilt from the new data. Its
+  Prep and Correction pages may still show the previous import until you
+  load it again
+
+The box ends with a summary, such as "Loaded 3 of 4 datasets · 1 failed".
+It stays open when something failed or needs attention, and folds away when
+everything loaded.
+The rows above then show the new last-loaded times.
 
 #### Preview Imported Data
 
-After import, you'll see:
+Pick an imported dataset under **Dataset** to see:
 
-- **Dataset tabs**: Switch between imported datasets
-- **Column information**: Names, types, counts
-- **Sample data**: First 100 rows preview
-- **Data metrics**: Total rows, columns, missing values
+- **Data metrics**: Total rows, columns and the share of missing values
+- **Data**: the imported data
+- **Dictionary**: the dataset's data dictionary. This tab says "No dictionary
+  yet" for now
 
 **Demo Data Includes**:
 

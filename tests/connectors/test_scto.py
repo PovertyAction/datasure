@@ -4,6 +4,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import Mock, patch
 
+import duckdb
 import polars as pl
 import pyarrow as pa
 import pytest
@@ -13,6 +14,7 @@ from datasure.connectors.scto import (
     CacheManager,
     ConnectionError,
     FormConfig,
+    FormDefinitionNotSavedError,
     FormType,
     MediaDownloader,
     MediaType,
@@ -2310,6 +2312,34 @@ class TestTypedImport:
             client._import_regular_form(form_config)
         mock_save.assert_not_called()
         mock_save_definition.assert_not_called()
+
+    @patch("datasure.connectors.scto.save_form_definition")
+    @patch("datasure.connectors.scto.duckdb_save_table")
+    def test_definition_failure_after_raw_says_raw_was_saved(
+        self, mock_save, mock_save_definition, client, form_config
+    ):
+        mock_save_definition.side_effect = duckdb.IOException("logs locked")
+
+        with pytest.raises(FormDefinitionNotSavedError) as raised:
+            client._import_regular_form(form_config)
+
+        mock_save.assert_called_once()
+        assert raised.value.new_rows == len(FARM_ROWS)
+        assert isinstance(raised.value.__cause__, duckdb.IOException)
+
+    @patch("datasure.connectors.scto.delete_form_definitions")
+    @patch("datasure.connectors.scto.duckdb_save_table")
+    def test_server_dataset_definition_failure_says_raw_was_saved(
+        self, mock_save, mock_delete, client, form_config
+    ):
+        client._scto_client.download_dataset_csv.return_value = b"a\n1\n2\n"
+        mock_delete.side_effect = duckdb.IOException("logs locked")
+
+        with pytest.raises(FormDefinitionNotSavedError) as raised:
+            client._import_server_dataset(form_config)
+
+        mock_save.assert_called_once()
+        assert raised.value.new_rows == 2
 
     @patch("datasure.connectors.scto.save_form_definition")
     @patch("datasure.connectors.scto.duckdb_save_table")

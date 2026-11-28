@@ -1,23 +1,44 @@
+import logging
+import time
+from collections.abc import Callable
+
 import polars as pl
 import streamlit as st
 
-from datasure.connectors.local import load_local_data, render_local_file_form
+from datasure.connectors.local import import_local_file
 from datasure.connectors.scto import (
     FormConfig,
-    SurveyCTOUI,
-    download_forms,
+    FormDefinitionNotSavedError,
+    SurveyCTOClient,
 )
 from datasure.processing.corrections import CorrectionProcessor
 from datasure.processing.prep import prep_apply_action
+from datasure.utils.dataset_list import (
+    LOCAL_SOURCE,
+    SOURCE_FILTERS,
+    SURVEYCTO_SOURCE,
+    LoadResult,
+    build_dataset_list,
+    filter_rows,
+    load_outcome,
+    result_line,
+)
 from datasure.utils.duckdb_utils import (
-    delete_form_definitions,
-    duckdb_delete_rows,
     duckdb_get_aliases,
     duckdb_get_imported_datasets,
     duckdb_get_table,
-    duckdb_remove_table,
-    duckdb_save_table,
+    duckdb_row_counts,
     duckdb_table_exists,
+)
+from datasure.utils.import_log import dataset_entry, get_load_info, record_load
+from datasure.utils.import_ui import (
+    NOTICE_SCOPE,
+    open_add_dialog,
+    open_edit_dialog,
+    open_remove_dialog,
+    project_name,
+    render_connections,
+    render_dataset_row,
 )
 from datasure.utils.names import STORED_NAME
 from datasure.utils.navigations_utils import (
@@ -33,13 +54,14 @@ from datasure.utils.onboarding_utils import (
     is_demo_project,
 )
 from datasure.utils.reapply_utils import ReapplyFailure, warn_reapply_failures
-from datasure.utils.secure_credentials import (
-    delete_stored_credentials,
-    list_stored_credentials,
-    test_keyring_availability,
+from datasure.utils.ui_utils import (
+    metric_row,
+    page_header,
+    section_header,
+    show_queued_notices,
 )
-from datasure.utils.settings_utils import trigger_save
-from datasure.utils.ui_utils import confirm_dialog, page_header, section_header
+
+logger = logging.getLogger(__name__)
 
 # --- CONFIGURE PAGE --- #
 # Page title and layout are set globally in app.py via st.set_page_config; the
@@ -49,15 +71,11 @@ from datasure.utils.ui_utils import confirm_dialog, page_header, section_header
 add_demo_navigation("import_view.py", step=2)
 demo_sidebar_help()
 
-page_header(
-    "Import Data",
-    "Connect a data source and load survey data into your project.",
-)
-
 # --- define project ID --- #
 project_id = st.session_state.st_project_id
 
 if not project_id:
+    page_header("Import Data", divider=False)
     st.info(
         "Please select a project from the Start page to import data. "
         "You can also create a new project from the Start page."
@@ -81,25 +99,23 @@ if "st_prep_dataset_list" not in st.session_state:
     st.session_state.st_prep_dataset_list = None
 
 
+def _datasets_caption(count: int) -> str:
+    return f"{count} dataset" if count == 1 else f"{count} datasets"
+
+
 # --- Load raw dataset list from import configurations --- #
-def load_raw_datasets(project_id: str) -> None:
-    """Load raw dataset list from the cache file.
+def load_raw_datasets(project_id: str) -> list[LoadResult]:
+    """Load the datasets marked Load, refreshing those marked Refresh.
 
-    PARAMS:
-    -------
-    project_id: str : project ID
-
-    Returns
-    -------
-    None
+    Returns one result per dataset; empty when nothing is marked Load.
     """
     import_log = _get_filtered_import_log(project_id)
 
     if import_log.is_empty():
         st.error("No import configurations found. Please add import configurations.")
-        return
+        return []
 
-    _process_import_log(project_id, import_log)
+    return _process_import_log(project_id, import_log)
 
 
 def _get_filtered_import_log(project_id: str) -> pl.DataFrame:
@@ -112,30 +128,127 @@ def _get_filtered_import_log(project_id: str) -> pl.DataFrame:
     return import_log.filter(pl.col("load"))
 
 
-def _process_import_log(project_id: str, import_log: pl.DataFrame) -> None:
-    """Process all rows in import log with status updates."""
+def _process_import_log(project_id: str, import_log: pl.DataFrame) -> list[LoadResult]:
+    """Load each dataset, showing which one is loading and how each went."""
+    rows = list(import_log.iter_rows(named=True))
+    total = len(rows)
+    results: list[LoadResult] = []
     all_failures: list[ReapplyFailure] = []
-    with st.status("Loading datasets ...", expanded=True) as status:
-        for row in import_log.iter_rows(named=True):
-            all_failures.extend(_process_single_import(project_id, row))
-        status.update(
-            label="Data loaded successfully!", state="complete", expanded=True
-        )
+    with st.status(f"Loading {_datasets_caption(total)}...", expanded=True) as status:
+        progress = st.progress(0.0)
+        for index, row in enumerate(rows):
+            prefix = f"Loading {index + 1} of {total}: {row['alias']}"
+
+            def report(stage: str, prefix: str = prefix) -> None:
+                status.update(label=f"{prefix} · {stage}")
+
+            progress.progress(index / total, text=prefix)
+            result, failures = _process_single_import(project_id, row, report)
+            results.append(result)
+            all_failures.extend(failures)
+            st.markdown(result_line(result))
+        progress.empty()
+        label, state = load_outcome(results)
+        # Collapse when all went well; the rows above show the new loads.
+        status.update(label=label, state=state, expanded=state == "error")
     warn_reapply_failures(
         all_failures,
         "Some downstream data could not be fully reapplied after import",
     )
+    return results
 
 
-def _process_single_import(project_id: str, row: dict) -> list[ReapplyFailure]:
-    """Process a single import configuration row."""
+def _no_report(_stage: str) -> None:
+    """Default stage reporter: say nothing."""
+
+
+def _process_single_import(
+    project_id: str, row: dict, report: Callable[[str], None] = _no_report
+) -> tuple[LoadResult, list[ReapplyFailure]]:
+    """Load one dataset; return how it went and any steps not reapplied.
+
+    A dataset that fails to load is reported and skipped, so the others
+    still load, and its imported copy is left as it was. A failure after the
+    raw import (bookkeeping, rebuilding prep and corrections) is reported as
+    a problem on a loaded dataset, and doesn't stop the batch either.
+    """
+    alias = row["alias"]
+    refreshed = bool(row["refresh"]) and row["source"] in _LOADERS
     failures: list[ReapplyFailure] = []
-    if row["refresh"]:
-        _load_dataset_by_source(project_id, row)
-        failures = _refresh_downstream_data(project_id, row["alias"])
+    problems: list[str] = []
+    error = None
+    new_rows = None
+    started = time.monotonic()
+    if refreshed:
+        report(_STAGE_LABELS[row["source"]])
+        try:
+            new_rows = _load_dataset_by_source(project_id, row)
+        except FormDefinitionNotSavedError as e:
+            # Raw already holds the new data: carry on so downstream data
+            # is rebuilt from it, and say what wasn't saved.
+            logger.exception("Form definition not saved for dataset %s", alias)
+            new_rows = e.new_rows
+            problems.append(str(e))
+        except Exception as e:
+            # UI boundary: one failed dataset must not stop the batch, but
+            # the traceback has to land in the logs.
+            logger.exception("Failed to load dataset %s", alias)
+            error = str(e) or type(e).__name__
+        if error is None:
+            report("reapplying prep and corrections")
+            rebuild_failures, rebuild_problem = _after_raw_import(project_id, alias)
+            failures = rebuild_failures
+            if rebuild_problem:
+                problems.append(rebuild_problem)
 
-    _add_to_session_state(row["alias"])
-    return failures
+    _add_to_session_state(alias)
+    result = LoadResult(
+        alias=alias,
+        source=row["source"],
+        refreshed=refreshed,
+        error=error,
+        rows=_raw_row_count(project_id, alias),
+        new_rows=new_rows if row["source"] == SURVEYCTO_SOURCE else None,
+        seconds=time.monotonic() - started,
+        reapply_failures=len(failures),
+        problems=tuple(problems),
+    )
+    return result, failures
+
+
+def _after_raw_import(
+    project_id: str, alias: str
+) -> tuple[list[ReapplyFailure], str | None]:
+    """Record the load and rebuild downstream data after a raw import.
+
+    Returns the steps not reapplied, and a description of the failure when
+    this work couldn't finish.
+    """
+    try:
+        _record_load(project_id, alias)
+        return _refresh_downstream_data(project_id, alias), None
+    except Exception as e:
+        # UI boundary: raw has loaded, so report the rest as a problem on
+        # this dataset instead of stopping the batch.
+        logger.exception("Failed to rebuild prep and corrections for %s", alias)
+        detail = str(e) or type(e).__name__
+        return [], f"prep and corrections not rebuilt: {detail}"
+
+
+def _raw_row_count(project_id: str, alias: str) -> int | None:
+    """Return a dataset's imported row count, or ``None`` if it can't be read."""
+    try:
+        return duckdb_row_counts(project_id, [alias], "raw").get(alias)
+    except Exception:
+        # UI boundary: a count is only shown, never worth stopping the batch.
+        logger.exception("Could not count the rows of %s", alias)
+        return None
+
+
+def _record_load(project_id: str, alias: str) -> None:
+    """Note the load time of a refreshed dataset that has imported data."""
+    if duckdb_table_exists(project_id, alias=alias, db_name="raw"):
+        record_load(project_id, alias)
 
 
 def _refresh_downstream_data(project_id: str, alias: str) -> list[ReapplyFailure]:
@@ -157,17 +270,19 @@ def _refresh_downstream_data(project_id: str, alias: str) -> list[ReapplyFailure
     return failures
 
 
-def _load_dataset_by_source(project_id: str, row: dict) -> None:
-    """Load dataset based on source type."""
-    if row["source"] == "local storage":
-        _load_from_local_storage(project_id, row)
-    elif row["source"] == "SurveyCTO":
-        _load_from_surveycto(project_id, row)
+def _load_dataset_by_source(project_id: str, row: dict) -> int | None:
+    """Load a dataset from its source; return the rows it imported or added.
+
+    Raises when the dataset can't be loaded. Other sources (the demo
+    datasets) aren't loaded and return ``None``.
+    """
+    loader = _LOADERS.get(row["source"])
+    return loader(project_id, row) if loader else None
 
 
-def _load_from_local_storage(project_id: str, row: dict) -> None:
-    """Load dataset from local storage."""
-    load_local_data(
+def _load_from_local_storage(project_id: str, row: dict) -> int:
+    """Read a dataset's local file; return its row count."""
+    return import_local_file(
         project_id=project_id,
         alias=row["alias"],
         filename=row["filename"],
@@ -175,13 +290,19 @@ def _load_from_local_storage(project_id: str, row: dict) -> None:
     )
 
 
-def _load_from_surveycto(project_id: str, row: dict) -> None:
-    """Load dataset from SurveyCTO."""
-    form_configs = _create_form_config(row)
-    download_forms(
-        project_id=project_id,
-        form_configs=[form_configs],
-    )
+def _load_from_surveycto(project_id: str, row: dict) -> int:
+    """Download a dataset's SurveyCTO form; return how many rows it added."""
+    return SurveyCTOClient(project_id).import_data(_create_form_config(row))
+
+
+_LOADERS = {
+    LOCAL_SOURCE: _load_from_local_storage,
+    SURVEYCTO_SOURCE: _load_from_surveycto,
+}
+_STAGE_LABELS = {
+    LOCAL_SOURCE: "reading the file",
+    SURVEYCTO_SOURCE: "downloading from SurveyCTO",
+}
 
 
 def _create_form_config(row: dict) -> FormConfig:
@@ -224,314 +345,57 @@ def _percent_missing(data: pl.DataFrame) -> float:
     return data.null_count().sum_horizontal().item() / total_cells * 100
 
 
-# --- Update import log in the cache file --- #
-def update_import_log(import_log: pl.DataFrame) -> None:
-    """Update the import log in the cache file."""
-    # reaarnge columns to match the import log structure
-    import_log = import_log.select(
+def _edit_dataset(alias: str) -> None:
+    entry = dataset_entry(project_id, alias)
+    if entry:
+        open_edit_dialog(project_id, entry)
+
+
+def _after_remove(_alias: str) -> None:
+    st.session_state.st_raw_dataset_list = duckdb_get_aliases(project_id)
+
+
+def _remove_dataset(alias: str) -> None:
+    open_remove_dialog(project_id, alias, on_removed=_after_remove)
+
+
+def _render_preview(preview_options: list[str]) -> None:
+    """Preview one imported dataset: its metrics, its data and its dictionary."""
+    section_header("Preview", icon=":material/table_view:")
+
+    if is_demo_project():
+        demo_callout(ImportDemoInfo.get_info_message("preview_data_info"))
+
+    selected_dataset = st.selectbox(
+        "Dataset",
+        options=sorted(preview_options),
+        key="imported_data_select",
+        width=320,
+    )
+    preview_data = duckdb_get_table(project_id, alias=selected_dataset, db_name="raw")
+
+    metric_row(
         [
-            "refresh",
-            "load",
-            "alias",
-            "filename",
-            "sheet_name",
-            "source",
-            "server",
-            "username",
-            "form_id",
-            "private_key",
-            "save_to",
-            "attachments",
+            (
+                "Rows",
+                f"{preview_data.height:,}",
+                "Number of rows in the imported dataset.",
+            ),
+            (
+                "Columns",
+                f"{preview_data.width:,}",
+                "Number of columns in the imported dataset.",
+            ),
+            (
+                "Missing Data",
+                f"{_percent_missing(preview_data):.2f}%",
+                "Percentage of missing data in the imported dataset.",
+            ),
         ]
     )
-    edited_import_log = st.data_editor(
-        data=import_log,
-        key="import_data_editor",
-        width="stretch",
-        column_config={
-            "refresh": st.column_config.CheckboxColumn("Refresh?"),
-            "load": st.column_config.CheckboxColumn("Load?"),
-            "alias": st.column_config.TextColumn("Alias", disabled=True),
-            "filename": st.column_config.TextColumn("Filename", disabled=True),
-            "sheet_name": st.column_config.TextColumn("Sheet Name", disabled=True),
-            "source": st.column_config.TextColumn("Source", disabled=True),
-            "server": st.column_config.TextColumn("Server", disabled=True),
-            "username": st.column_config.TextColumn("Username", disabled=True),
-            "form_id": st.column_config.TextColumn("Form ID", disabled=True),
-            "private_key": st.column_config.TextColumn("Private Key", disabled=True),
-            "save_to": st.column_config.TextColumn("Save To", disabled=True),
-            "attachments": st.column_config.CheckboxColumn("Download Media?"),
-        },
-        on_change=trigger_save,
-        kwargs={"state_name": "refresh_import_log"},
-    )
-    if "refresh_import_log" in st.session_state and st.session_state.refresh_import_log:
-        # Save the edited import log to the database
-        duckdb_save_table(
-            project_id=project_id,
-            table_data=edited_import_log,
-            alias="import_log",
-            db_name="logs",
-        )
-        st.session_state.refresh_import_log = False
 
-
-# --- Credential Manager --- #
-if is_demo_project():
-    demo_callout(ImportDemoInfo.get_info_message("surveycto_info"))
-with st.container(border=True):
-    section_header("Manage Credentials", icon=":material/key:")
-    st.write("Import and manage your credentials for data import.")
-
-    kc1, kc2, kc3 = st.columns([0.4, 0.3, 0.3])
-
-    with (
-        kc1,
-        st.popover("Add Credentials", width="stretch", icon=":material/add:"),
-    ):
-        st.write("Add your SurveyCTO login credentials for data import.")
-        SurveyCTOUI(project_id).render_login_form()
-
-    with (
-        kc2,
-        st.popover("Remove Credentials", width="stretch", icon=":material/delete:"),
-    ):
-        st.write("**Remove Credentials**")
-        saved_credentials = list_stored_credentials(project_id).get("credentials", {})
-        select_credentials = st.selectbox(
-            "Select Credentials to Delete",
-            options=saved_credentials.keys(),
-            index=None,
-        )
-        if st.button(
-            "Delete Credentials",
-            type="primary",
-            width="stretch",
-            disabled=not select_credentials,
-        ):
-            selected_server = saved_credentials[select_credentials].get("server", "")
-            selected_type = saved_credentials[select_credentials].get(
-                "credential_type", "scto_login"
-            )
-            result = delete_stored_credentials(
-                project_id=project_id,
-                server=selected_server,
-                credential_type=selected_type,
-            )
-            if result["success"]:
-                st.success(
-                    f"Credentials for {select_credentials} deleted successfully."
-                )
-            else:
-                st.error(
-                    f"Could not delete credentials for {select_credentials}: "
-                    f"{result['error']}"
-                )
-
-    with (
-        kc3,
-        st.popover("Keyring Diagnostics", width="stretch", icon=":material/build:"),
-    ):
-        st.write("**Keyring Diagnostics**")
-        if st.button("Test Keyring Availability", width="stretch"):
-            keyring_status = test_keyring_availability()
-            if keyring_status["success"]:
-                st.success(
-                    f":material/check: Keyring working: {keyring_status['backend']}"
-                )
-                st.info(keyring_status["message"])
-                if keyring_status.get("warning"):
-                    st.warning(keyring_status["warning"])
-            else:
-                st.error(f":material/close: Keyring issue: {keyring_status['error']}")
-                st.info("**Troubleshooting Tips:**")
-                st.markdown("""
-                - **Windows**: Ensure Windows Credential Manager is accessible
-                - **macOS**: Check Keychain Access permissions
-                - **Linux**: Install and configure a keyring backend (gnome-keyring, kwallet)
-                - **Headless server or container**: select an encrypted backend with
-                  `PYTHON_KEYRING_BACKEND` (see "Running on a server" in the README)
-                """)
-
-with st.container(border=True):
-    section_header("Import Data From Sources", icon=":material/database:")
-    st.write("Add, edit, or remove the data sources for this project.")
-
-    # -- Add configurations for import data -- #
-    ac1, ac2, ac3 = st.columns([0.4, 0.4, 0.2])
-    aliases = duckdb_get_aliases(project_id, to_load=False)
-    with (
-        ac1,
-        st.popover("Add Import Configuration", width="stretch", icon=":material/add:"),
-    ):
-        import_type = st.selectbox(
-            "Import Type", options=["local storage", "SurveyCTO"], index=None
-        )
-        if import_type == "local storage":
-            render_local_file_form(project_id)
-        elif import_type == "SurveyCTO":
-            SurveyCTOUI(project_id).render_form_config()
-    with (
-        ac2,
-        st.popover(
-            "Edit Import Configuration",
-            width="stretch",
-            icon=":material/edit:",
-            disabled=not aliases,
-        ),
-    ):
-        edit_config = st.selectbox(
-            "Select Data to Edit",
-            options=aliases,
-            index=None,
-        )
-        if edit_config:
-            import_log = duckdb_get_table(
-                project_id, alias="import_log", db_name="logs"
-            )
-            # -- Get the selected import configuration details -- #
-            selected_config = import_log.filter(
-                pl.col("alias") == edit_config
-            ).to_dicts()[0]
-            if selected_config["source"] == "local storage":
-                render_local_file_form(
-                    project_id, edit_mode=True, defaults=selected_config
-                )
-            elif selected_config["source"] == "SurveyCTO":
-                SurveyCTOUI(project_id).render_form_config(
-                    edit_mode=True, defaults=selected_config
-                )
-            else:
-                st.error("Invalid import source.")
-    with (
-        ac3,
-        st.popover(
-            "Remove Import Configuration",
-            width="stretch",
-            icon=":material/clear:",
-            disabled=not aliases,
-        ),
-    ):
-        remove_column_options = duckdb_get_aliases(project_id, to_load=False)
-        remove_data = st.selectbox(
-            "Select Data to Remove",
-            options=remove_column_options,
-            index=None,
-            key="remove_import_config_select",
-        )
-
-        def _remove_import_configuration(alias: str):
-            """Remove an import configuration and its raw/prep/corrected data."""
-            duckdb_delete_rows(
-                project_id=project_id,
-                alias="import_log",
-                db_name="logs",
-                column="alias",
-                value=alias,
-            )
-            duckdb_remove_table(project_id, alias=alias, db_name="raw")
-            delete_form_definitions(project_id, alias)
-            # check if the table exist in prep, if yes remove it
-            if duckdb_table_exists(project_id, alias=alias, db_name="prep"):
-                duckdb_remove_table(project_id, alias=alias, db_name="prep")
-            # check if the table exist in corrected db, if yes remove it
-            if duckdb_table_exists(project_id, alias=alias, db_name="corrected"):
-                duckdb_remove_table(project_id, alias=alias, db_name="corrected")
-            st.session_state.st_raw_dataset_list = duckdb_get_aliases(project_id)
-
-        if st.button(
-            "Remove Data", type="primary", width="stretch", disabled=not remove_data
-        ):
-            confirm_dialog(
-                "Remove import configuration",
-                f"This permanently removes **{remove_data}** and its imported, "
-                "prepared, and corrected data. This cannot be undone.",
-                confirm_label="Remove",
-                on_confirm=lambda: _remove_import_configuration(remove_data),
-            )
-
-import_log = duckdb_get_table(project_id, alias="import_log", db_name="logs")
-if not import_log.is_empty():
-    # -- Update import log in the DB on change -- #
-    update_import_log(import_log)
-
-    # -- Load data from import configurations -- #
-    if is_demo_project():
-        demo_callout(
-            "Your demo data is already loaded. You do not need to click **Load Data** — "
-            "scroll down to **Preview Imported Data** to continue."
-        )
-    ld1, ld2 = st.columns([0.3, 0.7])
-    with ld1:
-        load_btn = st.button(
-            "Load Data",
-            type="primary",
-            width="stretch",
-            key="load_data_key",
-        )
-
-    if load_btn:
-        with ld2:
-            # Load raw datasets from import configurations
-            load_raw_datasets(project_id)
-            preview_options = duckdb_get_imported_datasets(project_id)
-            st.session_state.st_prep_dataset_list = preview_options
-
-        # display success message and link to the prep section
-        with st.container(border=True):
-            st.success(
-                "Data loaded successfully! You can now preview the imported data in the Prep section."
-            )
-
-    preview_options = duckdb_get_imported_datasets(project_id)
-    if preview_options:
-        # --- Preview imported data --- #
-        # activate prep section
-
-        section_header("Preview Imported Data")
-
-        # Demo guidance
-        if is_demo_project():
-            demo_callout(ImportDemoInfo.get_info_message("preview_data_info"))
-        sb, _, mb1, mb2, mb3 = st.columns([0.3, 0.25, 0.15, 0.15, 0.15])
-        with sb:
-            selected_dataset = st.selectbox(
-                "Select Dataset",
-                options=sorted(preview_options),
-                key="imported_data_select",
-            )
-
-        preview_data = duckdb_get_table(
-            project_id,
-            alias=selected_dataset,
-            db_name="raw",
-        )
-
-        num_rows = preview_data.height
-        mb1.metric(
-            label="Rows",
-            value=f"{num_rows:,}",
-            help="Number of rows in the imported dataset.",
-            border=True,
-        )
-
-        num_columns = preview_data.width
-        mb2.metric(
-            label="Columns",
-            value=f"{num_columns:,}",
-            help="Number of columns in the imported dataset.",
-            border=True,
-        )
-
-        perc_missing = _percent_missing(preview_data)
-
-        mb3.metric(
-            label="Missing Data",
-            value=f"{perc_missing:.2f}%",
-            help="Percentage of missing data in the imported dataset.",
-            border=True,
-        )
-
+    data_tab, dictionary_tab = st.tabs(["Data", "Dictionary"])
+    with data_tab:
         if preview_data.is_empty():
             st.info(
                 f"**{selected_dataset}** has no rows yet. If it comes from "
@@ -539,14 +403,101 @@ if not import_log.is_empty():
             )
         else:
             st.dataframe(preview_data, width="stretch")
+    with dictionary_tab:
+        st.info("No dictionary yet.", icon=":material/menu_book:")
 
-        # Demo next action
+
+# --- Header --- #
+import_log = duckdb_get_table(project_id, alias="import_log", db_name="logs")
+dataset_count = 0 if import_log.is_empty() else import_log.height
+
+with st.container(horizontal=True, vertical_alignment="bottom"):
+    with st.container(gap=None):
+        page_header(
+            "Import Data",
+            f"{project_name(project_id)} · {_datasets_caption(dataset_count)}",
+            divider=False,
+        )
+    if st.button(
+        "Add dataset",
+        type="primary",
+        icon=":material/add:",
+        key="add_dataset_button",
+    ):
+        open_add_dialog(project_id)
+
+show_queued_notices(NOTICE_SCOPE)
+
+# --- Connections --- #
+if is_demo_project():
+    demo_callout(ImportDemoInfo.get_info_message("surveycto_info"))
+render_connections(project_id)
+
+if import_log.is_empty():
+    st.info(
+        "This project has no datasets yet. If your data is on SurveyCTO, "
+        "connect a server under **Connections** first. Then click "
+        "**Add dataset** to add a form or a file on this computer.",
+        icon=":material/info:",
+    )
+else:
+    # --- Dataset rows --- #
+    # Filled after Load data runs below, so rows show the new load times.
+    rows_area = st.container()
+
+    if is_demo_project():
+        demo_callout(
+            "Your demo data is already loaded. You do not need to click "
+            "**Load data**. Scroll down to **Preview** to continue."
+        )
+    with st.container(horizontal=True, vertical_alignment="center"):
+        load_btn = st.button(
+            "Load data",
+            type="primary",
+            icon=":material/download:",
+            key="load_data_key",
+            # With nothing marked Load, the summary beside it says so.
+            disabled=not import_log["load"].any(),
+        )
+        summary_slot = st.empty()
+
+    if load_btn:
+        results = load_raw_datasets(project_id)
+        st.session_state.st_prep_dataset_list = duckdb_get_imported_datasets(project_id)
+        if results and all(result.ok for result in results):
+            st.success(
+                "Data loaded. Preview it below, then prepare it on the Prep page.",
+                icon=":material/check_circle:",
+            )
+
+    aliases = import_log["alias"].to_list()
+    dataset_list = build_dataset_list(import_log, get_load_info(project_id, aliases))
+    summary_slot.caption(dataset_list.load_summary)
+
+    with rows_area:
+        rows = dataset_list.rows
+        if dataset_list.show_source_filter:
+            source_filter = st.segmented_control(
+                "Source",
+                options=SOURCE_FILTERS,
+                default=SOURCE_FILTERS[0],
+                key="import_source_filter",
+                label_visibility="collapsed",
+            )
+            rows = filter_rows(rows, source_filter)
+        for row in rows:
+            render_dataset_row(
+                project_id, row, on_edit=_edit_dataset, on_remove=_remove_dataset
+            )
+
+    # --- Preview imported data --- #
+    preview_options = duckdb_get_imported_datasets(project_id)
+    if preview_options:
+        _render_preview(preview_options)
+
         if is_demo_project():
             st.divider()
             show_demo_next_action(2, "st_prep_data_page", "Prepare Your Data")
-
-else:
-    st.info("No import data found. Please add import configurations.")
 
 # Previous and next pages (import, prep) - only for non-demo projects
 if not is_demo_project():

@@ -114,7 +114,7 @@ Run this only if you had projects in the previous stable version.
 | B2 | Open a project and go to each page in the sidebar | Each page loads without an error |
 | B3 | Open each check page, then each check on it | Each check loads, or says why it is not set up |
 | B4 | Open the Correct Data page | Earlier corrections are listed with a **Successful** status, or with a reason |
-| B5 | On Import Data, click **Load Data** | The data loads; the check pages show the refreshed data |
+| B5 | On Import Data, click **Load data** | The data loads; the check pages show the refreshed data |
 
 ### Core C. Demo project
 
@@ -133,11 +133,11 @@ Run this only if you had projects in the previous stable version.
 | # | Do this | You should see |
 | --- | --- | --- |
 | D1 | Click **+ New Project**, enter a name and click **Create Project** | The project is created and opened |
-| D2 | Add a local file (CSV, Excel `.xlsx`, Stata, JSON or Parquet) with **Add Import Configuration**, then **Load Data** | The dataset appears under **Preview Imported Data** with the right row and column counts |
-| D3 | Add your SurveyCTO credentials under **Manage Credentials**, add a form, then **Load Data** | The form imports with the same number of submissions as the SurveyCTO console |
-| D4 | Remove those credentials with **Remove Credentials**, then check your OS credential store (Credential Manager or Keychain Access) | The `datasure_` entry for that server is gone |
+| D2 | Add a local file (CSV, Excel `.xlsx`, Stata, JSON or Parquet) with **Add dataset** (Source → Connection → Review), then **Load data** | The dataset's row shows its path, row count and last load time, and **Preview** shows the right row and column counts |
+| D3 | Add your SurveyCTO server under **Connections → Add connection**, add a form with **Add dataset**, then **Load data** | The form imports with the same number of submissions as the SurveyCTO console |
+| D4 | Remove those credentials with **Connections → Remove connection**, then check your OS credential store (Credential Manager or Keychain Access) | The `datasure_` entry for that server is gone |
 | D5 | On Prepare Data, add a few steps (convert a date, rename or remove a column, remove rows) | Each step's message gives the rows and columns left; the preview matches |
-| D6 | Click **Load Data** on Import Data again, then reopen Prepare Data | Your steps are applied again to the new data |
+| D6 | Click **Load data** on Import Data again, then reopen Prepare Data | Your steps are applied again to the new data |
 
 ### Core E. Real project: checks
 

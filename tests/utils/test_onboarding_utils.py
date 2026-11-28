@@ -1484,7 +1484,20 @@ class TestProjectGuidance:
         self._assert_names_real_labels(
             guidance,
             "views/import_view.py",
-            ["Add Credentials", "Add Import Configuration", "Import Type", "SurveyCTO"],
+            ["Add dataset", "Preview"],
+        )
+        self._assert_names_real_labels(
+            guidance,
+            "utils/import_ui.py",
+            [
+                "Connections",
+                "Add connection",
+                "SurveyCTO",
+                "Server",
+                "Form",
+                "Alias",
+                "Next: review",
+            ],
         )
         self._assert_names_real_labels(
             guidance,
@@ -1494,9 +1507,6 @@ class TestProjectGuidance:
                 "Email address",
                 "Password",
                 "Connect & Save Credentials",
-                "Select Server Credentials",
-                "Select Form ID",
-                "Add Form",
             ],
         )
 

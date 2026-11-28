@@ -105,11 +105,11 @@ fails until you configure one:
 - Select it with the `PYTHON_KEYRING_BACKEND` environment variable, for
   example `PYTHON_KEYRING_BACKEND=keyrings.cryptfile.cryptfile.CryptFileKeyring`.
 - Plaintext file backends (such as `keyrings.alt.file.PlaintextKeyring`) are
-  not supported: **Import Data → Keyring Diagnostics** warns when one is
-  active.
+  not supported: **Import Data → Connections → Keyring diagnostics** warns
+  when one is active.
 
-**Import Data → Keyring Diagnostics → Test Keyring Availability** shows which
-backend is active and whether it is usable.
+**Import Data → Connections → Keyring diagnostics → Test keyring** shows
+which backend is active and whether it is usable.
 
 ## Data Quality Check Modules
 

@@ -8,7 +8,7 @@ from unittest.mock import MagicMock, patch
 import polars as pl
 import pytest
 
-from datasure.connectors.scto import FormConfig
+from datasure.connectors.scto import FormConfig, FormDefinitionNotSavedError
 from datasure.utils.reapply_utils import ReapplyFailure
 
 # --- Module import setup ---
@@ -37,6 +37,7 @@ _st.columns = MagicMock(side_effect=_make_columns)
 _st.popover = MagicMock()
 _st.container = MagicMock()
 _st.status = MagicMock()
+_st.tabs = MagicMock(return_value=[MagicMock(), MagicMock()])
 
 
 def _module_patches(overrides: dict | None = None):
@@ -54,28 +55,26 @@ def _module_patches(overrides: dict | None = None):
         return patch(target, **kwargs)
 
     return (
-        # The "Add Credentials" popover renders the SurveyCTO login form at
-        # import; the real form calls st.image on scto's own streamlit binding
-        # (which may be the real module if scto was imported by another test
-        # package first). Patch the UI class so module import stays in bare mode.
-        _p("datasure.connectors.scto.SurveyCTOUI"),
-        _p("datasure.connectors.local.load_local_data"),
-        _p("datasure.connectors.local.render_local_file_form"),
+        _p("datasure.connectors.local.import_local_file", return_value=3),
+        _p("datasure.connectors.scto.SurveyCTOClient"),
+        _p("datasure.utils.duckdb_utils.duckdb_row_counts", return_value={}),
         _p("datasure.utils.duckdb_utils.duckdb_get_aliases", return_value=[]),
         _p("datasure.utils.duckdb_utils.duckdb_get_table", return_value=pl.DataFrame()),
         _p("datasure.utils.duckdb_utils.duckdb_get_imported_datasets", return_value=[]),
         _p("datasure.utils.duckdb_utils.duckdb_table_exists", return_value=False),
         # The corrections module is not reloaded, so it keeps its own binding.
         _p("datasure.processing.corrections.duckdb_table_exists", return_value=False),
-        _p(
-            "datasure.utils.secure_credentials.list_stored_credentials",
-            return_value={"credentials": {}},
-        ),
-        _p("datasure.utils.secure_credentials.delete_stored_credentials"),
-        _p(
-            "datasure.utils.secure_credentials.test_keyring_availability",
-            return_value={"success": True, "backend": "mock-backend"},
-        ),
+        _p("datasure.utils.import_log.get_load_info", return_value={}),
+        _p("datasure.utils.import_log.record_load"),
+        # Connections, rows and dialogs are covered by AppTest in
+        # tests/utils/test_import_ui.py; here they only need to be called.
+        _p("datasure.utils.import_ui.render_connections"),
+        _p("datasure.utils.import_ui.render_dataset_row"),
+        _p("datasure.utils.import_ui.project_name", return_value="Test project"),
+        _p("datasure.utils.import_ui.open_add_dialog"),
+        _p("datasure.utils.import_ui.open_edit_dialog"),
+        _p("datasure.utils.import_ui.open_remove_dialog"),
+        _p("datasure.utils.import_log.dataset_entry"),
         patch("datasure.utils.navigations_utils.page_navigation"),
         patch("datasure.utils.navigations_utils.add_demo_navigation"),
         patch("datasure.utils.navigations_utils.demo_sidebar_help"),
@@ -113,7 +112,7 @@ def _reloaded_with(
     return None). Because import_view imports its collaborators by name
     (`from x import y`), the mocks these patches install can be read back
     off the reloaded module inside the `with` block, e.g.
-    `import_view.render_local_file_form`. Assertions must happen inside the
+    `import_view.open_add_dialog`. Assertions must happen inside the
     block: on exit, the module is reloaded back to its default bindings, so
     anything read afterwards would see fresh, uncalled mocks.
     """
@@ -125,6 +124,7 @@ def _reloaded_with(
     orig_popover = _st.popover
     orig_container = _st.container
     orig_status = _st.status
+    orig_tabs = _st.tabs
     _st.button = MagicMock(
         side_effect=lambda label=None, *a, **k: label in button_labels
     )
@@ -139,6 +139,7 @@ def _reloaded_with(
     _st.popover = MagicMock()
     _st.container = MagicMock()
     _st.status = MagicMock()
+    _st.tabs = MagicMock(return_value=[MagicMock(), MagicMock()])
 
     patches = _module_patches(overrides)
     for p in patches:
@@ -164,6 +165,7 @@ def _reloaded_with(
         _st.popover = orig_popover
         _st.container = orig_container
         _st.status = orig_status
+        _st.tabs = orig_tabs
 
 
 _patches = _module_patches()
@@ -180,6 +182,28 @@ finally:
 # Restore guard state
 _st.session_state["st_project_id"] = None
 _st.stop = _orig_stop
+
+
+# import_view imports utils/import_ui and utils/import_log. Imported here,
+# they bind this file's mock streamlit (import_ui's @st.dialog runs at import)
+# and the patched DuckDB helpers. Drop them so the AppTest and DuckDB tests in
+# tests/utils import them again with the real ones.
+_PAGE_HELPERS = ("datasure.utils.import_ui", "datasure.utils.import_log")
+
+
+def _forget_page_helpers():
+    for name in _PAGE_HELPERS:
+        sys.modules.pop(name, None)
+
+
+_forget_page_helpers()
+
+
+@pytest.fixture(autouse=True)
+def _forget_mock_bound_helpers():
+    """Drop the helpers after each test, as reloading import_view re-imports them."""
+    yield
+    _forget_page_helpers()
 
 
 def _import_log_df(rows: list[dict] | None = None) -> pl.DataFrame:
@@ -335,35 +359,97 @@ class TestLoadRawDatasets:
 
 
 class TestProcessImportLog:
-    """Test per-row processing with status updates."""
+    """Loading every dataset marked Load, with one status line each."""
 
-    def test_processes_each_row(self):
+    def _results(self, *aliases, failed=()):
+        from datasure.utils.dataset_list import LoadResult
+
+        return [
+            (
+                LoadResult(
+                    alias=a,
+                    source="local storage",
+                    refreshed=True,
+                    error="boom" if a in failed else None,
+                    rows=None if a in failed else 3,
+                ),
+                [],
+            )
+            for a in aliases
+        ]
+
+    def test_processes_each_row_and_returns_their_results(self):
         log = _import_log_df([{"alias": "a"}, {"alias": "b"}])
-        with patch.object(import_view, "_process_single_import") as mock_single:
+        with patch.object(
+            import_view,
+            "_process_single_import",
+            side_effect=self._results("a", "b"),
+        ) as mock_single:
+            results = import_view._process_import_log("test_project", log)
+
+        processed = [call.args[1]["alias"] for call in mock_single.call_args_list]
+        assert processed == ["a", "b"]
+        assert [r.alias for r in results] == ["a", "b"]
+
+    def test_status_ends_complete_when_every_dataset_loaded(self):
+        log = _import_log_df([{"alias": "a"}, {"alias": "b"}])
+        _st.status.reset_mock()
+        with patch.object(
+            import_view,
+            "_process_single_import",
+            side_effect=self._results("a", "b"),
+        ):
             import_view._process_import_log("test_project", log)
 
-        assert mock_single.call_count == 2
-        processed_aliases = [
-            call.args[1]["alias"] for call in mock_single.call_args_list
-        ]
-        assert processed_aliases == ["a", "b"]
+        status = _st.status.return_value.__enter__.return_value
+        final = status.update.call_args.kwargs
+        assert final == {
+            "label": "Loaded 2 datasets",
+            "state": "complete",
+            "expanded": False,
+        }
+
+    def test_status_ends_in_error_and_stays_open_when_one_failed(self):
+        log = _import_log_df([{"alias": "a"}, {"alias": "b"}])
+        _st.status.reset_mock()
+        with patch.object(
+            import_view,
+            "_process_single_import",
+            side_effect=self._results("a", "b", failed={"b"}),
+        ):
+            import_view._process_import_log("test_project", log)
+
+        status = _st.status.return_value.__enter__.return_value
+        final = status.update.call_args.kwargs
+        assert final == {
+            "label": "Loaded 1 of 2 datasets · 1 failed",
+            "state": "error",
+            "expanded": True,
+        }
 
 
 class TestProcessSingleImport:
-    """Test the refresh gate and session-state registration."""
+    """One dataset's load: the refresh gate, failures and its result."""
 
     def test_refresh_true_loads_dataset(self):
         row = {"refresh": True, "alias": "survey", "source": "local storage"}
         with (
-            patch.object(import_view, "_load_dataset_by_source") as mock_load,
-            patch.object(import_view, "_refresh_downstream_data") as mock_refresh,
+            patch.object(
+                import_view, "_load_dataset_by_source", return_value=3
+            ) as mock_load,
+            patch.object(
+                import_view, "_refresh_downstream_data", return_value=[]
+            ) as mock_refresh,
             patch.object(import_view, "_add_to_session_state") as mock_add,
+            patch.object(import_view, "duckdb_row_counts", return_value={"survey": 3}),
         ):
-            import_view._process_single_import("test_project", row)
+            result, failures = import_view._process_single_import("test_project", row)
 
         mock_load.assert_called_once_with("test_project", row)
         mock_refresh.assert_called_once_with("test_project", "survey")
         mock_add.assert_called_once_with("survey")
+        assert (result.ok, result.refreshed, result.rows) == (True, True, 3)
+        assert failures == []
 
     def test_refresh_false_skips_load_but_registers(self):
         row = {"refresh": False, "alias": "survey", "source": "local storage"}
@@ -372,11 +458,125 @@ class TestProcessSingleImport:
             patch.object(import_view, "_refresh_downstream_data") as mock_refresh,
             patch.object(import_view, "_add_to_session_state") as mock_add,
         ):
-            import_view._process_single_import("test_project", row)
+            result, _ = import_view._process_single_import("test_project", row)
 
         mock_load.assert_not_called()
         mock_refresh.assert_not_called()
         mock_add.assert_called_once_with("survey")
+        assert result.refreshed is False
+
+    def test_a_failed_load_is_reported_not_raised_and_skips_reapplying(self):
+        row = {"refresh": True, "alias": "survey", "source": "SurveyCTO"}
+        with (
+            patch.object(
+                import_view,
+                "_load_dataset_by_source",
+                side_effect=ConnectionError("couldn't sign in"),
+            ),
+            patch.object(import_view, "_refresh_downstream_data") as mock_refresh,
+            patch.object(import_view, "_record_load") as mock_record,
+            patch.object(import_view, "_add_to_session_state"),
+        ):
+            result, failures = import_view._process_single_import("test_project", row)
+
+        assert result.ok is False
+        assert result.error == "couldn't sign in"
+        mock_refresh.assert_not_called()
+        mock_record.assert_not_called()
+        assert failures == []
+
+    def test_a_definition_not_saved_still_rebuilds_and_is_flagged(self):
+        row = {"refresh": True, "alias": "survey", "source": "SurveyCTO"}
+        with (
+            patch.object(
+                import_view,
+                "_load_dataset_by_source",
+                side_effect=FormDefinitionNotSavedError("definition not saved", 7),
+            ),
+            patch.object(
+                import_view, "_refresh_downstream_data", return_value=[]
+            ) as mock_refresh,
+            patch.object(import_view, "_record_load") as mock_record,
+            patch.object(import_view, "_add_to_session_state"),
+            patch.object(import_view, "duckdb_row_counts", return_value={"survey": 9}),
+        ):
+            result, _ = import_view._process_single_import("test_project", row)
+
+        # Raw holds the new data, so it counts as loaded and downstream follows.
+        assert result.ok is True
+        assert (result.rows, result.new_rows) == (9, 7)
+        assert result.problems == ("definition not saved",)
+        mock_record.assert_called_once_with("test_project", "survey")
+        mock_refresh.assert_called_once_with("test_project", "survey")
+
+    @pytest.mark.parametrize("failing", ["_record_load", "_refresh_downstream_data"])
+    def test_a_failure_after_the_raw_import_is_flagged_not_raised(self, failing):
+        row = {"refresh": True, "alias": "survey", "source": "local storage"}
+        with (
+            patch.object(import_view, "_load_dataset_by_source", return_value=3),
+            patch.object(import_view, "_record_load"),
+            patch.object(import_view, "_refresh_downstream_data", return_value=[]),
+            patch.object(import_view, failing, side_effect=OSError("disk full")),
+            patch.object(import_view, "_add_to_session_state"),
+            patch.object(import_view, "duckdb_row_counts", return_value={"survey": 3}),
+        ):
+            result, failures = import_view._process_single_import("test_project", row)
+
+        assert result.ok is True
+        assert result.problems == ("prep and corrections not rebuilt: disk full",)
+        assert failures == []
+
+    def test_an_unreadable_row_count_is_left_blank(self):
+        row = {"refresh": False, "alias": "survey", "source": "local storage"}
+        with (
+            patch.object(import_view, "_add_to_session_state"),
+            patch.object(
+                import_view, "duckdb_row_counts", side_effect=OSError("locked")
+            ),
+        ):
+            result, _ = import_view._process_single_import("test_project", row)
+
+        assert result.rows is None
+
+    def test_surveycto_result_counts_new_rows(self):
+        row = {"refresh": True, "alias": "survey", "source": "SurveyCTO"}
+        with (
+            patch.object(import_view, "_load_dataset_by_source", return_value=38),
+            patch.object(import_view, "_refresh_downstream_data", return_value=[]),
+            patch.object(import_view, "_add_to_session_state"),
+            patch.object(
+                import_view, "duckdb_row_counts", return_value={"survey": 1284}
+            ),
+        ):
+            result, _ = import_view._process_single_import("test_project", row)
+
+        assert (result.rows, result.new_rows) == (1284, 38)
+
+    def test_reports_each_stage(self):
+        row = {"refresh": True, "alias": "survey", "source": "SurveyCTO"}
+        stages = []
+        with (
+            patch.object(import_view, "_load_dataset_by_source", return_value=1),
+            patch.object(import_view, "_refresh_downstream_data", return_value=[]),
+            patch.object(import_view, "_add_to_session_state"),
+        ):
+            import_view._process_single_import("test_project", row, stages.append)
+
+        assert stages == [
+            "downloading from SurveyCTO",
+            "reapplying prep and corrections",
+        ]
+
+    def test_demo_rows_are_not_refreshed(self):
+        row = {"refresh": True, "alias": "demo_survey", "source": "Demo Data"}
+        with (
+            patch.object(import_view, "_load_dataset_by_source") as mock_load,
+            patch.object(import_view, "_add_to_session_state"),
+        ):
+            result, _ = import_view._process_single_import("test_project", row)
+
+        mock_load.assert_not_called()
+        assert result.refreshed is False
 
 
 class TestRefreshDownstreamData:
@@ -429,42 +629,35 @@ class TestLoadDatasetBySource:
 
     def test_local_storage_dispatch(self):
         row = {"source": "local storage"}
-        with (
-            patch.object(import_view, "_load_from_local_storage") as mock_local,
-            patch.object(import_view, "_load_from_surveycto") as mock_scto,
-        ):
-            import_view._load_dataset_by_source("test_project", row)
+        local, scto = MagicMock(return_value=3), MagicMock()
+        loaders = {"local storage": local, "SurveyCTO": scto}
+        with patch.dict(import_view._LOADERS, loaders):
+            assert import_view._load_dataset_by_source("test_project", row) == 3
 
-        mock_local.assert_called_once_with("test_project", row)
-        mock_scto.assert_not_called()
+        local.assert_called_once_with("test_project", row)
+        scto.assert_not_called()
 
     def test_surveycto_dispatch(self):
         row = {"source": "SurveyCTO"}
-        with (
-            patch.object(import_view, "_load_from_local_storage") as mock_local,
-            patch.object(import_view, "_load_from_surveycto") as mock_scto,
-        ):
-            import_view._load_dataset_by_source("test_project", row)
+        local, scto = MagicMock(), MagicMock(return_value=38)
+        loaders = {"local storage": local, "SurveyCTO": scto}
+        with patch.dict(import_view._LOADERS, loaders):
+            assert import_view._load_dataset_by_source("test_project", row) == 38
 
-        mock_scto.assert_called_once_with("test_project", row)
-        mock_local.assert_not_called()
+        scto.assert_called_once_with("test_project", row)
+        local.assert_not_called()
 
     def test_unknown_source_is_noop(self):
-        row = {"source": "ftp"}
-        with (
-            patch.object(import_view, "_load_from_local_storage") as mock_local,
-            patch.object(import_view, "_load_from_surveycto") as mock_scto,
-        ):
-            import_view._load_dataset_by_source("test_project", row)
-
-        mock_local.assert_not_called()
-        mock_scto.assert_not_called()
+        assert (
+            import_view._load_dataset_by_source("test_project", {"source": "ftp"})
+            is None
+        )
 
 
 class TestLoadFromSurveycto:
     """Test SurveyCTO download invocation."""
 
-    def test_downloads_with_form_config(self):
+    def test_imports_with_form_config_and_returns_new_rows(self):
         row = {
             "alias": "svy",
             "form_id": "form_1",
@@ -475,16 +668,15 @@ class TestLoadFromSurveycto:
             "attachments": False,
             "refresh": True,
         }
-        with patch.object(import_view, "download_forms") as mock_download:
-            import_view._load_from_surveycto("test_project", row)
+        with patch.object(import_view, "SurveyCTOClient") as mock_client:
+            mock_client.return_value.import_data.return_value = 38
+            new_rows = import_view._load_from_surveycto("test_project", row)
 
-        mock_download.assert_called_once()
-        kwargs = mock_download.call_args.kwargs
-        assert kwargs["project_id"] == "test_project"
-        configs = kwargs["form_configs"]
-        assert len(configs) == 1
-        assert isinstance(configs[0], FormConfig)
-        assert configs[0].form_id == "form_1"
+        assert new_rows == 38
+        mock_client.assert_called_once_with("test_project")
+        (config,) = mock_client.return_value.import_data.call_args.args
+        assert isinstance(config, FormConfig)
+        assert config.form_id == "form_1"
 
 
 class TestLoadFromLocalStorage:
@@ -496,8 +688,10 @@ class TestLoadFromLocalStorage:
             "filename": "C:/data/survey.csv",
             "sheet_name": "Sheet1",
         }
-        with patch.object(import_view, "load_local_data") as mock_load:
-            import_view._load_from_local_storage("test_project", row)
+        with patch.object(
+            import_view, "import_local_file", return_value=3
+        ) as mock_load:
+            assert import_view._load_from_local_storage("test_project", row) == 3
 
         mock_load.assert_called_once_with(
             project_id="test_project",
@@ -508,7 +702,7 @@ class TestLoadFromLocalStorage:
 
     def test_blank_sheet_name_becomes_none(self):
         row = {"alias": "svy", "filename": "C:/data/survey.csv", "sheet_name": ""}
-        with patch.object(import_view, "load_local_data") as mock_load:
+        with patch.object(import_view, "import_local_file") as mock_load:
             import_view._load_from_local_storage("test_project", row)
 
         assert mock_load.call_args.kwargs["sheet_name"] is None
@@ -564,347 +758,55 @@ class TestAddToSessionState:
         mock_callout.assert_called_once()
 
 
-class TestUpdateImportLog:
-    """Test the import-log data editor save flow."""
+class TestPageActions:
+    """The header button and each row's menu open the right dialog."""
 
-    def test_saves_edited_log_when_refresh_triggered(self):
-        log = _import_log_df()
-        edited = log.with_columns(pl.lit(False).alias("refresh"))
-        _st.session_state["refresh_import_log"] = True
+    def test_add_dataset_button_opens_the_add_dialog(self):
+        with _reloaded_with(button_labels={"Add dataset"}) as iv:
+            iv.open_add_dialog.assert_called_once_with("test_project")
 
-        with (
-            patch.object(_st, "data_editor", return_value=edited),
-            patch.object(import_view, "duckdb_save_table") as mock_save,
-        ):
-            import_view.update_import_log(log)
-
-        mock_save.assert_called_once()
-        kwargs = mock_save.call_args.kwargs
-        assert kwargs["alias"] == "import_log"
-        assert kwargs["db_name"] == "logs"
-        assert kwargs["table_data"].equals(edited)
-        # The trigger flag is reset after saving
-        assert _st.session_state["refresh_import_log"] is False
-
-    def test_no_save_without_refresh_trigger(self):
-        log = _import_log_df()
-        with (
-            patch.object(_st, "data_editor", return_value=log),
-            patch.object(import_view, "duckdb_save_table") as mock_save,
-        ):
-            import_view.update_import_log(log)
-
-        mock_save.assert_not_called()
-
-
-class TestRemoveImportFlow:
-    """Test the module-level remove-import-configuration flow.
-
-    The flow is top-level Streamlit code, so it is exercised by reloading
-    the module with the Remove Data button returning True. The row-removal
-    helper is patched under both its old (duckdb_row_filter) and new
-    (duckdb_delete_rows) names with create=True so this test passes on
-    either side of the PR #179 rename.
-    """
-
-    def _run_remove_flow(self, table_exists_side_effect):
-        """Reload the module through the Remove Data -> confirm cascade.
-
-        Returns the (mock_remove, mock_exists, mock_row_filter,
-        mock_delete_rows) mocks so callers can assert on the cascade.
-        """
-        _st.session_state["st_project_id"] = "test_project"
-        orig_button = _st.button
-        orig_selectbox = _st.selectbox
-        orig_stop = _st.stop
-        orig_dialog = _st.dialog
-        orig_columns = _st.columns
-
-        _st.stop = MagicMock()
-        # The removal is guarded by confirm_dialog: clicking "Remove Data"
-        # opens the modal, whose "Remove" button runs the cascade. Return True
-        # for both so the whole flow executes in one reload pass.
-        _st.button = MagicMock(
-            side_effect=lambda label=None, *a, **k: label in ("Remove Data", "Remove")
-        )
-        _st.selectbox = MagicMock(
-            side_effect=lambda label=None, *a, **k: (
-                "stale_data" if label == "Select Data to Remove" else None
-            )
-        )
-        # Make @st.dialog(title) a no-op decorator so the dialog body runs, and
-        # return one column per requested slot (confirm_dialog needs 2, the
-        # action row needs 3) regardless of leaked state from other view tests.
-        _st.dialog = MagicMock(side_effect=lambda *a, **k: lambda fn: fn)
-        _st.columns = MagicMock(side_effect=_make_columns)
-
-        try:
-            with (
-                patch("datasure.connectors.scto.SurveyCTOUI"),
-                patch(
-                    "datasure.utils.duckdb_utils.duckdb_get_aliases",
-                    return_value=["stale_data"],
-                ),
-                patch(
-                    "datasure.utils.duckdb_utils.duckdb_get_table",
-                    return_value=pl.DataFrame(),
-                ),
-                patch(
-                    "datasure.utils.duckdb_utils.duckdb_get_imported_datasets",
-                    return_value=[],
-                ),
-                patch("datasure.utils.duckdb_utils.duckdb_remove_table") as mock_remove,
-                patch(
-                    "datasure.utils.duckdb_utils.duckdb_table_exists",
-                    side_effect=table_exists_side_effect,
-                ) as mock_exists,
-                patch(
-                    "datasure.utils.duckdb_utils.duckdb_row_filter",
-                    create=True,
-                ) as mock_row_filter,
-                patch(
-                    "datasure.utils.duckdb_utils.duckdb_delete_rows",
-                    create=True,
-                ) as mock_delete_rows,
-                patch(
-                    "datasure.utils.secure_credentials.list_stored_credentials",
-                    return_value={"credentials": {}},
-                ),
-                patch("datasure.utils.navigations_utils.page_navigation"),
-                patch("datasure.utils.navigations_utils.add_demo_navigation"),
-                patch("datasure.utils.navigations_utils.demo_sidebar_help"),
-                patch("datasure.utils.navigations_utils.demo_callout"),
-                patch("datasure.utils.navigations_utils.show_demo_next_action"),
-                patch(
-                    "datasure.utils.onboarding_utils.is_demo_project",
-                    return_value=False,
-                ),
-            ):
-                importlib.reload(import_view)
-
-            return mock_remove, mock_exists, mock_row_filter, mock_delete_rows
-        finally:
-            # Restore button/selectbox/dialog *before* the cleanup reload so
-            # it takes a truly default pass (this test's mocks would
-            # otherwise route the cleanup reload into the same remove-data
-            # cascade, against the baseline's unpatched duckdb functions).
-            # Columns stays pinned through cleanup since the baseline
-            # patches don't restore column counts either.
-            _st.button = orig_button
-            _st.selectbox = orig_selectbox
-            _st.dialog = orig_dialog
-
-            _st.session_state["st_project_id"] = "test_project"
-            _reload_cleanly()
-            _st.session_state["st_project_id"] = None
-            _st.columns = orig_columns
-            _st.stop = orig_stop
-
-    def test_remove_data_cascades_table_removal(self):
-        mock_remove, mock_exists, mock_row_filter, mock_delete_rows = (
-            self._run_remove_flow([False, True, False])
-        )
-
-        # The import_log row for the alias is removed (either helper)
-        assert mock_row_filter.called or mock_delete_rows.called
-
-        # The raw table is removed, plus the prep table (exists=True);
-        # the corrected table does not exist so it is left alone
-        removed = [
-            (call.kwargs.get("alias"), call.kwargs.get("db_name"))
-            for call in mock_remove.call_args_list
-        ]
-        assert ("stale_data", "raw") in removed
-        assert ("stale_data", "prep") in removed
-        assert ("stale_data", "corrected") not in removed
-        assert mock_exists.call_count == 3
-
-    def test_remove_data_also_removes_corrected_when_present(self):
-        mock_remove, mock_exists, _, _ = self._run_remove_flow([False, True, True])
-
-        removed = [
-            (call.kwargs.get("alias"), call.kwargs.get("db_name"))
-            for call in mock_remove.call_args_list
-        ]
-        assert ("stale_data", "raw") in removed
-        assert ("stale_data", "prep") in removed
-        assert ("stale_data", "corrected") in removed
-        assert mock_exists.call_count == 3
-
-    def test_remove_data_skips_prep_and_corrected_when_absent(self):
-        mock_remove, mock_exists, _, _ = self._run_remove_flow([False, False, False])
-
-        removed = [
-            (call.kwargs.get("alias"), call.kwargs.get("db_name"))
-            for call in mock_remove.call_args_list
-        ]
-        assert ("stale_data", "raw") in removed
-        assert ("stale_data", "prep") not in removed
-        assert ("stale_data", "corrected") not in removed
-        assert mock_exists.call_count == 3
-
-    def test_remove_data_removes_the_form_definition(self):
-        _, _, _, mock_delete_rows = self._run_remove_flow([True, False, False])
-
-        deleted = [
-            (call.kwargs.get("alias"), call.kwargs.get("value"))
-            for call in mock_delete_rows.call_args_list
-        ]
-        assert ("form_definitions", "stale_data") in deleted
-
-
-_SAVED_CREDENTIALS_OVERRIDE = {
-    "return_value": {
-        "credentials": {
-            "Test Cred": {
-                "server": "srv",
-                "username": "user@example.com",
-                "credential_type": "scto_login",
+    def test_edit_opens_the_dialog_with_the_import_log_row(self):
+        entry = {"alias": "survey", "source": "local storage"}
+        with _reloaded_with(
+            overrides={
+                "datasure.utils.import_log.dataset_entry": {"return_value": entry}
             }
-        }
-    }
-}
-
-
-class TestCredentialsSection:
-    """Test the Manage Credentials section: delete and keyring diagnostics."""
-
-    def test_delete_credentials_button(self):
-        _st.success.reset_mock()
-        _st.error.reset_mock()
-        with _reloaded_with(
-            overrides={
-                "datasure.utils.secure_credentials.list_stored_credentials": (
-                    _SAVED_CREDENTIALS_OVERRIDE
-                ),
-                "datasure.utils.secure_credentials.delete_stored_credentials": {
-                    "return_value": {"success": True, "message": "deleted"}
-                },
-            },
-            button_labels={"Delete Credentials"},
-            selectbox_map={"Select Credentials to Delete": "Test Cred"},
         ) as iv:
-            iv.delete_stored_credentials.assert_called_once_with(
-                project_id="test_project",
-                server="srv",
-                credential_type="scto_login",
-            )
-            assert _st.success.called
-            assert not _st.error.called
+            iv._edit_dataset("survey")
 
-    def test_delete_credentials_failure_shows_error(self):
-        _st.success.reset_mock()
-        _st.error.reset_mock()
+            iv.dataset_entry.assert_called_once_with("test_project", "survey")
+            iv.open_edit_dialog.assert_called_once_with("test_project", entry)
+
+    def test_remove_asks_through_the_remove_dialog(self):
+        with _reloaded_with() as iv:
+            iv._remove_dataset("survey")
+
+            iv.open_remove_dialog.assert_called_once()
+            assert iv.open_remove_dialog.call_args.args == ("test_project", "survey")
+
+
+class TestDatasetList:
+    """The page renders one row per dataset, or guidance when there are none."""
+
+    def test_empty_project_shows_guidance_instead_of_rows(self):
+        _st.info.reset_mock()
+        with _reloaded_with() as iv:
+            iv.render_dataset_row.assert_not_called()
+            assert "no datasets yet" in str(_st.info.call_args_list)
+
+    def test_each_dataset_gets_a_row(self):
+        log = _import_log_df([{"alias": "a"}, {"alias": "b"}])
         with _reloaded_with(
             overrides={
-                "datasure.utils.secure_credentials.list_stored_credentials": (
-                    _SAVED_CREDENTIALS_OVERRIDE
-                ),
-                "datasure.utils.secure_credentials.delete_stored_credentials": {
-                    "return_value": {
-                        "success": False,
-                        "error": "Access denied",
-                        "error_type": "keyring_error",
-                    }
-                },
-            },
-            button_labels={"Delete Credentials"},
-            selectbox_map={"Select Credentials to Delete": "Test Cred"},
-        ):
-            assert _st.error.called
-            assert "Access denied" in str(_st.error.call_args)
-            assert not _st.success.called
-
-    def test_keyring_diagnostics_success(self):
-        _st.success.reset_mock()
-        with _reloaded_with(
-            overrides={
-                "datasure.utils.secure_credentials.test_keyring_availability": {
-                    "return_value": {
-                        "success": True,
-                        "backend": "Windows",
-                        "message": "Keyring backend is functional.",
-                    }
-                },
-            },
-            button_labels={"Test Keyring Availability"},
-        ):
-            assert _st.success.called
-
-    def test_keyring_diagnostics_failure(self):
-        _st.error.reset_mock()
-        with _reloaded_with(
-            overrides={
-                "datasure.utils.secure_credentials.test_keyring_availability": {
-                    "return_value": {"success": False, "error": "no backend"}
-                },
-            },
-            button_labels={"Test Keyring Availability"},
-        ):
-            assert _st.error.called
-
-
-class TestImportConfigurationFlow:
-    """Test the Add/Edit Import Configuration popovers."""
-
-    def test_add_local_storage_form(self):
-        with _reloaded_with(
-            overrides={
-                "datasure.utils.duckdb_utils.duckdb_get_aliases": {
-                    "return_value": ["survey"]
-                },
-            },
-            selectbox_map={"Import Type": "local storage"},
+                "datasure.utils.duckdb_utils.duckdb_get_table": {"return_value": log}
+            }
         ) as iv:
-            iv.render_local_file_form.assert_called_once_with("test_project")
+            rendered = [c.args[1].alias for c in iv.render_dataset_row.call_args_list]
+            assert rendered == ["a", "b"]
 
-    def test_add_surveycto_form(self):
-        with _reloaded_with(selectbox_map={"Import Type": "SurveyCTO"}) as iv:
-            iv.SurveyCTOUI.return_value.render_form_config.assert_called_once_with()
-
-    def test_edit_local_storage_form(self):
-        log = _import_log_df([{"alias": "survey", "source": "local storage"}])
-        with _reloaded_with(
-            overrides={
-                "datasure.utils.duckdb_utils.duckdb_get_aliases": {
-                    "return_value": ["survey"]
-                },
-                "datasure.utils.duckdb_utils.duckdb_get_table": {"return_value": log},
-            },
-            selectbox_map={"Select Data to Edit": "survey"},
-        ) as iv:
-            iv.render_local_file_form.assert_called_once_with(
-                "test_project", edit_mode=True, defaults=log.to_dicts()[0]
-            )
-
-    def test_edit_surveycto_form(self):
-        log = _import_log_df([{"alias": "survey", "source": "SurveyCTO"}])
-        with _reloaded_with(
-            overrides={
-                "datasure.utils.duckdb_utils.duckdb_get_aliases": {
-                    "return_value": ["survey"]
-                },
-                "datasure.utils.duckdb_utils.duckdb_get_table": {"return_value": log},
-            },
-            selectbox_map={"Select Data to Edit": "survey"},
-        ) as iv:
-            iv.SurveyCTOUI.return_value.render_form_config.assert_called_once_with(
-                edit_mode=True, defaults=log.to_dicts()[0]
-            )
-
-    def test_edit_invalid_source_shows_error(self):
-        log = _import_log_df([{"alias": "survey", "source": "unknown"}])
-        _st.error.reset_mock()
-        with _reloaded_with(
-            overrides={
-                "datasure.utils.duckdb_utils.duckdb_get_aliases": {
-                    "return_value": ["survey"]
-                },
-                "datasure.utils.duckdb_utils.duckdb_get_table": {"return_value": log},
-            },
-            selectbox_map={"Select Data to Edit": "survey"},
-        ):
-            assert _st.error.called
+    def test_connections_are_always_rendered(self):
+        with _reloaded_with() as iv:
+            iv.render_connections.assert_called_once_with("test_project")
 
 
 def _fake_get_table_for(
@@ -945,8 +847,8 @@ class TestLoadAndPreviewFlow:
                     "return_value": True
                 },
             },
-            button_labels={"Load Data"},
-            selectbox_map={"Select Dataset": "survey"},
+            button_labels={"Load data"},
+            selectbox_map={"Dataset": "survey"},
             project_id=import_view.DEMO_PROJECT_ID,
         ):
             # Demo datasets are folded into the raw dataset list on first
@@ -955,7 +857,7 @@ class TestLoadAndPreviewFlow:
             assert "demo_survey" in raw_list
             assert "demo_backcheck" in raw_list
             assert "survey" in raw_list
-            # Load Data -> preview options are stashed for the Prep page.
+            # Load data -> preview options are stashed for the Prep page.
             assert _st.session_state.st_prep_dataset_list == ["survey"]
             # The preview section rendered metrics from the fetched raw data.
             assert _st.dataframe.called
@@ -977,8 +879,8 @@ class TestLoadAndPreviewFlow:
                     "return_value": ["survey"]
                 },
             },
-            button_labels={"Load Data"},
-            selectbox_map={"Select Dataset": "survey"},
+            button_labels={"Load data"},
+            selectbox_map={"Dataset": "survey"},
         ):
             assert _st.session_state.st_prep_dataset_list == ["survey"]
             assert _st.dataframe.called
