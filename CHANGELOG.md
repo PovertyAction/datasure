@@ -9,6 +9,13 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ### Added
 
+- **Load data keeps the app on the Import page** (`views/import_view.py`,
+  `app.py`, #490): opening another page during a load started a new script
+  run and stopped the load partway through a dataset, sometimes before its
+  prep and corrections were reapplied. **Load data** now sets
+  `st_import_running`; while it is set the page menu is hidden and the
+  Import page shows only the load progress. The flag is always cleared, even
+  when the load raises, and the outcome shows once the full page returns.
 - **Load data progress** (`views/import_view.py`,
   `utils/dataset_list.py`): one `st.status` for the whole load, whose label
   names the dataset and stage ("Loading 2 of 4: household_survey ·

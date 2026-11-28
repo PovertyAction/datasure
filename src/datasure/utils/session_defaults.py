@@ -17,6 +17,9 @@ APP_SESSION_DEFAULTS: dict[str, Callable[[], Any]] = {
     "st_output_pages": list,
     "st_corr_page": lambda: None,
     "st_replication_page": lambda: None,
+    # True while Load data runs. app.py hides the page menu and the Import
+    # page shows only the load progress, so no click can stop the load.
+    "st_import_running": bool,
 }
 
 
